@@ -1,0 +1,81 @@
+import React from 'react';
+import { Button } from '../components/Button';
+import { Upload, GitCompare, BarChart3 } from 'lucide-react';
+
+interface HomeScreenProps {
+  onNavigate: (screen: string) => void;
+}
+
+export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 flex flex-col items-center justify-center p-6">
+      <div className="max-w-4xl w-full text-center">
+        {/* Logo */}
+        <div className="mb-8">
+          <div className="w-32 h-32 bg-white rounded-full shadow-lg flex items-center justify-center mx-auto mb-6">
+            <div className="text-4xl font-bold text-blue-600">GP</div>
+          </div>
+          <h1 className="text-4xl font-bold text-gray-800 mb-2">
+            Gampack Price Comparator
+          </h1>
+          <p className="text-xl text-gray-600">
+            Supplier Organization and Price Comparison System
+          </p>
+        </div>
+
+        {/* Navigation Buttons */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl mx-auto">
+          <div 
+            onClick={() => onNavigate('manual')}
+            className="bg-white p-8 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer group hover:scale-105"
+          >
+            <div className="flex flex-col items-center space-y-4">
+              <div className="p-4 bg-blue-100 rounded-full group-hover:bg-blue-200 transition-colors">
+                <Upload size={32} className="text-blue-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-800">Upload Price List</h3>
+              <p className="text-gray-600 text-center">
+                Manually enter product pricing data from suppliers and competitors
+              </p>
+            </div>
+          </div>
+
+          <div 
+            onClick={() => onNavigate('equivalences')}
+            className="bg-white p-8 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer group hover:scale-105"
+          >
+            <div className="flex flex-col items-center space-y-4">
+              <div className="p-4 bg-green-100 rounded-full group-hover:bg-green-200 transition-colors">
+                <GitCompare size={32} className="text-green-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-800">View Equivalences</h3>
+              <p className="text-gray-600 text-center">
+                Review product matching and equivalence relationships
+              </p>
+            </div>
+          </div>
+
+          <div 
+            onClick={() => onNavigate('compare')}
+            className="bg-white p-8 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer group hover:scale-105"
+          >
+            <div className="flex flex-col items-center space-y-4">
+              <div className="p-4 bg-blue-100 rounded-full group-hover:bg-blue-200 transition-colors">
+                <BarChart3 size={32} className="text-blue-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-800">Compare Prices</h3>
+              <p className="text-gray-600 text-center">
+                Analyze pricing differences across suppliers and competitors
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-12 text-gray-500 text-sm">
+          <p>© 2024 Gampack Price Comparator. All rights reserved.</p>
+        </div>
+      </div>
+    </div>
+  );
+};
