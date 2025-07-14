@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Navigation } from '../components/Navigation';
 import { Input } from '../components/Input';
 import { Table } from '../components/Table';
-import { database } from '../utils/database';
-import { PriceComparison } from '../types/database';
+import { PriceComparison } from '../tipos/database';
 import { Search, TrendingUp, TrendingDown } from 'lucide-react';
 
 interface CompareScreenProps {
@@ -21,10 +20,12 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     loadComparisons();
   }, []);
 
-  const loadComparisons = async () => {
+  const loadComparisons = async (search = '') => {
     setLoading(true);
     try {
-      const data = await database.getPriceComparisons();
+      const response = await fetch(`/api/price-comparisons?search=${encodeURIComponent(search)}`);
+      if (!response.ok) throw new Error('Error fetching price comparisons');
+      const data: PriceComparison[] = await response.json();
       setComparisons(data);
     } catch (error) {
       console.error('Error loading price comparisons:', error);
@@ -33,16 +34,8 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     }
   };
 
-  const handleSearch = async () => {
-    setLoading(true);
-    try {
-      const data = await database.getPriceComparisons(searchTerm);
-      setComparisons(data);
-    } catch (error) {
-      console.error('Error searching comparisons:', error);
-    } finally {
-      setLoading(false);
-    }
+  const handleSearch = () => {
+    loadComparisons(searchTerm);
   };
 
   const handleSort = (key: string) => {

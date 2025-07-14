@@ -3,8 +3,7 @@ import { Navigation } from '../components/Navigation';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Select } from '../components/Select';
-import { database } from '../utils/database';
-import { Product } from '../types/database';
+import { Product } from '../tipos/database';
 
 interface ManualEntryScreenProps {
   onNavigate: (screen: string) => void;

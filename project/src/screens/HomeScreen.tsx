@@ -1,9 +1,10 @@
 import React from 'react';
+import { Screen } from '../types';  // Ajusta la ruta según tu estructura
 import { Button } from '../components/Button';
 import { Upload, GitCompare, BarChart3 } from 'lucide-react';
 
 interface HomeScreenProps {
-  onNavigate: (screen: string) => void;
+  onNavigate: (screen: Screen) => void;  // Aquí el cambio importante
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {

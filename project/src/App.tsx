@@ -3,7 +3,7 @@ import { HomeScreen } from './screens/HomeScreen';
 import { ManualEntryScreen } from './screens/ManualEntryScreen';
 import { EquivalencesScreen } from './screens/EquivalencesScreen';
 import { CompareScreen } from './screens/CompareScreen';
-import { database } from './utils/database';
+import { Screen } from './types'
 
 type Screen = 'home' | 'manual' | 'equivalences' | 'compare';
 
@@ -14,11 +14,12 @@ function App() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        await database.initialize();
+        const response = await fetch('http://localhost:4000/api/health');
+        if (!response.ok) throw new Error('Backend no responde OK');
         setIsInitialized(true);
       } catch (error) {
-        console.error('Failed to initialize database:', error);
-        setIsInitialized(true); // Continue anyway with fallback
+        console.error('Failed to initialize backend:', error);
+        setIsInitialized(true); // continuar igual
       }
     };
 

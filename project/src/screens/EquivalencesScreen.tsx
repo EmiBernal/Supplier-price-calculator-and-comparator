@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Navigation } from '../components/Navigation';
 import { Input } from '../components/Input';
 import { Table } from '../components/Table';
-import { database } from '../utils/database';
-import { ProductEquivalence } from '../types/database';
+import { ProductEquivalence } from '../tipos/database';
 import { Search } from 'lucide-react';
 
 interface EquivalencesScreenProps {
@@ -18,31 +17,24 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
-    loadEquivalences();
+    fetchEquivalences();
   }, []);
 
-  const loadEquivalences = async () => {
+  const fetchEquivalences = async (search: string = '') => {
     setLoading(true);
     try {
-      const data = await database.getEquivalences();
+      const response = await fetch(`http://localhost:4000/api/price-comparisons?search=${encodeURIComponent(search)}`);
+      const data = await response.json();
       setEquivalences(data);
     } catch (error) {
-      console.error('Error loading equivalences:', error);
+      console.error('Error fetching equivalences:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSearch = async () => {
-    setLoading(true);
-    try {
-      const data = await database.getEquivalences(searchTerm);
-      setEquivalences(data);
-    } catch (error) {
-      console.error('Error searching equivalences:', error);
-    } finally {
-      setLoading(false);
-    }
+  const handleSearch = () => {
+    fetchEquivalences(searchTerm);
   };
 
   const handleSort = (key: string) => {
@@ -53,7 +45,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
     const sorted = [...equivalences].sort((a, b) => {
       const aValue = a[key as keyof ProductEquivalence];
       const bValue = b[key as keyof ProductEquivalence];
-      
+
       if (aValue < bValue) return newDirection === 'asc' ? -1 : 1;
       if (aValue > bValue) return newDirection === 'asc' ? 1 : -1;
       return 0;
@@ -68,9 +60,9 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
     { key: 'externalName', label: 'External Name', sortable: true },
     { key: 'internalCode', label: 'Internal Code', sortable: true },
     { key: 'internalName', label: 'Internal Name', sortable: true },
-    { 
-      key: 'matchingCriteria', 
-      label: 'Matching Criteria', 
+    {
+      key: 'matchingCriteria',
+      label: 'Matching Criteria',
       sortable: true,
       render: (value: string) => (
         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
