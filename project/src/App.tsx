@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { Screen } from './types'; // Ajusta la ruta según tu estructura
 import { HomeScreen } from './screens/HomeScreen';
 import { ManualEntryScreen } from './screens/ManualEntryScreen';
 import { EquivalencesScreen } from './screens/EquivalencesScreen';
 import { CompareScreen } from './screens/CompareScreen';
-import { Screen } from './types'
-
-type Screen = 'home' | 'manual' | 'equivalences' | 'compare';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
@@ -26,7 +24,7 @@ function App() {
     initializeApp();
   }, []);
 
-  const handleNavigate = (screen: Screen) => {
+   const handleNavigate = (screen: Screen) => {
     setCurrentScreen(screen);
   };
 

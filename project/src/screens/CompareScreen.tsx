@@ -4,9 +4,10 @@ import { Input } from '../components/Input';
 import { Table } from '../components/Table';
 import { PriceComparison } from '../tipos/database';
 import { Search, TrendingUp, TrendingDown } from 'lucide-react';
+import { Screen } from '../types';  // la ruta correcta hacia types.ts
 
 interface CompareScreenProps {
-  onNavigate: (screen: string) => void;
+  onNavigate: (screen: Screen) => void;
 }
 
 export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {

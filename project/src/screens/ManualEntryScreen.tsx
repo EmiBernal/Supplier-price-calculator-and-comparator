@@ -3,21 +3,31 @@ import { Navigation } from '../components/Navigation';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Select } from '../components/Select';
-import { Product } from '../tipos/database';
+import { Screen } from '../types';  // la ruta correcta hacia types.ts
 
 interface ManualEntryScreenProps {
-  onNavigate: (screen: string) => void;
+  onNavigate: (screen: Screen) => void;
+}
+
+interface FormData {
+  supplier: string;
+  productCode: string;
+  productName: string;
+  netPrice: number | '';
+  finalPrice: number | '';
+  companyType: 'supplier' | 'competitor';
+  date: string;
 }
 
 export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate }) => {
-  const [formData, setFormData] = useState<Omit<Product, 'id' | 'createdAt'>>({
+  const [formData, setFormData] = useState<FormData>({
     supplier: '',
     productCode: '',
     productName: '',
-    netPrice: 0,
-    finalPrice: 0,
+    netPrice: '',
+    finalPrice: '',
     companyType: 'supplier',
-    date: new Date().toISOString().split('T')[0]
+    date: new Date().toISOString().split('T')[0],
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -30,27 +40,25 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     if (!formData.supplier.trim()) {
       newErrors.supplier = 'Supplier is required';
     }
-
     if (!formData.productCode.trim()) {
       newErrors.productCode = 'Product code is required';
     }
-
     if (!formData.productName.trim()) {
       newErrors.productName = 'Product name is required';
     }
-
-    if (formData.netPrice <= 0) {
+    if (formData.netPrice === '' || formData.netPrice <= 0) {
       newErrors.netPrice = 'Net price must be greater than 0';
     }
-
-    if (formData.finalPrice <= 0) {
+    if (formData.finalPrice === '' || formData.finalPrice <= 0) {
       newErrors.finalPrice = 'Final price must be greater than 0';
     }
-
-    if (formData.finalPrice < formData.netPrice) {
+    if (
+      formData.finalPrice !== '' &&
+      formData.netPrice !== '' &&
+      formData.finalPrice < formData.netPrice
+    ) {
       newErrors.finalPrice = 'Final price must be greater than or equal to net price';
     }
-
     if (!formData.date) {
       newErrors.date = 'Date is required';
     }
@@ -61,34 +69,47 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!validateForm()) {
       return;
     }
 
     setIsSubmitting(true);
     setSuccessMessage('');
+    setErrors({});
 
     try {
-      await database.insertProduct(formData);
+      // Aquí haces la llamada a tu API
+      const response = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formData,
+          // Asegurar que netPrice y finalPrice sean number
+          netPrice: Number(formData.netPrice),
+          finalPrice: Number(formData.finalPrice),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+
       setSuccessMessage('Product uploaded successfully!');
-      
-      // Reset form
+
       setFormData({
         supplier: '',
         productCode: '',
         productName: '',
-        netPrice: 0,
-        finalPrice: 0,
+        netPrice: '',
+        finalPrice: '',
         companyType: 'supplier',
-        date: new Date().toISOString().split('T')[0]
+        date: new Date().toISOString().split('T')[0],
       });
-      
-      // Clear success message after 3 seconds
+
       setTimeout(() => {
         setSuccessMessage('');
       }, 3000);
-      
     } catch (error) {
       console.error('Error uploading product:', error);
       setErrors({ general: 'Failed to upload product. Please try again.' });
@@ -97,17 +118,19 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     }
   };
 
-  const handleInputChange = (field: keyof typeof formData, value: string | number) => {
-    setFormData(prev => ({
+  const handleInputChange = (
+    field: keyof FormData,
+    value: string | number
+  ) => {
+    setFormData((prev) => ({
       ...prev,
-      [field]: value
+      [field]: value,
     }));
-    
-    // Clear error when user starts typing
+
     if (errors[field]) {
-      setErrors(prev => ({
+      setErrors((prev) => ({
         ...prev,
-        [field]: ''
+        [field]: '',
       }));
     }
   };
@@ -115,10 +138,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-4xl mx-auto">
-        <Navigation 
-          onBack={() => onNavigate('home')} 
-          title="Manual Price Entry"
-        />
+        <Navigation onBack={() => onNavigate('home')} title="Manual Price Entry" />
 
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -156,7 +176,12 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                   min="0"
                   step="0.01"
                   value={formData.netPrice}
-                  onChange={(e) => handleInputChange('netPrice', parseFloat(e.target.value) || 0)}
+                  onChange={(e) =>
+                    handleInputChange(
+                      'netPrice',
+                      e.target.value === '' ? '' : parseFloat(e.target.value)
+                    )
+                  }
                   error={errors.netPrice}
                   placeholder="0.00"
                 />
@@ -170,7 +195,12 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                   min="0"
                   step="0.01"
                   value={formData.finalPrice}
-                  onChange={(e) => handleInputChange('finalPrice', parseFloat(e.target.value) || 0)}
+                  onChange={(e) =>
+                    handleInputChange(
+                      'finalPrice',
+                      e.target.value === '' ? '' : parseFloat(e.target.value)
+                    )
+                  }
                   error={errors.finalPrice}
                   placeholder="0.00"
                 />
@@ -180,10 +210,12 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
               <Select
                 label="Company Type"
                 value={formData.companyType}
-                onChange={(e) => handleInputChange('companyType', e.target.value as 'supplier' | 'competitor')}
+                onChange={(e) =>
+                  handleInputChange('companyType', e.target.value as 'supplier' | 'competitor')
+                }
                 options={[
                   { value: 'supplier', label: 'Supplier' },
-                  { value: 'competitor', label: 'Competitor' }
+                  { value: 'competitor', label: 'Competitor' },
                 ]}
               />
 
@@ -209,11 +241,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
             )}
 
             <div className="flex justify-end space-x-4">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => onNavigate('home')}
-              >
+              <Button type="button" variant="secondary" onClick={() => onNavigate('home')}>
                 Back to Home
               </Button>
               <Button

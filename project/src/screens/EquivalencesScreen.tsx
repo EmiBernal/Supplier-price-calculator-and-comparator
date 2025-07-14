@@ -4,26 +4,24 @@ import { Input } from '../components/Input';
 import { Table } from '../components/Table';
 import { ProductEquivalence } from '../tipos/database';
 import { Search } from 'lucide-react';
+import { Screen } from '../types';  // la ruta correcta hacia types.ts
 
 interface EquivalencesScreenProps {
-  onNavigate: (screen: string) => void;
+  onNavigate: (screen: Screen) => void;
 }
 
 export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNavigate }) => {
   const [equivalences, setEquivalences] = useState<ProductEquivalence[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [sortKey, setSortKey] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-
-  useEffect(() => {
-    fetchEquivalences();
-  }, []);
 
   const fetchEquivalences = async (search: string = '') => {
     setLoading(true);
     try {
-      const response = await fetch(`http://localhost:4000/api/price-comparisons?search=${encodeURIComponent(search)}`);
+      const response = await fetch(`http://localhost:4000/api/lista_precios?search=${encodeURIComponent(search)}`);
+      if (!response.ok) throw new Error('Error al obtener datos');
       const data = await response.json();
       setEquivalences(data);
     } catch (error) {
@@ -76,6 +74,10 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
     },
     { key: 'date', label: 'Date', sortable: true }
   ];
+
+  useEffect(() => {
+    fetchEquivalences();
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
