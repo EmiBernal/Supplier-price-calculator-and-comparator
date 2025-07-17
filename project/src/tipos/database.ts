@@ -1,11 +1,18 @@
 export interface PriceComparison {
   internalProduct: string;
+  externalProduct: string;
   supplier: string;
-  finalPrice: number;
+  internalNetPrice: number;
+  externalNetPrice: number;
+  internalFinalPrice: number;
+  externalFinalPrice: number;
+  priceDifference: number;
+  internalDate: string;
+  externalDate: string;
   companyType: string;
   saleConditions: string;
-  priceDifference: number;
 }
+
 
 export interface ProductEquivalence {
   externalName: string;

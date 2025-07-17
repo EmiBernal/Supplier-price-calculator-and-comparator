@@ -27,47 +27,59 @@ app.get('/', (req, res) => {
 
 //Obtener datos de comparaciones de precios
 app.get('/api/price-comparisons', (req, res) => {
-  //Lee el termino de busqueda desde la URL
   const search = req.query.search || '';
-  const sql = `
-  SELECT 
-    lp.cod_externo AS codigoExterno,
-    lp.nom_externo AS nombreExterno,
-    li.nom_interno AS productoInterno,
-    lp.precio_final AS precioFinal,
-    lp.tipo_empresa AS tipoEmpresa,
-    rel.criterio_relacion AS criterioRelacion,
-    ROUND(((lp.precio_final - li.precio_final) / li.precio_final) * 100, 2) AS diferenciaPrecio
-  FROM
-    lista_precios lp
-  JOIN
-    relacion_articulos rel ON lp.id_externo = rel.id_lista_precios
-  JOIN
-    lista_interna li ON li.id_interno = rel.id_lista_interna              
-  WHERE 
-    lp.nom_externo LIKE ? OR li.nom_interno LIKE ?
-  `;
-
   const likeSearch = `%${search}%`;
 
+  const sql = `
+  SELECT
+    li.nom_interno AS internalProduct,
+    lp.nom_externo AS externalProduct,
+    lp.tipo_empresa AS companyType,
+    lp.cod_externo AS externalCode,
+    lp.precio_neto AS externalNetPrice,
+    lp.precio_final AS externalFinalPrice,
+    li.precio_neto AS internalNetPrice,
+    li.precio_final AS internalFinalPrice,
+    ROUND(((lp.precio_final - li.precio_final) / li.precio_final) * 100, 2) AS priceDifference,
+    lp.fecha AS externalDate,
+    li.fecha AS internalDate,
+    lp.nom_externo AS supplier,
+    rel.criterio_relacion AS saleConditions
+  FROM 
+    relacion_articulos rel
+  JOIN 
+    lista_precios lp ON rel.id_lista_precios = lp.id_externo
+  JOIN 
+    lista_interna li ON rel.id_lista_interna = li.id_interno
+  WHERE 
+    li.nom_interno LIKE ? OR lp.nom_externo LIKE ?
+  `;
+
   db.all(sql, [likeSearch, likeSearch], (err, rows) => {
-    //Si hay error
-    if(err) {
+    if (err) {
       console.error('Error al obtener comparaciones:', err.message);
-      return res.status(500).json({ error: 'Error interno del servidor'});
+      return res.status(500).json({ error: 'Error interno del servidor' });
     }
-    //Si no hay error
+    
     const resultados = rows.map(row => ({
-      internalProduct : row.productoInterno,
-      supplier: row.nombreExterno,
-      finalPrice: row.precioFinal,
-      companyType: row.tipoEmpresa,
-      saleConditions: row.criterioRelacion,
-      priceDifference: row.diferenciaPrecio
+      internalProduct: row.internalProduct,
+      externalProduct: row.externalProduct,
+      supplier: row.supplier,
+      internalNetPrice: row.internalNetPrice,
+      externalNetPrice: row.externalNetPrice,
+      internalFinalPrice: row.internalFinalPrice,
+      externalFinalPrice: row.externalFinalPrice,
+      priceDifference: row.priceDifference,
+      internalDate: row.internalDate,
+      externalDate: row.externalDate,
+      companyType: row.companyType,
+      saleConditions: row.saleConditions
     }));
+    
     res.json(resultados);
   });
 });
+
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
