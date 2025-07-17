@@ -1,4 +1,4 @@
-// server/index.js
+
 const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
@@ -25,48 +25,54 @@ app.get('/', (req, res) => {
   res.send('¡El backend está funcionando!');
 });
 
-// Endpoint que lista todos los precios
-app.get('/api/lista_precios', (req, res) => {
-  db.all('SELECT * FROM lista_precios', [], (err, rows) => {
-    if (err) {
-      console.error(err.message);
-      return res.status(500).json({ error: 'Error al obtener lista_precios' });
+//Obtener datos de comparaciones de precios
+app.get('/api/price-comparisons', (req, res) => {
+  //Lee el termino de busqueda desde la URL
+  const search = req.query.search || '';
+  const sql = `
+  SELECT 
+    lp.cod_externo AS codigoExterno,
+    lp.nom_externo AS nombreExterno,
+    li.nom_interno AS productoInterno,
+    lp.precio_final AS precioFinal,
+    lp.tipo_empresa AS tipoEmpresa,
+    rel.criterio_relacion AS criterioRelacion,
+    ROUND(((lp.precio_final - li.precio_final) / li.precio_final) * 100, 2) AS diferenciaPrecio
+  FROM
+    lista_precios lp
+  JOIN
+    relacion_articulos rel ON lp.id_externo = rel.id_lista_precios
+  JOIN
+    lista_interna li ON li.id_interno = rel.id_lista_interna              
+  WHERE 
+    lp.nom_externo LIKE ? OR li.nom_interno LIKE ?
+  `;
+
+  const likeSearch = `%${search}%`;
+
+  db.all(sql, [likeSearch, likeSearch], (err, rows) => {
+    //Si hay error
+    if(err) {
+      console.error('Error al obtener comparaciones:', err.message);
+      return res.status(500).json({ error: 'Error interno del servidor'});
     }
-    res.json(rows);
+    //Si no hay error
+    const resultados = rows.map(row => ({
+      internalProduct : row.productoInterno,
+      supplier: row.nombreExterno,
+      finalPrice: row.precioFinal,
+      companyType: row.tipoEmpresa,
+      saleConditions: row.criterioRelacion,
+      priceDifference: row.diferenciaPrecio
+    }));
+    res.json(resultados);
   });
 });
 
-// Endpoint para comparaciones (price-comparisons) filtradas
-app.get('/api/price-comparisons', (req, res) => {
-  const searchTerm = (req.query.search || '').toLowerCase();
-  const likeTerm = `%${searchTerm}%`;
-
-  const sql = `
-    SELECT 
-      nom_externo AS externalName,
-      cod_externo AS externalCode,
-      nom_interno AS internalName,
-      cod_interno AS internalCode,
-      tipo_empresa AS supplier,
-      fecha AS date
-    FROM relacion_articulos ra
-    JOIN lista_precios lp ON lp.id_externo = ra.id_lista_precios
-    JOIN lista_interna li ON li.id_interno = ra.id_lista_interna
-    WHERE LOWER(lp.nom_externo) LIKE ?
-      OR LOWER(li.nom_interno) LIKE ?
-      OR LOWER(lp.cod_externo) LIKE ?
-      OR LOWER(li.cod_interno) LIKE ?
-  `;
-
-  db.all(sql, [likeTerm, likeTerm, likeTerm, likeTerm], (err, rows) => {
-    if (err) {
-      console.error('Error al consultar price-comparisons:', err.message);
-      return res.status(500).json({ error: 'Error al obtener comparaciones' });
-    }
-    res.json(rows);
-  });
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
 });
 
 app.listen(PORT, () => {
-  console.log(`Servidor backend escuchando en http://localhost:${PORT}`);
+  console.log(`Servidor backend corriendo en http://localhost:${PORT}`);
 });
