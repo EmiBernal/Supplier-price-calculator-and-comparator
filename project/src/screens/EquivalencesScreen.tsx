@@ -4,7 +4,7 @@ import { Input } from '../components/Input';
 import { Table } from '../components/Table';
 import { ProductEquivalence } from '../tipos/database';
 import { Search } from 'lucide-react';
-import { Screen } from '../types';  // la ruta correcta hacia types.ts
+import { Screen } from '../types';  
 
 interface EquivalencesScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -84,7 +84,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
       <div className="max-w-7xl mx-auto">
         <Navigation 
           onBack={() => onNavigate('home')} 
-          title="Product Equivalences"
+          title="Equivalencia entre productos"
         />
 
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -92,7 +92,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
           <div className="mb-6">
             <div className="relative max-w-md">
               <Input
-                placeholder="Search by name or code..."
+                placeholder="Busca por nombre o por codigo..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
@@ -109,7 +109,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
           {/* Results Count */}
           <div className="mb-4">
             <p className="text-sm text-gray-600">
-              {loading ? 'Loading...' : `Showing ${equivalences.length} equivalence${equivalences.length !== 1 ? 's' : ''}`}
+              {loading ? 'Cargando...' : `Mostrando ${equivalences.length} equivalencias${equivalences.length !== 1 ? 's' : ''}`}
             </p>
           </div>
 
