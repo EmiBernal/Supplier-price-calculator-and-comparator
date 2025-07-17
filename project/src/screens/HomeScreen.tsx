@@ -17,10 +17,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
             <div className="text-4xl font-bold text-blue-600">GP</div>
           </div>
           <h1 className="text-4xl font-bold text-gray-800 mb-2">
-            Gampack Price Comparator
+            Comparador de precios
           </h1>
           <p className="text-xl text-gray-600">
-            Supplier Organization and Price Comparison System
+            Organización de proveedores y sistema de comparación de precios
           </p>
         </div>
 
@@ -34,9 +34,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
               <div className="p-4 bg-blue-100 rounded-full group-hover:bg-blue-200 transition-colors">
                 <Upload size={32} className="text-blue-600" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-800">Upload Price List</h3>
+              <h3 className="text-xl font-semibold text-gray-800">Ingreso de productos</h3>
               <p className="text-gray-600 text-center">
-                Manually enter product pricing data from suppliers and competitors
+                Ingrese manualmente datos de precios de productos de proveedores y competidores
               </p>
             </div>
           </div>
@@ -49,9 +49,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
               <div className="p-4 bg-green-100 rounded-full group-hover:bg-green-200 transition-colors">
                 <GitCompare size={32} className="text-green-600" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-800">View Equivalences</h3>
+              <h3 className="text-xl font-semibold text-gray-800">Equivalencias entre productos</h3>
               <p className="text-gray-600 text-center">
-                Review product matching and equivalence relationships
+                Revisar las relaciones de correspondencia y equivalencia de productos sin resolver
               </p>
             </div>
           </div>
@@ -64,9 +64,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
               <div className="p-4 bg-blue-100 rounded-full group-hover:bg-blue-200 transition-colors">
                 <BarChart3 size={32} className="text-blue-600" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-800">Compare Prices</h3>
+              <h3 className="text-xl font-semibold text-gray-800">Comparador de precios</h3>
               <p className="text-gray-600 text-center">
-                Analyze pricing differences across suppliers and competitors
+                Analizar las diferencias de precios entre proveedores y competidores
               </p>
             </div>
           </div>
@@ -74,7 +74,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
 
         {/* Footer */}
         <div className="mt-12 text-gray-500 text-sm">
-          <p>© 2024 Gampack Price Comparator. All rights reserved.</p>
+          <p>© Comparador de precios de Gampack 2025. Todos los derechos reservados.</p>
         </div>
       </div>
     </div>
