@@ -3,7 +3,7 @@ import { Navigation } from '../components/Navigation';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Select } from '../components/Select';
-import { Screen } from '../types';  
+import { Screen } from '../types';
 
 interface ManualEntryScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -19,6 +19,8 @@ interface FormData {
   date: string;
 }
 
+const BASE_URL = 'http://localhost:4000'; // <--- Asegurate que este es el puerto de tu backend
+
 export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate }) => {
   const [formData, setFormData] = useState<FormData>({
     company: '',
@@ -33,70 +35,92 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [existingProduct, setExistingProduct] = useState<any | null>(null);
+  const [wantsToUpdate, setWantsToUpdate] = useState<boolean | null>(null);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
-    if (!formData.company.trim()) {
-      newErrors.supplier = 'Proveedor es requerido';
-    }
-    if (!formData.productCode.trim()) {
-      newErrors.productCode = 'El codigo del producto es requerido';
-    }
-    if (!formData.productName.trim()) {
-      newErrors.productName = 'El nombre del producto es requerido';
-    }
-    if (formData.netPrice === '' || formData.netPrice <= 0) {
-      newErrors.netPrice = 'El precio neto debe ser mayor a 0';
-    }
-    if (formData.finalPrice === '' || formData.finalPrice <= 0) {
-      newErrors.finalPrice = 'El precio final debe ser mayor a 0';
-    }
+    if (!formData.company.trim()) newErrors.supplier = 'Proveedor es requerido';
+    if (!formData.productCode.trim()) newErrors.productCode = 'El codigo del producto es requerido';
+    if (!formData.productName.trim()) newErrors.productName = 'El nombre del producto es requerido';
+    if (formData.netPrice === '' || formData.netPrice <= 0) newErrors.netPrice = 'El precio neto debe ser mayor a 0';
+    if (formData.finalPrice === '' || formData.finalPrice <= 0) newErrors.finalPrice = 'El precio final debe ser mayor a 0';
     if (
       formData.finalPrice !== '' &&
       formData.netPrice !== '' &&
       formData.finalPrice < formData.netPrice
-    ) {
-      newErrors.finalPrice = 'El precio final debe ser mayor o igual al precio neto';
-    }
-    if (!formData.date) {
-      newErrors.date = 'La fecha es requerida';
-    }
+    ) newErrors.finalPrice = 'El precio final debe ser mayor o igual al precio neto';
+    if (!formData.date) newErrors.date = 'La fecha es requerida';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
+  const checkProductExists = async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/check-product`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productCode: formData.productCode,
+          productName: formData.productName,
+          companyType: formData.companyType,
+        }),
+      });
+
+      if (!res.ok) {
+        console.error('Error en respuesta de check-product:', res.status);
+        return false;
+      }
+
+      const data = await res.json();
+
+      if (data.found) {
+        setExistingProduct(data.product);
+        return true;
+      }
+      setExistingProduct(null);
+      return false;
+    } catch (error) {
+      console.error('Error verificando producto existente:', error);
+      setExistingProduct(null);
+      return false;
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!validateForm()) {
-      return;
-    }
+    if (!validateForm()) return;
 
     setIsSubmitting(true);
     setSuccessMessage('');
     setErrors({});
 
+    const found = await checkProductExists();
+
+    if (found && wantsToUpdate === null) {
+      // No se decidió si actualizar o no, cancelar submit
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
-      // Aquí haces la llamada a tu API
-      const response = await fetch('/api/products', {
+      const response = await fetch(`${BASE_URL}/api/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...formData,
-          // Asegurar que netPrice y finalPrice sean number
           netPrice: Number(formData.netPrice),
           finalPrice: Number(formData.finalPrice),
+          updateExisting: wantsToUpdate || false,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('La respuesta de la red no fue correcta');
-      }
+      if (!response.ok) throw new Error('La respuesta de la red no fue correcta');
 
-      setSuccessMessage('Producto cargado de forma exitosamente!');
-
+      setSuccessMessage('Producto cargado de forma exitosa!');
       setFormData({
         company: '',
         productCode: '',
@@ -106,10 +130,9 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
         companyType: 'Proveedor',
         date: new Date().toISOString().split('T')[0],
       });
-
-      setTimeout(() => {
-        setSuccessMessage('');
-      }, 3000);
+      setExistingProduct(null);
+      setWantsToUpdate(null);
+      setTimeout(() => setSuccessMessage(''), 3000);
     } catch (error) {
       console.error('Error uploading product:', error);
       setErrors({ general: 'Failed to upload product. Please try again.' });
@@ -118,21 +141,11 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     }
   };
 
-  const handleInputChange = (
-    field: keyof FormData,
-    value: string | number
-  ) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-
-    if (errors[field]) {
-      setErrors((prev) => ({
-        ...prev,
-        [field]: '',
-      }));
-    }
+  const handleInputChange = (field: keyof FormData, value: string | number) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: '' }));
+    setExistingProduct(null);
+    setWantsToUpdate(null);
   };
 
   return (
@@ -152,21 +165,31 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
               />
 
               <Input
-                label="Codigo producto"
+                label="Código producto"
                 value={formData.productCode}
                 onChange={(e) => handleInputChange('productCode', e.target.value)}
                 error={errors.productCode}
-                placeholder="Ingresa el codigo del producto"
+                placeholder="Ingresa el código del producto"
               />
 
-              <div className="md:col-span-2">
+              <div className="md:col-span-2 relative">
                 <Input
-                  label="Nombre del producto "
+                  label="Nombre del producto"
                   value={formData.productName}
                   onChange={(e) => handleInputChange('productName', e.target.value)}
                   error={errors.productName}
                   placeholder="Ingresa el nombre del producto"
                 />
+                {existingProduct && wantsToUpdate === null && (
+                  <div className="mt-2 bg-yellow-50 border border-yellow-300 rounded p-3 text-sm text-yellow-800 absolute right-0 top-0 max-w-md shadow-md">
+                    Producto ya existente: <strong>{existingProduct.nom_externo ?? existingProduct.nom_interno}</strong> con código <strong>{existingProduct.cod_externo ?? existingProduct.cod_interno}</strong>.<br />
+                    ¿Deseas actualizar su precio?
+                    <div className="mt-2 flex space-x-2">
+                      <Button type="button" onClick={() => setWantsToUpdate(true)}>Sí</Button>
+                      <Button type="button" variant="secondary" onClick={() => setWantsToUpdate(false)}>No</Button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="relative">
@@ -209,7 +232,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                 label="Tipo de empresa"
                 value={formData.companyType}
                 onChange={(e) =>
-                  handleInputChange('companyType', e.target.value as 'supplier' | 'competitor')
+                  handleInputChange('companyType', e.target.value as 'Proveedor' | 'Gampack')
                 }
                 options={[
                   { value: 'Proveedor', label: 'Proveedor' },
@@ -244,10 +267,10 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
               </Button>
               <Button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || (existingProduct && wantsToUpdate === null)}
                 className={isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}
               >
-                  {isSubmitting ? 'Subiendo...' : 'Subir'}
+                {isSubmitting ? 'Subiendo...' : 'Subir'}
               </Button>
             </div>
           </form>
