@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Navigation } from '../components/Navigation';
 import { Input } from '../components/Input';
-import { Table, Column } from '../components/Table';  // Asegurate que exportas Column también
+import { Table, Column } from '../components/Table';  // Asegúrate que exportas Column también
 import { ProductEquivalence } from '../tipos/database';
 import { Search } from 'lucide-react';
 import { Screen } from '../types';
@@ -41,22 +41,21 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
   };
 
   const handleSort = (key: keyof ProductEquivalence) => {
-  const newDirection = sortKey === key && sortDirection === 'asc' ? 'desc' : 'asc';
-  setSortKey(key);
-  setSortDirection(newDirection);
+    const newDirection = sortKey === key && sortDirection === 'asc' ? 'desc' : 'asc';
+    setSortKey(key);
+    setSortDirection(newDirection);
 
-  const sorted = [...equivalences].sort((a, b) => {
-    const aValue = (a[key] ?? '').toString();
-    const bValue = (b[key] ?? '').toString();
+    const sorted = [...equivalences].sort((a, b) => {
+      const aValue = (a[key] ?? '').toString().toLowerCase();
+      const bValue = (b[key] ?? '').toString().toLowerCase();
 
-    if (aValue < bValue) return newDirection === 'asc' ? -1 : 1;
-    if (aValue > bValue) return newDirection === 'asc' ? 1 : -1;
-    return 0;
-  });
+      if (aValue < bValue) return newDirection === 'asc' ? -1 : 1;
+      if (aValue > bValue) return newDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
 
-  setEquivalences(sorted);
-};
-
+    setEquivalences(sorted);
+  };
 
   const columns: Column<ProductEquivalence>[] = [
     { key: 'supplier', label: 'Proveedor', sortable: true },
@@ -131,14 +130,22 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
             </p>
           </div>
 
-          {/* Tabla */}
-          <Table
-            columns={columns}
-            data={equivalences}
-            onSort={handleSort}
-            sortKey={sortKey}
-            sortDirection={sortDirection}
-          />
+          {/* Tabla con datos */}
+          <div className="overflow-x-auto">
+            {loading ? (
+              <p>Cargando...</p>
+            ) : equivalences.length === 0 ? (
+              <p>No hay equivalencias para mostrar</p>
+            ) : (
+              <Table
+                columns={columns}
+                data={equivalences}
+                sortKey={sortKey}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+              />
+            )}
+          </div>
         </div>
       </div>
     </div>

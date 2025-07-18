@@ -15,17 +15,17 @@ export interface PriceComparison {
 
 
 export interface ProductEquivalence {
-  supplier: string;
+  id: number;
+  supplier?: string | null;
   externalCode: string;
   externalName: string;
   externalDate: string;
-  internalSupplier: string;
+  internalSupplier?: string;
   internalCode: string;
   internalName: string;
   internalDate: string;
-  matchingCriteria?: string; // IMPORTANTE: debe estar
+  matchingCriteria?: string;
 }
-
 
 export interface Product {
   id: string; // ID único, generado automáticamente por el backend

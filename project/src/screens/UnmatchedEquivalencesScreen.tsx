@@ -12,37 +12,66 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   useEffect(() => {
     fetch('http://localhost:4000/api/no-relacionados/proveedores')
       .then(res => res.json())
-      .then(setExternals);
+      .then(data => {
+        if (Array.isArray(data)) {
+          setExternals(data);
+        } else {
+          console.error('Respuesta inválida para productos externos:', data);
+          setExternals([]);
+        }
+      })
+      .catch(err => {
+        console.error('Error fetching externos:', err);
+        setExternals([]);
+      });
 
     fetch('http://localhost:4000/api/no-relacionados/gampack')
       .then(res => res.json())
-      .then(setInternals);
+      .then(data => {
+        if (Array.isArray(data)) {
+          setInternals(data);
+        } else {
+          console.error('Respuesta inválida para productos internos:', data);
+          setInternals([]);
+        }
+      })
+      .catch(err => {
+        console.error('Error fetching internos:', err);
+        setInternals([]);
+      });
   }, []);
 
   const handleLink = async () => {
-    if (!selectedExternal || !selectedInternal) return alert('Seleccioná un producto de cada tabla');
+    if (!selectedExternal || !selectedInternal) {
+      alert('Seleccioná un producto de cada tabla');
+      return;
+    }
 
     const body = {
-      id_lista_precios: selectedExternal.id_lista_precios,
-      id_lista_interna: selectedInternal.id_lista_interna,
+      id_lista_precios: selectedExternal.id_externo,    // CORREGIDO: id_externo
+      id_lista_interna: selectedInternal.id_interno,    // CORREGIDO: id_interno
       criterio: 'manual',
     };
 
-    const res = await fetch('http://localhost:4000/api/relacionar-manual', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    try {
+      const res = await fetch('http://localhost:4000/api/relacionar-manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
 
-    if (res.ok) {
-      alert('¡Productos vinculados!');
-      setExternals(externals.filter(e => e.id_lista_precios !== selectedExternal.id_lista_precios));
-      setInternals(internals.filter(i => i.id_lista_interna !== selectedInternal.id_lista_interna));
-      setSelectedExternal(null);
-      setSelectedInternal(null);
-    } else {
-      const error = await res.json();
-      alert(`Error: ${error.message || 'No se pudo vincular'}`);
+      if (res.ok) {
+        alert('¡Productos vinculados!');
+        setExternals(prev => prev.filter(e => e.id_externo !== selectedExternal.id_externo));
+        setInternals(prev => prev.filter(i => i.id_interno !== selectedInternal.id_interno));
+        setSelectedExternal(null);
+        setSelectedInternal(null);
+      } else {
+        const error = await res.json();
+        alert(`Error: ${error.message || 'No se pudo vincular'}`);
+      }
+    } catch (error) {
+      alert('Error al conectar con el servidor');
     }
   };
 
@@ -70,23 +99,24 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {externals.map(item => (
-                      <tr
-                        key={item.id_lista_precios}
-                        className={rowStyle(selectedExternal?.id_lista_precios === item.id_lista_precios)}
-                        onClick={() => setSelectedExternal(item)}
-                      >
-                        <td className="px-6 py-4 whitespace-nowrap text-gray-900">{item.cod_externo}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-gray-900">{item.nom_externo}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-gray-900">{item.proveedor}</td>
-                      </tr>
-                    ))}
-                    {externals.length === 0 && (
+                    {externals.length === 0 ? (
                       <tr>
                         <td colSpan={3} className="px-6 py-4 text-center text-gray-500">
                           No hay productos no relacionados.
                         </td>
                       </tr>
+                    ) : (
+                      externals.map(item => (
+                        <tr
+                          key={item.id_externo}  // CORREGIDO: id_externo
+                          className={rowStyle(selectedExternal?.id_externo === item.id_externo)}
+                          onClick={() => setSelectedExternal(item)}
+                        >
+                          <td className="px-6 py-4 whitespace-nowrap text-gray-900">{item.cod_externo}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-gray-900">{item.nom_externo}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-gray-900">{item.proveedor ?? 'Sin proveedor'}</td>
+                        </tr>
+                      ))
                     )}
                   </tbody>
                 </table>
@@ -104,22 +134,23 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {internals.map(item => (
-                      <tr
-                        key={item.id_lista_interna}
-                        className={rowStyle(selectedInternal?.id_lista_interna === item.id_lista_interna)}
-                        onClick={() => setSelectedInternal(item)}
-                      >
-                        <td className="px-6 py-4 whitespace-nowrap text-gray-900">{item.cod_interno}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-gray-900">{item.nom_interno}</td>
-                      </tr>
-                    ))}
-                    {internals.length === 0 && (
+                    {internals.length === 0 ? (
                       <tr>
                         <td colSpan={2} className="px-6 py-4 text-center text-gray-500">
                           No hay productos no relacionados.
                         </td>
                       </tr>
+                    ) : (
+                      internals.map(item => (
+                        <tr
+                          key={item.id_interno}  // CORREGIDO: id_interno
+                          className={rowStyle(selectedInternal?.id_interno === item.id_interno)}
+                          onClick={() => setSelectedInternal(item)}
+                        >
+                          <td className="px-6 py-4 whitespace-nowrap text-gray-900">{item.cod_interno}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-gray-900">{item.nom_interno}</td>
+                        </tr>
+                      ))
                     )}
                   </tbody>
                 </table>

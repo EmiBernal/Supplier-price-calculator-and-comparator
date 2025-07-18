@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
-import { Select } from '../components/Select';
 import { Screen } from '../types';
 
 interface ManualEntryScreenProps {
@@ -15,11 +14,10 @@ interface FormData {
   productName: string;
   netPrice: number | '';
   finalPrice: number | '';
-  companyType: 'Proveedor' | 'Gampack';
   date: string;
 }
 
-const BASE_URL = 'http://localhost:4000'; // <--- Asegurate que este es el puerto de tu backend
+const BASE_URL = 'http://localhost:4000';
 
 export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate }) => {
   const [formData, setFormData] = useState<FormData>({
@@ -28,7 +26,6 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     productName: '',
     netPrice: '',
     finalPrice: '',
-    companyType: 'Proveedor',
     date: new Date().toISOString().split('T')[0],
   });
 
@@ -37,6 +34,10 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
   const [successMessage, setSuccessMessage] = useState('');
   const [existingProduct, setExistingProduct] = useState<any | null>(null);
   const [wantsToUpdate, setWantsToUpdate] = useState<boolean | null>(null);
+
+  const inferCompanyType = (name: string): 'Gampack' | 'Proveedor' => {
+    return name.trim().toLowerCase() === 'gampack' ? 'Gampack' : 'Proveedor';
+  };
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -65,17 +66,16 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
         body: JSON.stringify({
           productCode: formData.productCode,
           productName: formData.productName,
-          companyType: formData.companyType,
+          companyType: inferCompanyType(formData.company),
           company: formData.company,
         }),
       });
 
       if (!res.ok) {
-      const errorText = await res.text();
-      console.error('Error en respuesta de check-product:', res.status, errorText);
-      return false;
-    }
-
+        const errorText = await res.text();
+        console.error('Error en respuesta de check-product:', res.status, errorText);
+        return false;
+      }
 
       const data = await res.json();
 
@@ -101,13 +101,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     setSuccessMessage('');
     setErrors({});
 
-    const found = await checkProductExists();
-
-    if (found && wantsToUpdate === null) {
-      // No se decidió si actualizar o no, cancelar submit
-      setIsSubmitting(false);
-      return;
-    }
+    const companyType = inferCompanyType(formData.company);
 
     try {
       const response = await fetch(`${BASE_URL}/api/products`, {
@@ -115,13 +109,30 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...formData,
+          companyType,
           netPrice: Number(formData.netPrice),
           finalPrice: Number(formData.finalPrice),
           updateExisting: wantsToUpdate || false,
         }),
       });
 
-      if (!response.ok) throw new Error('La respuesta de la red no fue correcta');
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Error del servidor: ${errorText}`);
+      }
+
+      const json = await response.json();
+
+      if (json.sameProduct && wantsToUpdate === null) {
+        setExistingProduct({
+          cod_externo: companyType === 'Proveedor' ? formData.productCode : undefined,
+          cod_interno: companyType === 'Gampack' ? formData.productCode : undefined,
+          nom_externo: companyType === 'Proveedor' ? formData.productName : undefined,
+          nom_interno: companyType === 'Gampack' ? formData.productName : undefined,
+        });
+        setIsSubmitting(false);
+        return;
+      }
 
       setSuccessMessage('Producto cargado de forma exitosa!');
       setFormData({
@@ -130,7 +141,6 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
         productName: '',
         netPrice: '',
         finalPrice: '',
-        companyType: 'Proveedor',
         date: new Date().toISOString().split('T')[0],
       });
       setExistingProduct(null);
@@ -147,8 +157,10 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
   const handleInputChange = (field: keyof FormData, value: string | number) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) setErrors((prev) => ({ ...prev, [field]: '' }));
-    setExistingProduct(null);
-    setWantsToUpdate(null);
+    if (field === 'productCode' || field === 'productName' || field === 'company') {
+      setExistingProduct(null);
+      setWantsToUpdate(null);
+    }
   };
 
   return (
@@ -166,6 +178,9 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                 error={errors.supplier}
                 placeholder="Ingresa el nombre de la empresa (Gampack si es producto propio)"
               />
+              <p className="text-sm text-gray-500 md:col-span-2">
+                Tipo de empresa detectado: <strong>{inferCompanyType(formData.company)}</strong>
+              </p>
 
               <Input
                 label="Código producto"
@@ -230,18 +245,6 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                 />
                 <div className="absolute left-3 top-8 text-gray-500">$</div>
               </div>
-
-              <Select
-                label="Tipo de empresa"
-                value={formData.companyType}
-                onChange={(e) =>
-                  handleInputChange('companyType', e.target.value as 'Proveedor' | 'Gampack')
-                }
-                options={[
-                  { value: 'Proveedor', label: 'Proveedor' },
-                  { value: 'Gampack', label: 'Gampack' },
-                ]}
-              />
 
               <Input
                 label="Fecha"
