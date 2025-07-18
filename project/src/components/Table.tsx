@@ -1,31 +1,23 @@
 import React from 'react';
 
-interface Column {
-  key: string;
+export interface Column<T> {
+  key: keyof T;
   label: string;
-  render?: (value: any, row: any) => React.ReactNode;
+  render?: (value: any, row: T) => React.ReactNode;
   sortable?: boolean;
 }
 
-interface TableProps {
-  columns: Column[];
-  data: any[];
-  onSort?: (key: string) => void;
-  sortKey?: string;
+interface TableProps<T> {
+  columns: Column<T>[];
+  data: T[];
+  onSort?: (key: keyof T) => void;
+  sortKey?: keyof T | '';
   sortDirection?: 'asc' | 'desc';
 }
 
-export const Table: React.FC<TableProps> = ({ 
-  columns, 
-  data, 
-  onSort, 
-  sortKey, 
-  sortDirection 
-}) => {
-  const handleSort = (key: string) => {
-    if (onSort) {
-      onSort(key);
-    }
+export function Table<T>({ columns, data, onSort, sortKey, sortDirection }: TableProps<T>) {
+  const handleSort = (key: keyof T) => {
+    if (onSort) onSort(key);
   };
 
   return (
@@ -33,17 +25,17 @@ export const Table: React.FC<TableProps> = ({
       <table className="min-w-full divide-y divide-gray-200">
         <thead className="bg-gray-50">
           <tr>
-            {columns.map((column) => (
+            {columns.map((col) => (
               <th
-                key={column.key}
+                key={String(col.key)}
                 className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${
-                  column.sortable ? 'cursor-pointer hover:bg-gray-100' : ''
+                  col.sortable ? 'cursor-pointer hover:bg-gray-100' : ''
                 }`}
-                onClick={() => column.sortable && handleSort(column.key)}
+                onClick={() => col.sortable && handleSort(col.key)}
               >
                 <div className="flex items-center space-x-1">
-                  <span>{column.label}</span>
-                  {column.sortable && sortKey === column.key && (
+                  <span>{col.label}</span>
+                  {col.sortable && sortKey === col.key && (
                     <span className="text-blue-600">
                       {sortDirection === 'asc' ? '↑' : '↓'}
                     </span>
@@ -54,22 +46,24 @@ export const Table: React.FC<TableProps> = ({
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
-          {data.map((row, index) => (
-            <tr key={index} className="hover:bg-gray-50">
-              {columns.map((column) => (
-                <td key={column.key} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {column.render ? column.render(row[column.key], row) : row[column.key]}
+          {data.length === 0 && (
+            <tr>
+              <td colSpan={columns.length} className="text-center py-12 text-gray-500">
+                No data available
+              </td>
+            </tr>
+          )}
+          {data.map((row, idx) => (
+            <tr key={idx} className="hover:bg-gray-50">
+              {columns.map((col) => (
+                <td key={String(col.key)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  {col.render ? col.render(row[col.key], row) : (row[col.key] as unknown as React.ReactNode)}
                 </td>
               ))}
             </tr>
           ))}
         </tbody>
       </table>
-      {data.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-gray-500">No data available</p>
-        </div>
-      )}
     </div>
   );
-};
+}

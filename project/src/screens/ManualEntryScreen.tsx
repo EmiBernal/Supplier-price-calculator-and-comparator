@@ -66,13 +66,16 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
           productCode: formData.productCode,
           productName: formData.productName,
           companyType: formData.companyType,
+          company: formData.company,
         }),
       });
 
       if (!res.ok) {
-        console.error('Error en respuesta de check-product:', res.status);
-        return false;
-      }
+      const errorText = await res.text();
+      console.error('Error en respuesta de check-product:', res.status, errorText);
+      return false;
+    }
+
 
       const data = await res.json();
 

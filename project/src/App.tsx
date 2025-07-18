@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Screen } from './types'; // Ajusta la ruta según tu estructura
+import { useState, useEffect } from 'react';
+import { Screen } from './types'; // Ajustá la ruta según tu estructura
 import { HomeScreen } from './screens/HomeScreen';
 import { ManualEntryScreen } from './screens/ManualEntryScreen';
-import { EquivalencesScreen } from './screens/EquivalencesScreen';
 import { CompareScreen } from './screens/CompareScreen';
+import { MainEquivalences } from './screens/mainEquivalences'; // Importá MainEquivalences
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
@@ -17,14 +17,14 @@ function App() {
         setIsInitialized(true);
       } catch (error) {
         console.error('Failed to initialize backend:', error);
-        setIsInitialized(true); // continuar igual
+        setIsInitialized(true); // continuar igual aunque falle backend
       }
     };
 
     initializeApp();
   }, []);
 
-   const handleNavigate = (screen: Screen) => {
+  const handleNavigate = (screen: Screen) => {
     setCurrentScreen(screen);
   };
 
@@ -43,7 +43,7 @@ function App() {
     <div className="min-h-screen bg-gray-50">
       {currentScreen === 'home' && <HomeScreen onNavigate={handleNavigate} />}
       {currentScreen === 'manual' && <ManualEntryScreen onNavigate={handleNavigate} />}
-      {currentScreen === 'equivalences' && <EquivalencesScreen onNavigate={handleNavigate} />}
+      {currentScreen === 'equivalences' && <MainEquivalences onNavigate={handleNavigate} />}
       {currentScreen === 'compare' && <CompareScreen onNavigate={handleNavigate} />}
     </div>
   );
