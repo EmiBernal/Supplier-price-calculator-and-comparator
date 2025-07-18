@@ -246,27 +246,28 @@ app.post('/api/products', (req, res) => {
     companyType,
     company,
     date,
+    linkAsEquivalent = null, // Puede ser true, false o null
   } = req.body;
 
   if (!productCode || !productName || netPrice == null || finalPrice == null || !companyType || !date) {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
   }
 
-  // Función para crear relación y eliminar de no relacionados
   const createRelationAndClean = (idListaPrecios, idListaInterna) => {
     return new Promise((resolve, reject) => {
-      const insertRelSQL = `
-        INSERT OR IGNORE INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
-        VALUES (?, ?, 'automatic')
-      `;
-      db.run(insertRelSQL, [idListaPrecios, idListaInterna], function (err) {
+      const checkSQL = `SELECT 1 FROM relacion_articulos WHERE id_lista_precios = ? AND id_lista_interna = ?`;
+      db.get(checkSQL, [idListaPrecios, idListaInterna], (err, row) => {
         if (err) return reject(err);
+        if (row) return resolve();
 
-        // Eliminar de no relacionados
-        db.run(`DELETE FROM articulos_no_relacionados WHERE id_lista_precios = ?`, [idListaPrecios]);
-        db.run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = ?`, [idListaInterna]);
+        const insertRelSQL = `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion) VALUES (?, ?, 'automatic')`;
+        db.run(insertRelSQL, [idListaPrecios, idListaInterna], function (err2) {
+          if (err2) return reject(err2);
 
-        resolve();
+          db.run(`DELETE FROM articulos_no_relacionados WHERE id_lista_precios = ?`, [idListaPrecios]);
+          db.run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = ?`, [idListaInterna]);
+          resolve();
+        });
       });
     });
   };
@@ -274,14 +275,10 @@ app.post('/api/products', (req, res) => {
   if (companyType === 'Proveedor') {
     const selectExactSQL = `SELECT * FROM lista_precios WHERE cod_externo = ? AND nom_externo = ? AND proveedor = ? AND tipo_empresa = ?`;
     db.get(selectExactSQL, [productCode, productName, company, companyType], async (err, exactProduct) => {
-      if (err) {
-        console.error('Error buscando producto proveedor exacto:', err);
-        return res.status(500).json({ error: 'Error base de datos' });
-      }
+      if (err) return res.status(500).json({ error: 'Error base de datos' });
 
       try {
         if (exactProduct) {
-          // Actualizar precios que hayan cambiado
           const updates = [];
           const params = [];
 
@@ -298,72 +295,67 @@ app.post('/api/products', (req, res) => {
             params.push(productCode, productName, company, companyType);
             const updateSQL = `UPDATE lista_precios SET ${updates.join(', ')} WHERE cod_externo = ? AND nom_externo = ? AND proveedor = ? AND tipo_empresa = ?`;
             await new Promise((resolve, reject) => {
-              db.run(updateSQL, params, function (e) {
-                if (e) reject(e);
-                else resolve();
-              });
+              db.run(updateSQL, params, (e) => (e ? reject(e) : resolve()));
             });
           }
-
           return res.status(200).json({ success: true, updated: updates.length > 0, message: 'Producto actualizado' });
         }
 
-        // No existe exacto, insertar y buscar relación con Gampack
         const insertSQL = `INSERT INTO lista_precios (cod_externo, nom_externo, precio_neto, precio_final, tipo_empresa, fecha, proveedor) VALUES (?, ?, ?, ?, ?, ?, ?)`;
         db.run(insertSQL, [productCode, productName, netPrice, finalPrice, companyType, date, company], function (e) {
-          if (e) {
-            console.error('Error insertando producto proveedor:', e);
-            return res.status(500).json({ error: 'Error base de datos' });
-          }
+          if (e) return res.status(500).json({ error: 'Error base de datos' });
 
           const newId = this.lastID;
 
-          // Buscar coincidencia en lista_interna para relacionar
-          const selectGampackSQL = `SELECT * FROM lista_interna WHERE cod_interno = ? OR nom_interno = ?`;
-          db.get(selectGampackSQL, [productCode, productName], (err2, gampackProd) => {
-            if (err2) {
-              console.error('Error buscando producto Gampack para relacionar:', err2);
-              return res.status(500).json({ error: 'Error base de datos' });
-            }
+          const selectGampackSQL = `SELECT * FROM lista_interna WHERE cod_interno = ? OR nom_interno = ? LIMIT 1`;
+          db.get(selectGampackSQL, [productCode, productName], async (err2, gampackProd) => {
+            if (err2) return res.status(500).json({ error: 'Error base de datos' });
 
             if (gampackProd) {
-              createRelationAndClean(newId, gampackProd.id_interno)
-                .then(() => {
+              if (linkAsEquivalent === true) {
+                try {
+                  await createRelationAndClean(newId, gampackProd.id_interno);
                   return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
-                })
-                .catch((err) => {
-                  console.error('Error creando relación:', err);
+                } catch (error) {
                   return res.status(500).json({ error: 'Error creando relación' });
+                }
+              } else if (linkAsEquivalent === false) {
+                const insertNoRelacionadosSQL = `INSERT OR IGNORE INTO articulos_no_relacionados (id_lista_precios, motivo) VALUES (?, ?)`;
+                db.run(insertNoRelacionadosSQL, [newId, 'Usuario rechazó sugerencia de relación'], (err3) => {
+                  if (err3) return res.status(500).json({ error: 'Error base de datos' });
+                  return res.status(201).json({ success: true, message: 'Producto creado sin relación' });
                 });
+              } else {
+                return res.status(200).json({
+                  success: true,
+                  suggestedMatch: {
+                    id: gampackProd.id_interno,
+                    code: gampackProd.cod_interno,
+                    name: gampackProd.nom_interno,
+                    companyType: 'Gampack',
+                  },
+                });
+              }
             } else {
-              // No hay relación, insertamos en articulos_no_relacionados
               const insertNoRelacionadosSQL = `INSERT OR IGNORE INTO articulos_no_relacionados (id_lista_precios, motivo) VALUES (?, ?)`;
               db.run(insertNoRelacionadosSQL, [newId, 'No se encontró coincidencia por código ni nombre'], (err3) => {
-                if (err3) {
-                  console.error('Error insertando en articulos_no_relacionados:', err3);
-                  return res.status(500).json({ error: 'Error base de datos' });
-                }
+                if (err3) return res.status(500).json({ error: 'Error base de datos' });
                 return res.status(201).json({ success: true, message: 'Producto creado y agregado a no relacionados' });
               });
             }
           });
         });
       } catch (error) {
-        console.error('Error en proceso proveedor:', error);
         return res.status(500).json({ error: 'Error interno' });
       }
     });
   } else if (companyType === 'Gampack') {
     const selectExactSQL = `SELECT * FROM lista_interna WHERE cod_interno = ? AND nom_interno = ?`;
     db.get(selectExactSQL, [productCode, productName], async (err, exactProduct) => {
-      if (err) {
-        console.error('Error buscando producto Gampack exacto:', err);
-        return res.status(500).json({ error: 'Error base de datos' });
-      }
+      if (err) return res.status(500).json({ error: 'Error base de datos' });
 
       try {
         if (exactProduct) {
-          // Actualizar precios que hayan cambiado
           const updates = [];
           const params = [];
 
@@ -380,58 +372,57 @@ app.post('/api/products', (req, res) => {
             params.push(productCode, productName);
             const updateSQL = `UPDATE lista_interna SET ${updates.join(', ')} WHERE cod_interno = ? AND nom_interno = ?`;
             await new Promise((resolve, reject) => {
-              db.run(updateSQL, params, function (e) {
-                if (e) reject(e);
-                else resolve();
-              });
+              db.run(updateSQL, params, (e) => (e ? reject(e) : resolve()));
             });
           }
-
           return res.status(200).json({ success: true, updated: updates.length > 0, message: 'Producto actualizado' });
         }
 
-        // Insertar nuevo producto Gampack
         const insertSQL = `INSERT INTO lista_interna (cod_interno, nom_interno, precio_neto, precio_final, fecha) VALUES (?, ?, ?, ?, ?)`;
         db.run(insertSQL, [productCode, productName, netPrice, finalPrice, date], function (e) {
-          if (e) {
-            console.error('Error insertando producto Gampack:', e);
-            return res.status(500).json({ error: 'Error base de datos' });
-          }
+          if (e) return res.status(500).json({ error: 'Error base de datos' });
 
           const newId = this.lastID;
 
-          // Buscar producto proveedor para relacionar
-          const selectProveedorSQL = `SELECT * FROM lista_precios WHERE cod_externo = ? OR nom_externo = ?`;
-          db.get(selectProveedorSQL, [productCode, productName], (err2, proveedorProd) => {
-            if (err2) {
-              console.error('Error buscando producto proveedor para relacionar:', err2);
-              return res.status(500).json({ error: 'Error base de datos' });
-            }
+          const selectProveedorSQL = `SELECT * FROM lista_precios WHERE cod_externo = ? OR nom_externo = ? LIMIT 1`;
+          db.get(selectProveedorSQL, [productCode, productName], async (err2, proveedorProd) => {
+            if (err2) return res.status(500).json({ error: 'Error base de datos' });
 
             if (proveedorProd) {
-              createRelationAndClean(proveedorProd.id_externo, newId)
-                .then(() => {
+              if (linkAsEquivalent === true) {
+                try {
+                  await createRelationAndClean(proveedorProd.id_externo, newId);
                   return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
-                })
-                .catch((err) => {
-                  console.error('Error creando relación:', err);
+                } catch (error) {
                   return res.status(500).json({ error: 'Error creando relación' });
+                }
+              } else if (linkAsEquivalent === false) {
+                const insertNoRelacionadosSQL = `INSERT OR IGNORE INTO articulos_gampack_no_relacionados (id_lista_interna, motivo) VALUES (?, ?)`;
+                db.run(insertNoRelacionadosSQL, [newId, 'Usuario rechazó sugerencia de relación'], (err3) => {
+                  if (err3) return res.status(500).json({ error: 'Error base de datos' });
+                  return res.status(201).json({ success: true, message: 'Producto creado sin relación' });
                 });
+              } else {
+                return res.status(200).json({
+                  success: true,
+                  suggestedMatch: {
+                    id: proveedorProd.id_externo,
+                    code: proveedorProd.cod_externo,
+                    name: proveedorProd.nom_externo,
+                    companyType: 'Proveedor',
+                  },
+                });
+              }
             } else {
-              // No hay relación, insertamos en articulos_gampack_no_relacionados
               const insertNoRelacionadosSQL = `INSERT OR IGNORE INTO articulos_gampack_no_relacionados (id_lista_interna, motivo) VALUES (?, ?)`;
               db.run(insertNoRelacionadosSQL, [newId, 'No se encontró coincidencia por código ni nombre'], (err3) => {
-                if (err3) {
-                  console.error('Error insertando en articulos_gampack_no_relacionados:', err3);
-                  return res.status(500).json({ error: 'Error base de datos' });
-                }
+                if (err3) return res.status(500).json({ error: 'Error base de datos' });
                 return res.status(201).json({ success: true, message: 'Producto creado y agregado a no relacionados' });
               });
             }
           });
         });
       } catch (error) {
-        console.error('Error en proceso Gampack:', error);
         return res.status(500).json({ error: 'Error interno' });
       }
     });
@@ -439,7 +430,6 @@ app.post('/api/products', (req, res) => {
     return res.status(400).json({ error: 'Tipo de empresa no válido' });
   }
 });
-
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`);

@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS articulos_no_relacionados (
     UNIQUE (id_lista_precios)
 );
 
--- Tabla para productos internos no relacionados (Gampack)
+-- Tabla para productos internos no relacionados 
 CREATE TABLE IF NOT EXISTS articulos_gampack_no_relacionados (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     id_lista_interna INTEGER NOT NULL,
