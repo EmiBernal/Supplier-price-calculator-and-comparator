@@ -20,7 +20,7 @@ CREATE TABLE lista_precios (
     id_externo INTEGER PRIMARY KEY AUTOINCREMENT,
     nom_externo TEXT NOT NULL,
     cod_externo TEXT NOT NULL,
-    precio_neto REAL NOT NULL,
+  precio_neto REAL NOT NULL,
     precio_final REAL NOT NULL,
     tipo_empresa TEXT NOT NULL,
     fecha TEXT NOT NULL,
@@ -45,8 +45,7 @@ CREATE TABLE relacion_articulos (
     criterio_relacion TEXT NOT NULL,
     FOREIGN KEY (id_lista_precios) REFERENCES lista_precios(id_externo) ON DELETE CASCADE,
     FOREIGN KEY (id_lista_interna) REFERENCES lista_interna(id_interno) ON DELETE CASCADE,
-    UNIQUE (id_lista_precios),
-    UNIQUE (id_lista_interna)
+    UNIQUE(id_lista_precios, id_lista_interna)
 );
 
 CREATE TABLE articulos_no_relacionados (
