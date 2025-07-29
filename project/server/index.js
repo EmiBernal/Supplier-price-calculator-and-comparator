@@ -246,7 +246,7 @@ app.post('/api/products', (req, res) => {
     companyType,
     company,
     date,
-    linkAsEquivalent = null, // Puede ser true, false o null
+    linkAsEquivalent = null,
   } = req.body;
 
   if (!productCode || !productName || netPrice == null || finalPrice == null || !companyType || !date) {
@@ -255,17 +255,29 @@ app.post('/api/products', (req, res) => {
 
   const createRelationAndClean = (idListaPrecios, idListaInterna) => {
     return new Promise((resolve, reject) => {
+      console.log('🧩 Verificando si ya existe la relación');
+      console.log('ID lista precios:', idListaPrecios);
+      console.log('ID lista interna:', idListaInterna);
+
       const checkSQL = `SELECT 1 FROM relacion_articulos WHERE id_lista_precios = ? AND id_lista_interna = ?`;
       db.get(checkSQL, [idListaPrecios, idListaInterna], (err, row) => {
         if (err) return reject(err);
-        if (row) return resolve();
+        if (row) {
+          console.log('⚠️ La relación ya existe, no se inserta');
+          return resolve();
+        }
 
+        console.log('✅ Insertando nueva relación...');
         const insertRelSQL = `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion) VALUES (?, ?, 'automatic')`;
         db.run(insertRelSQL, [idListaPrecios, idListaInterna], function (err2) {
-          if (err2) return reject(err2);
+          if (err2) {
+            console.error('❌ Error insertando relación:', err2.message);
+            return reject(err2);
+          }
 
           db.run(`DELETE FROM articulos_no_relacionados WHERE id_lista_precios = ?`, [idListaPrecios]);
           db.run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = ?`, [idListaInterna]);
+          console.log('🧹 Relación insertada correctamente y no relacionados limpiados');
           resolve();
         });
       });
@@ -306,34 +318,28 @@ app.post('/api/products', (req, res) => {
           if (e) return res.status(500).json({ error: 'Error base de datos' });
 
           const newId = this.lastID;
+          console.log('✅ Producto insertado en lista_precios con ID:', newId);
 
           const selectGampackSQL = `SELECT * FROM lista_interna WHERE cod_interno = ? OR nom_interno = ? LIMIT 1`;
           db.get(selectGampackSQL, [productCode, productName], async (err2, gampackProd) => {
             if (err2) return res.status(500).json({ error: 'Error base de datos' });
 
+            console.log('🔍 ¿Existe match en lista_interna?', !!gampackProd);
+            console.log('📩 linkAsEquivalent recibido:', linkAsEquivalent);
+
             if (gampackProd) {
-              if (linkAsEquivalent === true) {
+              if (linkAsEquivalent !== false) {
                 try {
                   await createRelationAndClean(newId, gampackProd.id_interno);
                   return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
                 } catch (error) {
                   return res.status(500).json({ error: 'Error creando relación' });
                 }
-              } else if (linkAsEquivalent === false) {
+              } else {
                 const insertNoRelacionadosSQL = `INSERT OR IGNORE INTO articulos_no_relacionados (id_lista_precios, motivo) VALUES (?, ?)`;
                 db.run(insertNoRelacionadosSQL, [newId, 'Usuario rechazó sugerencia de relación'], (err3) => {
                   if (err3) return res.status(500).json({ error: 'Error base de datos' });
                   return res.status(201).json({ success: true, message: 'Producto creado sin relación' });
-                });
-              } else {
-                return res.status(200).json({
-                  success: true,
-                  suggestedMatch: {
-                    id: gampackProd.id_interno,
-                    code: gampackProd.cod_interno,
-                    name: gampackProd.nom_interno,
-                    companyType: 'Gampack',
-                  },
                 });
               }
             } else {
@@ -383,34 +389,28 @@ app.post('/api/products', (req, res) => {
           if (e) return res.status(500).json({ error: 'Error base de datos' });
 
           const newId = this.lastID;
+          console.log('✅ Producto insertado en lista_interna con ID:', newId);
 
           const selectProveedorSQL = `SELECT * FROM lista_precios WHERE cod_externo = ? OR nom_externo = ? LIMIT 1`;
           db.get(selectProveedorSQL, [productCode, productName], async (err2, proveedorProd) => {
             if (err2) return res.status(500).json({ error: 'Error base de datos' });
 
+            console.log('🔍 ¿Existe match en lista_precios?', !!proveedorProd);
+            console.log('📩 linkAsEquivalent recibido:', linkAsEquivalent);
+
             if (proveedorProd) {
-              if (linkAsEquivalent === true) {
+              if (linkAsEquivalent !== false) {
                 try {
                   await createRelationAndClean(proveedorProd.id_externo, newId);
                   return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
                 } catch (error) {
                   return res.status(500).json({ error: 'Error creando relación' });
                 }
-              } else if (linkAsEquivalent === false) {
+              } else {
                 const insertNoRelacionadosSQL = `INSERT OR IGNORE INTO articulos_gampack_no_relacionados (id_lista_interna, motivo) VALUES (?, ?)`;
                 db.run(insertNoRelacionadosSQL, [newId, 'Usuario rechazó sugerencia de relación'], (err3) => {
                   if (err3) return res.status(500).json({ error: 'Error base de datos' });
                   return res.status(201).json({ success: true, message: 'Producto creado sin relación' });
-                });
-              } else {
-                return res.status(200).json({
-                  success: true,
-                  suggestedMatch: {
-                    id: proveedorProd.id_externo,
-                    code: proveedorProd.cod_externo,
-                    name: proveedorProd.nom_externo,
-                    companyType: 'Proveedor',
-                  },
                 });
               }
             } else {
@@ -430,6 +430,7 @@ app.post('/api/products', (req, res) => {
     return res.status(400).json({ error: 'Tipo de empresa no válido' });
   }
 });
+
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`);

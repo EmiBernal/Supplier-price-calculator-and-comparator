@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Navigation } from '../components/Navigation';
 import { Input } from '../components/Input';
-import { Table } from '../components/Table';
+import { Table, Column } from '../components/Table';
 import { PriceComparison } from '../tipos/database';
 import { Search, TrendingUp, TrendingDown, Equal } from 'lucide-react';
 import { Screen } from '../types';
@@ -14,7 +14,7 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   const [comparisons, setComparisons] = useState<PriceComparison[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
-  const [sortKey, setSortKey] = useState<string>('finalPrice');
+  const [sortKey, setSortKey] = useState<keyof PriceComparison | ''>('internalFinalPrice');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
@@ -39,83 +39,85 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     loadComparisons(searchTerm);
   };
 
-  const handleSort = (key: string) => {
-    const newDirection = sortKey === key && sortDirection === 'asc' ? 'desc' : 'asc';
-    setSortKey(key);
-    setSortDirection(newDirection);
+  const handleSort = (key: keyof PriceComparison) => {
+  const newDirection = sortKey === key && sortDirection === 'asc' ? 'desc' : 'asc';
+  setSortKey(key);
+  setSortDirection(newDirection);
 
-    const sorted = [...comparisons].sort((a, b) => {
-      const aValue = a[key as keyof PriceComparison];
-      const bValue = b[key as keyof PriceComparison];
+  const sorted = [...comparisons].sort((a, b) => {
+    const aValue = a[key];
+    const bValue = b[key];
 
-      if (typeof aValue === 'number' && typeof bValue === 'number') {
-        return newDirection === 'asc' ? aValue - bValue : bValue - aValue;
-      }
-
-      if (aValue < bValue) return newDirection === 'asc' ? -1 : 1;
-      if (aValue > bValue) return newDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-
-    setComparisons(sorted);
-  };
-
-  const columns = [
-    { key: 'internalProduct', label: 'Producto Interno', sortable: true },
-    { key: 'externalProduct', label: 'Producto Externo', sortable: true },
-    { key: 'supplier', label: 'Proveedor', sortable: true },
-    {
-      key: 'internalNetPrice',
-      label: 'Neto Interno',
-      sortable: true,
-      render: (value: number) => `$${value.toFixed(2)}`
-    },
-    {
-      key: 'externalNetPrice',
-      label: 'Neto Externo',
-      sortable: true,
-      render: (value: number) => `$${value.toFixed(2)}`
-    },
-    {
-      key: 'internalFinalPrice',
-      label: 'Final Interno',
-      sortable: true,
-      render: (value: number) => `$${value.toFixed(2)}`
-    },
-    {
-      key: 'externalFinalPrice',
-      label: 'Final Externo',
-      sortable: true,
-      render: (value: number) => `$${value.toFixed(2)}`
-    },
-    {
-      key: 'internalDate',
-      label: 'Fecha Interna',
-      sortable: true
-    },
-    {
-      key: 'externalDate',
-      label: 'Fecha Externa',
-      sortable: true
-    },
-    {
-      key: 'companyType',
-      label: 'Tipo de Empresa',
-      sortable: true,
-      render: (value: string) => (
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-          value === 'supplier' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'
-        }`}>
-          {value.charAt(0).toUpperCase() + value.slice(1)}
-        </span>
-      )
-    },
-    {
-      key: 'saleConditions',
-      label: 'Condición de Relación',
-      sortable: true
+    if (typeof aValue === 'number' && typeof bValue === 'number') {
+      return newDirection === 'asc' ? aValue - bValue : bValue - aValue;
     }
-  ];
+
+    if (aValue < bValue) return newDirection === 'asc' ? -1 : 1;
+    if (aValue > bValue) return newDirection === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  setComparisons(sorted);
+};
+
+
+  const columns: Column<PriceComparison>[] = [
+  { key: 'internalProduct', label: 'Producto Interno', sortable: true },
+  { key: 'externalProduct', label: 'Producto Externo', sortable: true },
+  { key: 'supplier', label: 'Proveedor', sortable: true },
+  {
+    key: 'internalNetPrice',
+    label: 'Neto Interno',
+    sortable: true,
+    render: (value) => `$${(value as number).toFixed(2)}`
+  },
+  {
+    key: 'externalNetPrice',
+    label: 'Neto Externo',
+    sortable: true,
+    render: (value) => `$${(value as number).toFixed(2)}`
+  },
+  {
+    key: 'internalFinalPrice',
+    label: 'Final Interno',
+    sortable: true,
+    render: (value) => `$${(value as number).toFixed(2)}`
+  },
+  {
+    key: 'externalFinalPrice',
+    label: 'Final Externo',
+    sortable: true,
+    render: (value) => `$${(value as number).toFixed(2)}`
+  },
+  {
+    key: 'internalDate',
+    label: 'Fecha Interna',
+    sortable: true
+  },
+  {
+    key: 'externalDate',
+    label: 'Fecha Externa',
+    sortable: true
+  },
+  {
+    key: 'companyType',
+    label: 'Tipo de Empresa',
+    sortable: true,
+    render: (value) => (
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+        (value as string) === 'supplier' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'
+      }`}>
+        {(value as string).charAt(0).toUpperCase() + (value as string).slice(1)}
+      </span>
+    )
+  },
+  {
+    key: 'saleConditions',
+    label: 'Condición de Relación',
+    sortable: true
+  }
+];
+
 
   const stats = {
     totalProducts: comparisons.length,
