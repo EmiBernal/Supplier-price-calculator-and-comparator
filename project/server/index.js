@@ -200,12 +200,12 @@ function checkEquivalenceAndInsertNoRelacionado(productId, code, name, tipo, cal
   let insertNoRelacionadoParams = [];
 
   if (tipo === 'Proveedor') {
-    checkSQL = `SELECT * FROM lista_interna WHERE cod_interno = ? OR nom_interno = ? LIMIT 1`;
+    checkSQL = `SELECT * FROM lista_interna WHERE LOWER(cod_interno) = LOWER(?) OR LOWER(nom_interno) = LOWER(?) LIMIT 1`;
     params = [code, name];
     insertNoRelacionadoSQL = `INSERT INTO articulos_no_relacionados (id_lista_precios, motivo) VALUES (?, ?)`;
     insertNoRelacionadoParams = [productId, 'No se encontró coincidencia por código ni nombre'];
   } else if (tipo === 'Gampack') {
-    checkSQL = `SELECT * FROM lista_precios WHERE cod_externo = ? OR nom_externo = ? LIMIT 1`;
+    checkSQL = `SELECT * FROM lista_precios WHERE LOWER(cod_externo) = LOWER(?) OR LOWER(nom_externo) = LOWER(?) LIMIT 1`;
     params = [code, name];
     insertNoRelacionadoSQL = `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo) VALUES (?, ?)`;
     insertNoRelacionadoParams = [productId, 'No se encontró coincidencia por código ni nombre'];
@@ -285,7 +285,11 @@ app.post('/api/products', (req, res) => {
   };
 
   if (companyType === 'Proveedor') {
-    const selectExactSQL = `SELECT * FROM lista_precios WHERE cod_externo = ? AND nom_externo = ? AND proveedor = ? AND tipo_empresa = ?`;
+    const selectExactSQL = `
+      SELECT * FROM lista_precios 
+      WHERE LOWER(cod_externo) = LOWER(?) AND LOWER(nom_externo) = LOWER(?) 
+        AND proveedor = ? AND tipo_empresa = ?
+    `;
     db.get(selectExactSQL, [productCode, productName, company, companyType], async (err, exactProduct) => {
       if (err) return res.status(500).json({ error: 'Error base de datos' });
 
@@ -305,7 +309,12 @@ app.post('/api/products', (req, res) => {
 
           if (updates.length > 0) {
             params.push(productCode, productName, company, companyType);
-            const updateSQL = `UPDATE lista_precios SET ${updates.join(', ')} WHERE cod_externo = ? AND nom_externo = ? AND proveedor = ? AND tipo_empresa = ?`;
+            const updateSQL = `
+              UPDATE lista_precios 
+              SET ${updates.join(', ')} 
+              WHERE LOWER(cod_externo) = LOWER(?) AND LOWER(nom_externo) = LOWER(?) 
+                AND proveedor = ? AND tipo_empresa = ?
+            `;
             await new Promise((resolve, reject) => {
               db.run(updateSQL, params, (e) => (e ? reject(e) : resolve()));
             });
@@ -313,14 +322,22 @@ app.post('/api/products', (req, res) => {
           return res.status(200).json({ success: true, updated: updates.length > 0, message: 'Producto actualizado' });
         }
 
-        const insertSQL = `INSERT INTO lista_precios (cod_externo, nom_externo, precio_neto, precio_final, tipo_empresa, fecha, proveedor) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+        const insertSQL = `
+          INSERT INTO lista_precios 
+          (cod_externo, nom_externo, precio_neto, precio_final, tipo_empresa, fecha, proveedor) 
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `;
         db.run(insertSQL, [productCode, productName, netPrice, finalPrice, companyType, date, company], function (e) {
           if (e) return res.status(500).json({ error: 'Error base de datos' });
 
           const newId = this.lastID;
           console.log('✅ Producto insertado en lista_precios con ID:', newId);
 
-          const selectGampackSQL = `SELECT * FROM lista_interna WHERE cod_interno = ? OR nom_interno = ? LIMIT 1`;
+          const selectGampackSQL = `
+            SELECT * FROM lista_interna 
+            WHERE LOWER(cod_interno) = LOWER(?) OR LOWER(nom_interno) = LOWER(?) 
+            LIMIT 1
+          `;
           db.get(selectGampackSQL, [productCode, productName], async (err2, gampackProd) => {
             if (err2) return res.status(500).json({ error: 'Error base de datos' });
 
@@ -356,7 +373,10 @@ app.post('/api/products', (req, res) => {
       }
     });
   } else if (companyType === 'Gampack') {
-    const selectExactSQL = `SELECT * FROM lista_interna WHERE cod_interno = ? AND nom_interno = ?`;
+    const selectExactSQL = `
+      SELECT * FROM lista_interna 
+      WHERE LOWER(cod_interno) = LOWER(?) AND LOWER(nom_interno) = LOWER(?)
+    `;
     db.get(selectExactSQL, [productCode, productName], async (err, exactProduct) => {
       if (err) return res.status(500).json({ error: 'Error base de datos' });
 
@@ -376,7 +396,11 @@ app.post('/api/products', (req, res) => {
 
           if (updates.length > 0) {
             params.push(productCode, productName);
-            const updateSQL = `UPDATE lista_interna SET ${updates.join(', ')} WHERE cod_interno = ? AND nom_interno = ?`;
+            const updateSQL = `
+              UPDATE lista_interna 
+              SET ${updates.join(', ')} 
+              WHERE LOWER(cod_interno) = LOWER(?) AND LOWER(nom_interno) = LOWER(?)
+            `;
             await new Promise((resolve, reject) => {
               db.run(updateSQL, params, (e) => (e ? reject(e) : resolve()));
             });
@@ -384,14 +408,22 @@ app.post('/api/products', (req, res) => {
           return res.status(200).json({ success: true, updated: updates.length > 0, message: 'Producto actualizado' });
         }
 
-        const insertSQL = `INSERT INTO lista_interna (cod_interno, nom_interno, precio_neto, precio_final, fecha) VALUES (?, ?, ?, ?, ?)`;
+        const insertSQL = `
+          INSERT INTO lista_interna 
+          (cod_interno, nom_interno, precio_neto, precio_final, fecha) 
+          VALUES (?, ?, ?, ?, ?)
+        `;
         db.run(insertSQL, [productCode, productName, netPrice, finalPrice, date], function (e) {
           if (e) return res.status(500).json({ error: 'Error base de datos' });
 
           const newId = this.lastID;
           console.log('✅ Producto insertado en lista_interna con ID:', newId);
 
-          const selectProveedorSQL = `SELECT * FROM lista_precios WHERE cod_externo = ? OR nom_externo = ? LIMIT 1`;
+          const selectProveedorSQL = `
+            SELECT * FROM lista_precios 
+            WHERE LOWER(cod_externo) = LOWER(?) OR LOWER(nom_externo) = LOWER(?) 
+            LIMIT 1
+          `;
           db.get(selectProveedorSQL, [productCode, productName], async (err2, proveedorProd) => {
             if (err2) return res.status(500).json({ error: 'Error base de datos' });
 
@@ -430,6 +462,7 @@ app.post('/api/products', (req, res) => {
     return res.status(400).json({ error: 'Tipo de empresa no válido' });
   }
 });
+
 
 
 app.listen(PORT, () => {
