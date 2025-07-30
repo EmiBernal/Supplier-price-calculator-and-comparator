@@ -4,7 +4,6 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
 const app = express();
-const PORT = 4000;
 
 app.use(cors());
 app.use(express.json());
@@ -463,8 +462,4 @@ app.post('/api/products', (req, res) => {
   }
 });
 
-
-
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
-});
+module.exports = app;
