@@ -7,4 +7,13 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react', '@sqlite.org/sqlite-wasm'],
   },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:4000',  // Cambia 3000 por el puerto de tu backend Express
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 });

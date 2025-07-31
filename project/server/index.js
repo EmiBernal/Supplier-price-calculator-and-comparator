@@ -497,4 +497,60 @@ app.get('/api/products/search', (req, res) => {
   });
 });
 
+app.get('/api/price-comparisons', (req, res) => {
+  const search = req.query.search || '';
+  const searchLike = `%${search.toLowerCase()}%`;
+
+  const sql = `
+    SELECT 
+      li.nom_interno AS internalProduct,
+      lp.nom_externo AS externalProduct,
+      lp.proveedor AS supplier,
+      li.precio_neto AS internalNetPrice,
+      lp.precio_neto AS externalNetPrice,
+      li.precio_final AS internalFinalPrice,
+      lp.precio_final AS externalFinalPrice,
+      li.fecha AS internalDate,
+      lp.fecha AS externalDate,
+      lp.tipo_empresa AS companyType,
+      ra.criterio_relacion AS saleConditions
+    FROM relacion_articulos ra
+    JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
+    JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
+    WHERE LOWER(li.nom_interno) LIKE ? 
+       OR LOWER(lp.nom_externo) LIKE ? 
+       OR LOWER(lp.proveedor) LIKE ?
+  `;
+
+  db.all(sql, [searchLike, searchLike, searchLike], (err, rows) => {
+    if (err) {
+      console.error('Error al obtener comparaciones de precios:', err.message);
+      return res.status(500).json({ error: 'Error al obtener comparaciones de precios' });
+    }
+
+    const results = rows.map(row => {
+      const priceDifference = row.externalFinalPrice !== 0
+        ? ((row.internalFinalPrice - row.externalFinalPrice) / row.externalFinalPrice) * 100
+        : 0;
+
+      return {
+        internalProduct: row.internalProduct,
+        externalProduct: row.externalProduct,
+        supplier: row.supplier,
+        internalNetPrice: row.internalNetPrice,
+        externalNetPrice: row.externalNetPrice,
+        internalFinalPrice: row.internalFinalPrice,
+        externalFinalPrice: row.externalFinalPrice,
+        internalDate: row.internalDate,
+        externalDate: row.externalDate,
+        companyType: row.companyType === 'Gampack' ? 'supplier' : 'competitor',
+        saleConditions: row.saleConditions || 'Desconocido',
+        priceDifference: parseFloat(priceDifference.toFixed(2)),
+      };
+    });
+
+    res.json(results);
+  });
+});
+
 module.exports = app;

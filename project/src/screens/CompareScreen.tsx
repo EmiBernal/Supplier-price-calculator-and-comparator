@@ -21,19 +21,34 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     loadComparisons();
   }, []);
 
+  useEffect(() => {
+    const delayDebounce = setTimeout(() => {
+      loadComparisons(searchTerm);
+    }, 300);
+
+    return () => clearTimeout(delayDebounce);
+  }, [searchTerm]);
+
+
   const loadComparisons = async (search = '') => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/price-comparisons?search=${encodeURIComponent(search)}`);
-      if (!response.ok) throw new Error('Error fetching price comparisons');
-      const data: PriceComparison[] = await response.json();
+      const url = search.trim()
+        ? `/api/price-comparisons?search=${encodeURIComponent(search)}`
+        : `/api/price-comparisons`; // mismo endpoint sin query trae todo
+
+      const response = await fetch(url);
+      const text = await response.text(); 
+      const data = JSON.parse(text); 
       setComparisons(data);
     } catch (error) {
-      console.error('Error loading price comparisons:', error);
+      console.error('❌ Error parsing response:', error);
+      setComparisons([]);
     } finally {
       setLoading(false);
     }
   };
+
 
   const handleSearch = () => {
     loadComparisons(searchTerm);
@@ -91,30 +106,25 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   },
   {
     key: 'internalDate',
-    label: 'Fecha Interna',
+    label: 'Fecha Alta Interna',
     sortable: true
   },
   {
     key: 'externalDate',
-    label: 'Fecha Externa',
+    label: 'Fecha Alta Externa',
     sortable: true
   },
   {
-    key: 'companyType',
-    label: 'Tipo de Empresa',
+    key: 'saleConditions',
+    label: 'Relación',
     sortable: true,
     render: (value) => (
       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-        (value as string) === 'supplier' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'
+        (value as string) === 'automatic' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'
       }`}>
         {(value as string).charAt(0).toUpperCase() + (value as string).slice(1)}
       </span>
     )
-  },
-  {
-    key: 'saleConditions',
-    label: 'Condición de Relación',
-    sortable: true
   }
 ];
 
@@ -205,7 +215,6 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
                 placeholder="Buscar por producto o proveedor..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
                 className="pl-10"
               />
               <Search
