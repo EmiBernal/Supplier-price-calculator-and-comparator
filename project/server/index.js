@@ -497,6 +497,64 @@ app.get('/api/products/search', (req, res) => {
   });
 });
 
+app.delete('/api/no-relacionados/:tipo/:id', (req, res) => {
+  let tipo = req.params.tipo.toLowerCase();
+  const id = req.params.id;
+
+  // Aceptar 'proveedor' o 'proveedores'
+  if (tipo === 'proveedores') tipo = 'proveedor';
+  if (tipo === 'gampacks') tipo = 'gampack';
+
+  let tablePrincipal = '';
+  let idFieldPrincipal = '';
+  let tableNoRelacionado = '';
+  let idFieldNoRelacionado = '';
+
+  if (tipo === 'proveedor') {
+    tablePrincipal = 'lista_precios';
+    idFieldPrincipal = 'id_externo';
+    tableNoRelacionado = 'articulos_no_relacionados';
+    idFieldNoRelacionado = 'id_lista_precios';
+  } else if (tipo === 'gampack') {
+    tablePrincipal = 'lista_interna';
+    idFieldPrincipal = 'id_interno';
+    tableNoRelacionado = 'articulos_gampack_no_relacionados';
+    idFieldNoRelacionado = 'id_lista_interna';
+  } else {
+    return res.status(400).json({ error: 'Tipo inválido. Debe ser "proveedor" o "gampack".' });
+  }
+
+  // Primero elimino de tabla principal
+  const sqlDeletePrincipal = `DELETE FROM ${tablePrincipal} WHERE ${idFieldPrincipal} = ?`;
+
+  db.run(sqlDeletePrincipal, [id], function (err) {
+    if (err) {
+      console.error('Error al eliminar de tabla principal:', err.message);
+      return res.status(500).json({ error: 'Error al eliminar producto de tabla principal' });
+    }
+
+    if (this.changes === 0) {
+      return res.status(404).json({ error: 'Producto no encontrado en tabla principal' });
+    }
+
+    // Si eliminó producto principal, elimino también de no relacionados
+    const sqlDeleteNoRelacionado = `DELETE FROM ${tableNoRelacionado} WHERE ${idFieldNoRelacionado} = ?`;
+
+    db.run(sqlDeleteNoRelacionado, [id], function (err2) {
+      if (err2) {
+        console.error('Error al eliminar de tabla no relacionados:', err2.message);
+        // Aunque falla eliminar en no relacionados, ya eliminó producto principal, aviso pero 200
+        return res.status(200).json({
+          warning: 'Producto eliminado de tabla principal, pero error eliminando en no relacionados',
+          errorNoRelacionados: err2.message,
+        });
+      }
+
+      res.status(200).json({ success: true, message: 'Producto eliminado correctamente de ambas tablas' });
+    });
+  });
+});
+
 app.get('/api/price-comparisons', (req, res) => {
   const search = req.query.search || '';
   const searchLike = `%${search.toLowerCase()}%`;
