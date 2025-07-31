@@ -462,4 +462,39 @@ app.post('/api/products', (req, res) => {
   }
 });
 
+app.get('/api/products/search', (req, res) => {
+  const { by, q } = req.query;
+
+  const allowedFields = {
+    productCode: 'cod_externo',
+    productName: 'nom_externo',
+    company: 'proveedor',
+  };
+
+  const dbField = allowedFields[by];
+  if (!dbField) {
+    return res.status(400).json({ error: 'Campo de búsqueda no válido' });
+  }
+
+  const sql = `SELECT * FROM lista_precios WHERE ${dbField} LIKE ? ORDER BY fecha DESC`;
+  const param = `%${q}%`;
+
+  db.all(sql, [param], (err, rows) => {
+    if (err) {
+      console.error('Error en búsqueda:', err.message);
+      return res.status(500).json({ error: 'Error al buscar productos' });
+    }
+
+    const result = rows.map(row => ({
+      productCode: row.cod_externo,
+      productName: row.nom_externo,
+      company: row.proveedor,
+      netPrice: row.precio_neto,
+      finalPrice: row.precio_final,
+    }));
+
+    res.json({ products: result });
+  });
+});
+
 module.exports = app;

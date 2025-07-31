@@ -35,6 +35,10 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
   const [existingProduct, setExistingProduct] = useState<any | null>(null);
   const [wantsToUpdate, setWantsToUpdate] = useState<boolean | null>(null);
   const [crossSuggestedProduct, setCrossSuggestedProduct] = useState<any | null>(null);
+  const [searchCriteria, setSearchCriteria] = useState<'productCode' | 'productName' | 'company'>('productCode');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
 
   const inferCompanyType = (name: string): 'Gampack' | 'Proveedor' =>
     name.trim().toLowerCase() === 'gampack' ? 'Gampack' : 'Proveedor';
@@ -95,6 +99,32 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
       return false;
     }
   };
+
+  const handleLiveSearch = async (query: string) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    setSearching(true);
+
+    try {
+      const res = await fetch(`${BASE_URL}/api/products/search?by=${searchCriteria}&q=${encodeURIComponent(query)}`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text);
+      }
+
+      const data = await res.json();
+      setSearchResults(data.products || []);
+    } catch (error) {
+      console.error('Error al buscar productos:', error);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -229,6 +259,21 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     handleSubmitWithLink(accept);
   };
 
+  const handleSuggestionClick = (prod: any) => {
+    setFormData({
+      company: prod.company,
+      productCode: prod.productCode,
+      productName: prod.productName,
+      netPrice: prod.netPrice ?? '',
+      finalPrice: prod.finalPrice ?? '',
+      date: new Date().toISOString().split('T')[0],
+    });
+
+    setSearchQuery('');
+    setSearchResults([]);
+    setWantsToUpdate(true); // asumimos que se quiere editar
+  };
+
   const handleInputChange = (field: keyof FormData, value: string | number) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) setErrors((prev) => ({ ...prev, [field]: '' }));
@@ -245,6 +290,68 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
       <Navigation onBack={() => onNavigate('home')} title="Registro Manual de Productos" />
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8">
+        {/* Búsqueda de productos */}
+          <div className="mb-6 p-6 border border-gray-300 rounded-lg bg-white shadow-sm relative max-w-4xl mx-auto">
+            <h2 className="text-xl font-semibold mb-5 text-gray-900 text-center">Buscar productos</h2>
+            <div className="flex flex-col md:flex-row md:items-end md:space-x-6 space-y-5 md:space-y-0">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Buscar por</label>
+                <select
+                  className="w-full border border-gray-300 rounded-md p-3 text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  value={searchCriteria}
+                  onChange={(e) => {
+                    const value = e.target.value as 'productCode' | 'productName' | 'company';
+                    setSearchCriteria(value);
+                    setSearchQuery('');
+                    setSearchResults([]);
+                  }}
+                >
+                  <option value="productCode">Código</option>
+                  <option value="productName">Nombre</option>
+                  <option value="company">Proveedor</option>
+                </select>
+              </div>
+
+              <div className="flex-1 relative">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Consulta</label>
+                <input
+                  className="w-full border border-gray-300 rounded-md p-3 text-gray-700 shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSearchQuery(val);
+                    handleLiveSearch(val);
+                  }}
+                  placeholder="Escribe tu búsqueda"
+                  autoComplete="off"
+                />
+
+                {/* Lista desplegable con resultados */}
+                {searchResults.length > 0 && (
+                  <ul className="absolute z-50 mt-2 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+                    {searchResults.map((prod, idx) => (
+                      <li
+                        key={idx}
+                        className="px-5 py-3 text-sm text-gray-800 hover:bg-blue-100 cursor-pointer transition-colors"
+                        onClick={() => handleSuggestionClick(prod)}
+                      >
+                        <strong>{prod.productName}</strong> — <span className="text-gray-600">{prod.productCode}</span> | <span className="italic">{prod.company}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <Button
+                type="button"
+                onClick={() => handleLiveSearch(searchQuery)}
+                className="whitespace-nowrap px-8 py-3 text-white bg-blue-600 rounded-md shadow hover:bg-blue-700 transition-colors"
+              >
+                Buscar
+              </Button>
+            </div>
+          </div>
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
             {/* Empresa */}
