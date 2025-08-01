@@ -80,8 +80,8 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     }
 
     const body = {
-      id_lista_precios: selectedExternal.id_externo,    // CORREGIDO: id_externo
-      id_lista_interna: selectedInternal.id_interno,    // CORREGIDO: id_interno
+      id_lista_precios: selectedExternal.id_externo,    
+      id_lista_interna: selectedInternal.id_interno,    
       criterio: 'manual',
     };
 

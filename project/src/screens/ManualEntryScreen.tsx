@@ -134,7 +134,6 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     setSuccessMessage('');
     setErrors({});
 
-    // Si ya hay sugerencia de relación, no hacer nada aquí, se espera confirmación
     if (crossSuggestedProduct) {
       setIsSubmitting(false);
       return;
@@ -303,6 +302,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                     setSearchCriteria(value);
                     setSearchQuery('');
                     setSearchResults([]);
+                    handleLiveSearch(''); 
                   }}
                 >
                   <option value="productCode">Código</option>
@@ -341,14 +341,6 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                   </ul>
                 )}
               </div>
-
-              <Button
-                type="button"
-                onClick={() => handleLiveSearch(searchQuery)}
-                className="whitespace-nowrap px-8 py-3 text-white bg-blue-600 rounded-md shadow hover:bg-blue-700 transition-colors"
-              >
-                Buscar
-              </Button>
             </div>
           </div>
         <form onSubmit={handleSubmit} className="space-y-6">
