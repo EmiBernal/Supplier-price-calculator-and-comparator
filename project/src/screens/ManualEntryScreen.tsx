@@ -125,7 +125,6 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
   };
 
 
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 

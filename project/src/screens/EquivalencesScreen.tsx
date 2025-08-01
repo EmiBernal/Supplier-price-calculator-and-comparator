@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Navigation } from '../components/Navigation';
 import { Input } from '../components/Input';
-import { Table, Column } from '../components/Table';  // Asegúrate que exportas Column también
+import { Table, Column } from '../components/Table';
 import { ProductEquivalence } from '../tipos/database';
 import { Search } from 'lucide-react';
 import { Screen } from '../types';
@@ -16,6 +16,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
   const [loading, setLoading] = useState(false);
   const [sortKey, setSortKey] = useState<keyof ProductEquivalence | ''>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [deleteMode, setDeleteMode] = useState(false);
 
   const fetchEquivalences = async (search = '') => {
     setLoading(true);
@@ -57,12 +58,48 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
     setEquivalences(sorted);
   };
 
+  const handleDelete = async (equivalence: ProductEquivalence) => {
+    console.log('Intentando eliminar relación con ID:', equivalence.id);
+
+    const confirm = window.confirm('¿Estás seguro que deseas eliminar esta relación? Esta acción no se puede deshacer.');
+    if (!confirm) {
+      console.log('El usuario canceló la eliminación.');
+      return;
+    }
+
+    try {
+      console.log('Equivalence completo antes del fetch:', equivalence);
+      const res = await fetch(`http://localhost:4000/api/relacion/${equivalence.id}`, {
+        method: 'DELETE',
+      });
+
+      console.log('Respuesta recibida del backend:', res.status, res.statusText);
+      const text = await res.text();
+      console.log('Contenido de la respuesta:', text);
+
+      if (!res.ok) {
+        throw new Error(`Error al eliminar relación: ${res.status} ${res.statusText}`);
+      }
+
+      await fetchEquivalences(searchTerm);
+      alert('Relación eliminada correctamente');
+    } catch (err) {
+      console.error('Error capturado al eliminar relación:', err);
+      alert('Error eliminando la relación');
+    }
+  };
+
+
+  const toggleDeleteMode = () => {
+    setDeleteMode((prev) => !prev);
+  };
+
   const columns: Column<ProductEquivalence>[] = [
     { key: 'supplier', label: 'Proveedor', sortable: true },
     { key: 'externalCode', label: 'Código Externo', sortable: true },
     { key: 'externalName', label: 'Nombre Externo', sortable: true },
-    { key: 'externalDate', label: 'Fecha Agregado Externo', sortable: true },
-    { key: 'internalSupplier', label: 'Proveedor Interno', sortable: false }, // Siempre Gampack
+    { key: 'externalDate', label: 'Fecha Agredo Externo', sortable: true },
+    { key: 'internalSupplier', label: 'Proveedor Interno', sortable: false },
     { key: 'internalCode', label: 'Código Interno', sortable: true },
     { key: 'internalName', label: 'Nombre Interno', sortable: true },
     { key: 'internalDate', label: 'Fecha Agregado Interno', sortable: true },
@@ -92,7 +129,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
             {value.charAt(0).toUpperCase() + value.slice(1)}
           </span>
         );
-      }
+      },
     },
   ];
 
@@ -130,7 +167,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
             </p>
           </div>
 
-          {/* Tabla con datos */}
+          {/* Tabla */}
           <div className="overflow-x-auto">
             {loading ? (
               <p>Cargando...</p>
@@ -143,8 +180,22 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
                 sortKey={sortKey}
                 sortDirection={sortDirection}
                 onSort={handleSort}
+                onRowClick={deleteMode ? (row: ProductEquivalence) => handleDelete(row) : undefined}
+                getRowKey={(row) => row.id} // ✅ agregado
               />
             )}
+          </div>
+
+          {/* Botón Eliminar Relación */}
+          <div className="mt-4">
+            <button
+              onClick={toggleDeleteMode}
+              className={`px-4 py-2 rounded-md font-semibold transition-colors duration-150 ${
+                deleteMode ? 'bg-gray-200 text-red-600 border border-red-600' : 'bg-red-600 text-white hover:bg-red-700'
+              }`}
+            >
+              {deleteMode ? 'Cancelar eliminación' : 'Eliminar relación'}
+            </button>
           </div>
         </div>
       </div>

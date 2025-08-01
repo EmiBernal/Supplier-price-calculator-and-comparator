@@ -13,9 +13,19 @@ interface TableProps<T> {
   onSort?: (key: keyof T) => void;
   sortKey?: keyof T | '';
   sortDirection?: 'asc' | 'desc';
+  onRowClick?: (row: T) => void;
+  getRowKey?: (row: T) => string | number;
 }
 
-export function Table<T>({ columns, data, onSort, sortKey, sortDirection }: TableProps<T>) {
+export function Table<T>({
+  columns,
+  data,
+  onSort,
+  sortKey,
+  sortDirection,
+  onRowClick,
+  getRowKey,
+}: TableProps<T>) {
   const handleSort = (key: keyof T) => {
     if (onSort) onSort(key);
   };
@@ -54,10 +64,16 @@ export function Table<T>({ columns, data, onSort, sortKey, sortDirection }: Tabl
             </tr>
           )}
           {data.map((row, idx) => (
-            <tr key={idx} className="hover:bg-gray-50">
+            <tr
+              key={getRowKey ? getRowKey(row) : idx}
+              className={`hover:bg-red-100 cursor-pointer transition-colors duration-150`}
+              onClick={() => onRowClick?.(row)}
+            >
               {columns.map((col) => (
                 <td key={String(col.key)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {col.render ? col.render(row[col.key], row) : (row[col.key] as unknown as React.ReactNode)}
+                  {col.render
+                    ? col.render(row[col.key], row)
+                    : (row[col.key] as unknown as React.ReactNode)}
                 </td>
               ))}
             </tr>

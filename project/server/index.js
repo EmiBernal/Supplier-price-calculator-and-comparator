@@ -462,6 +462,77 @@ app.post('/api/products', (req, res) => {
   }
 });
 
+app.delete('/api/relacion/:id', (req, res) => {
+  const id = req.params.id;
+  console.log('DELETE recibido para id:', id);
+
+  if (isNaN(Number(id))) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+
+  const sqlGetRelation = `
+    SELECT id_lista_precios, id_lista_interna 
+    FROM relacion_articulos 
+    WHERE id = ?
+  `;
+
+  db.get(sqlGetRelation, [id], (err, row) => {
+    if (err) {
+      console.error('Error al buscar relación:', err.message);
+      return res.status(500).json({ error: 'Error en base de datos' });
+    }
+
+    if (!row) {
+      console.log('Relación no encontrada para id:', id);
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+
+    console.log('Relación encontrada:', row);
+
+    const { id_lista_precios, id_lista_interna } = row;
+
+    db.serialize(() => {
+      db.run('BEGIN TRANSACTION');
+
+      db.run(`DELETE FROM relacion_articulos WHERE id = ?`, [id], function (errDelRel) {
+        if (errDelRel) {
+          console.error('Error eliminando relación:', errDelRel.message);
+          db.run('ROLLBACK');
+          return res.status(500).json({ error: 'Error eliminando relación' });
+        }
+        console.log(`Relación con id=${id} eliminada, filas afectadas: ${this.changes}`);
+
+        db.run(`DELETE FROM lista_precios WHERE id_externo = ?`, [id_lista_precios], function (errDelProv) {
+          if (errDelProv) {
+            console.error('Error eliminando producto proveedor:', errDelProv.message);
+            db.run('ROLLBACK');
+            return res.status(500).json({ error: 'Error eliminando producto proveedor' });
+          }
+          console.log(`Producto proveedor eliminado, filas afectadas: ${this.changes}`);
+
+          db.run(`DELETE FROM lista_interna WHERE id_interno = ?`, [id_lista_interna], function (errDelInt) {
+            if (errDelInt) {
+              console.error('Error eliminando producto interno:', errDelInt.message);
+              db.run('ROLLBACK');
+              return res.status(500).json({ error: 'Error eliminando producto interno' });
+            }
+            console.log(`Producto interno eliminado, filas afectadas: ${this.changes}`);
+
+            db.run('COMMIT', (commitErr) => {
+              if (commitErr) {
+                console.error('Error haciendo commit:', commitErr.message);
+                return res.status(500).json({ error: 'Error en la base de datos' });
+              }
+
+              res.status(200).json({ success: true, message: 'Relación y productos eliminados correctamente' });
+            });
+          });
+        });
+      });
+    });
+  });
+});
+
 app.get('/api/products/search', (req, res) => {
   const { by, q } = req.query;
 
@@ -494,6 +565,120 @@ app.get('/api/products/search', (req, res) => {
     }));
 
     res.json({ products: result });
+  });
+});
+
+app.delete('/api/no-relacionados/:tipo/:id', (req, res) => {
+  let tipo = req.params.tipo.toLowerCase();
+  const id = req.params.id;
+
+  // Aceptar 'proveedor' o 'proveedores'
+  if (tipo === 'proveedores') tipo = 'proveedor';
+  if (tipo === 'gampacks') tipo = 'gampack';
+
+  let tablePrincipal = '';
+  let idFieldPrincipal = '';
+  let tableNoRelacionado = '';
+  let idFieldNoRelacionado = '';
+
+  if (tipo === 'proveedor') {
+    tablePrincipal = 'lista_precios';
+    idFieldPrincipal = 'id_externo';
+    tableNoRelacionado = 'articulos_no_relacionados';
+    idFieldNoRelacionado = 'id_lista_precios';
+  } else if (tipo === 'gampack') {
+    tablePrincipal = 'lista_interna';
+    idFieldPrincipal = 'id_interno';
+    tableNoRelacionado = 'articulos_gampack_no_relacionados';
+    idFieldNoRelacionado = 'id_lista_interna';
+  } else {
+    return res.status(400).json({ error: 'Tipo inválido. Debe ser "proveedor" o "gampack".' });
+  }
+
+  // Primero elimino de tabla principal
+  const sqlDeletePrincipal = `DELETE FROM ${tablePrincipal} WHERE ${idFieldPrincipal} = ?`;
+
+  db.run(sqlDeletePrincipal, [id], function (err) {
+    if (err) {
+      console.error('Error al eliminar de tabla principal:', err.message);
+      return res.status(500).json({ error: 'Error al eliminar producto de tabla principal' });
+    }
+
+    if (this.changes === 0) {
+      return res.status(404).json({ error: 'Producto no encontrado en tabla principal' });
+    }
+
+    // Si eliminó producto principal, elimino también de no relacionados
+    const sqlDeleteNoRelacionado = `DELETE FROM ${tableNoRelacionado} WHERE ${idFieldNoRelacionado} = ?`;
+
+    db.run(sqlDeleteNoRelacionado, [id], function (err2) {
+      if (err2) {
+        console.error('Error al eliminar de tabla no relacionados:', err2.message);
+        // Aunque falla eliminar en no relacionados, ya eliminó producto principal, aviso pero 200
+        return res.status(200).json({
+          warning: 'Producto eliminado de tabla principal, pero error eliminando en no relacionados',
+          errorNoRelacionados: err2.message,
+        });
+      }
+
+      res.status(200).json({ success: true, message: 'Producto eliminado correctamente de ambas tablas' });
+    });
+  });
+});
+
+app.get('/api/price-comparisons', (req, res) => {
+  const search = req.query.search || '';
+  const searchLike = `%${search.toLowerCase()}%`;
+
+  const sql = `
+    SELECT 
+      li.nom_interno AS internalProduct,
+      lp.nom_externo AS externalProduct,
+      lp.proveedor AS supplier,
+      li.precio_neto AS internalNetPrice,
+      lp.precio_neto AS externalNetPrice,
+      li.precio_final AS internalFinalPrice,
+      lp.precio_final AS externalFinalPrice,
+      li.fecha AS internalDate,
+      lp.fecha AS externalDate,
+      lp.tipo_empresa AS companyType,
+      ra.criterio_relacion AS saleConditions
+    FROM relacion_articulos ra
+    JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
+    JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
+    WHERE LOWER(li.nom_interno) LIKE ? 
+       OR LOWER(lp.nom_externo) LIKE ? 
+       OR LOWER(lp.proveedor) LIKE ?
+  `;
+
+  db.all(sql, [searchLike, searchLike, searchLike], (err, rows) => {
+    if (err) {
+      console.error('Error al obtener comparaciones de precios:', err.message);
+      return res.status(500).json({ error: 'Error al obtener comparaciones de precios' });
+    }
+
+    const results = rows.map(row => {
+      const priceDifference = row.externalFinalPrice !== 0
+        ? ((row.internalFinalPrice - row.externalFinalPrice) / row.externalFinalPrice) * 100
+        : 0;
+
+      return {
+        internalProduct: row.internalProduct,
+        externalProduct: row.externalProduct,
+        supplier: row.supplier,
+        internalNetPrice: row.internalNetPrice,
+        externalNetPrice: row.externalNetPrice,
+        internalFinalPrice: row.internalFinalPrice,
+        externalFinalPrice: row.externalFinalPrice,
+        internalDate: row.internalDate,
+        externalDate: row.externalDate,
+        companyType: row.companyType === 'Gampack' ? 'supplier' : 'competitor',
+        saleConditions: row.saleConditions || 'Desconocido',
+        priceDifference: parseFloat(priceDifference.toFixed(2)),
+      };
+    });
+
+    res.json(results);
   });
 });
 

@@ -34,9 +34,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
               <div className="p-4 bg-blue-100 rounded-full group-hover:bg-blue-200 transition-colors">
                 <Upload size={32} className="text-blue-600" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-800">Ingreso de productos</h3>
+              <h3 className="text-xl font-semibold text-gray-800">Ingreso y busqueda  </h3>
               <p className="text-gray-600 text-center">
-                Ingrese manualmente datos de precios de productos de proveedores y competidores
+                Cargar o buscar productos manualmente              
               </p>
             </div>
           </div>
@@ -51,7 +51,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
               </div>
               <h3 className="text-xl font-semibold text-gray-800">Equivalencias entre productos</h3>
               <p className="text-gray-600 text-center">
-                Revisar las relaciones de correspondencia y equivalencia de productos sin resolver
+                Gestionar relaciones de productos
               </p>
             </div>
           </div>
@@ -66,7 +66,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
               </div>
               <h3 className="text-xl font-semibold text-gray-800">Comparador de precios</h3>
               <p className="text-gray-600 text-center">
-                Analizar las diferencias de precios entre proveedores y competidores
+                Análisis de precios
               </p>
             </div>
           </div>
