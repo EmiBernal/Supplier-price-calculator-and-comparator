@@ -462,6 +462,77 @@ app.post('/api/products', (req, res) => {
   }
 });
 
+app.delete('/api/relacion/:id', (req, res) => {
+  const id = req.params.id;
+  console.log('DELETE recibido para id:', id);
+
+  if (isNaN(Number(id))) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+
+  const sqlGetRelation = `
+    SELECT id_lista_precios, id_lista_interna 
+    FROM relacion_articulos 
+    WHERE id = ?
+  `;
+
+  db.get(sqlGetRelation, [id], (err, row) => {
+    if (err) {
+      console.error('Error al buscar relación:', err.message);
+      return res.status(500).json({ error: 'Error en base de datos' });
+    }
+
+    if (!row) {
+      console.log('Relación no encontrada para id:', id);
+      return res.status(404).json({ error: 'Relación no encontrada' });
+    }
+
+    console.log('Relación encontrada:', row);
+
+    const { id_lista_precios, id_lista_interna } = row;
+
+    db.serialize(() => {
+      db.run('BEGIN TRANSACTION');
+
+      db.run(`DELETE FROM relacion_articulos WHERE id = ?`, [id], function (errDelRel) {
+        if (errDelRel) {
+          console.error('Error eliminando relación:', errDelRel.message);
+          db.run('ROLLBACK');
+          return res.status(500).json({ error: 'Error eliminando relación' });
+        }
+        console.log(`Relación con id=${id} eliminada, filas afectadas: ${this.changes}`);
+
+        db.run(`DELETE FROM lista_precios WHERE id_externo = ?`, [id_lista_precios], function (errDelProv) {
+          if (errDelProv) {
+            console.error('Error eliminando producto proveedor:', errDelProv.message);
+            db.run('ROLLBACK');
+            return res.status(500).json({ error: 'Error eliminando producto proveedor' });
+          }
+          console.log(`Producto proveedor eliminado, filas afectadas: ${this.changes}`);
+
+          db.run(`DELETE FROM lista_interna WHERE id_interno = ?`, [id_lista_interna], function (errDelInt) {
+            if (errDelInt) {
+              console.error('Error eliminando producto interno:', errDelInt.message);
+              db.run('ROLLBACK');
+              return res.status(500).json({ error: 'Error eliminando producto interno' });
+            }
+            console.log(`Producto interno eliminado, filas afectadas: ${this.changes}`);
+
+            db.run('COMMIT', (commitErr) => {
+              if (commitErr) {
+                console.error('Error haciendo commit:', commitErr.message);
+                return res.status(500).json({ error: 'Error en la base de datos' });
+              }
+
+              res.status(200).json({ success: true, message: 'Relación y productos eliminados correctamente' });
+            });
+          });
+        });
+      });
+    });
+  });
+});
+
 app.get('/api/products/search', (req, res) => {
   const { by, q } = req.query;
 
