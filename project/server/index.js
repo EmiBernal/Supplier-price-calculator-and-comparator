@@ -536,32 +536,71 @@ app.delete('/api/relacion/:id', (req, res) => {
 app.get('/api/products/search', (req, res) => {
   const { by, q } = req.query;
 
-  const allowedFields = {
-    productCode: 'cod_externo',
-    productName: 'nom_externo',
-    company: 'proveedor',
-  };
+  if (!q || typeof q !== 'string') {
+    return res.status(400).json({ error: 'Falta la query de búsqueda' });
+  }
 
-  const dbField = allowedFields[by];
-  if (!dbField) {
+  const searchTerm = `%${q}%`;
+  let sql = '';
+  let params = [];
+
+  if (by === 'productCode') {
+    sql = `
+      SELECT cod_externo AS productCode, nom_externo AS productName, proveedor AS company, precio_neto AS netPrice, precio_final AS finalPrice, fecha
+      FROM lista_precios
+      WHERE cod_externo LIKE ?
+
+      UNION
+
+      SELECT cod_interno AS productCode, nom_interno AS productName, 'Gampack' AS company, precio_neto AS netPrice, precio_final AS finalPrice, fecha
+      FROM lista_interna
+      WHERE cod_interno LIKE ?
+
+      ORDER BY fecha DESC
+    `;
+    params = [searchTerm, searchTerm];
+
+  } else if (by === 'productName') {
+    sql = `
+      SELECT cod_externo AS productCode, nom_externo AS productName, proveedor AS company, precio_neto AS netPrice, precio_final AS finalPrice, fecha
+      FROM lista_precios
+      WHERE nom_externo LIKE ?
+
+      UNION
+
+      SELECT cod_interno AS productCode, nom_interno AS productName, 'Gampack' AS company, precio_neto AS netPrice, precio_final AS finalPrice, fecha
+      FROM lista_interna
+      WHERE nom_interno LIKE ?
+
+      ORDER BY fecha DESC
+    `;
+    params = [searchTerm, searchTerm];
+
+  } else if (by === 'company') {
+    sql = `
+      SELECT cod_externo AS productCode, nom_externo AS productName, proveedor AS company, precio_neto AS netPrice, precio_final AS finalPrice, fecha
+      FROM lista_precios
+      WHERE proveedor LIKE ?
+      ORDER BY fecha DESC
+    `;
+    params = [searchTerm];
+
+  } else {
     return res.status(400).json({ error: 'Campo de búsqueda no válido' });
   }
 
-  const sql = `SELECT * FROM lista_precios WHERE ${dbField} LIKE ? ORDER BY fecha DESC`;
-  const param = `%${q}%`;
-
-  db.all(sql, [param], (err, rows) => {
+  db.all(sql, params, (err, rows) => {
     if (err) {
       console.error('Error en búsqueda:', err.message);
       return res.status(500).json({ error: 'Error al buscar productos' });
     }
 
     const result = rows.map(row => ({
-      productCode: row.cod_externo,
-      productName: row.nom_externo,
-      company: row.proveedor,
-      netPrice: row.precio_neto,
-      finalPrice: row.precio_final,
+      productCode: row.productCode,
+      productName: row.productName,
+      company: row.company,
+      netPrice: row.netPrice,
+      finalPrice: row.finalPrice,
     }));
 
     res.json({ products: result });
