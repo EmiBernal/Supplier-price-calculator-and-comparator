@@ -4,6 +4,7 @@ import { Input } from '../components/Input';
 import { Table, Column } from '../components/Table';
 import { ProductEquivalence } from '../tipos/database';
 import { Search } from 'lucide-react';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Screen } from '../types';
 
 interface EquivalencesScreenProps {
@@ -17,6 +18,9 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
   const [sortKey, setSortKey] = useState<keyof ProductEquivalence | ''>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [deleteMode, setDeleteMode] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<ProductEquivalence | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+
 
   const fetchEquivalences = async (search = '') => {
     setLoading(true);
@@ -58,36 +62,32 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
     setEquivalences(sorted);
   };
 
-  const handleDelete = async (equivalence: ProductEquivalence) => {
-    console.log('Intentando eliminar relación con ID:', equivalence.id);
+  const handleDelete = (equivalence: ProductEquivalence) => {
+    setPendingDelete(equivalence);
+    setShowConfirm(true);
+  };
 
-    const confirm = window.confirm('¿Estás seguro que deseas eliminar esta relación? Esta acción no se puede deshacer.');
-    if (!confirm) {
-      console.log('El usuario canceló la eliminación.');
-      return;
-    }
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
 
     try {
-      console.log('Equivalence completo antes del fetch:', equivalence);
-      const res = await fetch(`http://localhost:4000/api/relacion/${equivalence.id}`, {
+      const res = await fetch(`http://localhost:4000/api/relacion/${pendingDelete.id}`, {
         method: 'DELETE',
       });
 
-      console.log('Respuesta recibida del backend:', res.status, res.statusText);
-      const text = await res.text();
-      console.log('Contenido de la respuesta:', text);
-
-      if (!res.ok) {
-        throw new Error(`Error al eliminar relación: ${res.status} ${res.statusText}`);
-      }
+      if (!res.ok) throw new Error('Error al eliminar');
 
       await fetchEquivalences(searchTerm);
       alert('Relación eliminada correctamente');
     } catch (err) {
-      console.error('Error capturado al eliminar relación:', err);
-      alert('Error eliminando la relación');
+      console.error('Error al eliminar:', err);
+      alert('Error eliminando relación');
+    } finally {
+      setPendingDelete(null);
+      setShowConfirm(false);
     }
   };
+
 
 
   const toggleDeleteMode = () => {
@@ -199,6 +199,16 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        visible={showConfirm}
+        title="¿Eliminar relación?"
+        message="¿Estás seguro que deseas eliminar esta relación? Esta acción no se puede deshacer."
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          setPendingDelete(null);
+          setShowConfirm(false);
+        }}
+      />
     </div>
   );
 };
