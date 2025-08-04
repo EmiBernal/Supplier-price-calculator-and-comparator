@@ -64,7 +64,6 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     return Object.keys(newErrors).length === 0;
   };
 
-  // No es llamada directamente: solo para referencia
   const checkProductExists = async (): Promise<boolean> => {
     try {
       const res = await fetch(`${BASE_URL}/api/check-product`, {

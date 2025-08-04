@@ -4,7 +4,6 @@ import { Input } from '../components/Input';
 import { Table, Column } from '../components/Table';
 import { ProductEquivalence } from '../tipos/database';
 import { Search } from 'lucide-react';
-import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Screen } from '../types';
 
 interface EquivalencesScreenProps {
@@ -18,14 +17,12 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
   const [sortKey, setSortKey] = useState<keyof ProductEquivalence | ''>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [deleteMode, setDeleteMode] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<ProductEquivalence | null>(null);
-  const [showConfirm, setShowConfirm] = useState(false);
 
-
-  const fetchEquivalences = async (search = '') => {
+  // Función para obtener equivalencias con filtro (puede ser cadena vacía para traer todo)
+  const fetchEquivalences = async (search: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:4000/api/equivalencias?search=${encodeURIComponent(search)}`);
+      const res = await fetch(`http://localhost:4000/api/equivalencias-search?search=${encodeURIComponent(search)}`);
       if (!res.ok) throw new Error('Error al obtener equivalencias');
       const data = await res.json();
       setEquivalences(data);
@@ -37,13 +34,20 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
     }
   };
 
+  // Al cargar la página, trae TODO
   useEffect(() => {
-    fetchEquivalences();
+    fetchEquivalences('');
   }, []);
 
-  const handleSearch = () => {
-    fetchEquivalences(searchTerm);
-  };
+  // Cuando cambia searchTerm, busca con debounce de 300ms
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      fetchEquivalences(searchTerm.trim());
+      console.log('Buscando equivalencias para:', searchTerm);
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [searchTerm]);
 
   const handleSort = (key: keyof ProductEquivalence) => {
     const newDirection = sortKey === key && sortDirection === 'asc' ? 'desc' : 'asc';
@@ -62,43 +66,15 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
     setEquivalences(sorted);
   };
 
-  const handleDelete = (equivalence: ProductEquivalence) => {
-    setPendingDelete(equivalence);
-    setShowConfirm(true);
-  };
-
-  const confirmDelete = async () => {
-    if (!pendingDelete) return;
-
-    try {
-      const res = await fetch(`http://localhost:4000/api/relacion/${pendingDelete.id}`, {
-        method: 'DELETE',
-      });
-
-      if (!res.ok) throw new Error('Error al eliminar');
-
-      await fetchEquivalences(searchTerm);
-      alert('Relación eliminada correctamente');
-    } catch (err) {
-      console.error('Error al eliminar:', err);
-      alert('Error eliminando relación');
-    } finally {
-      setPendingDelete(null);
-      setShowConfirm(false);
-    }
-  };
-
-
-
   const toggleDeleteMode = () => {
     setDeleteMode((prev) => !prev);
   };
 
   const columns: Column<ProductEquivalence>[] = [
-    { key: 'supplier', label: 'Proveedor', sortable: true },
+    { key: 'supplier', label: 'Proveedor Externo', sortable: true },
     { key: 'externalCode', label: 'Código Externo', sortable: true },
     { key: 'externalName', label: 'Nombre Externo', sortable: true },
-    { key: 'externalDate', label: 'Fecha Agredo Externo', sortable: true },
+    { key: 'externalDate', label: 'Fecha Agregado Externo', sortable: true },
     { key: 'internalSupplier', label: 'Proveedor Interno', sortable: false },
     { key: 'internalCode', label: 'Código Interno', sortable: true },
     { key: 'internalName', label: 'Nombre Interno', sortable: true },
@@ -149,30 +125,31 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
                 placeholder="Busca por nombre o por código..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
                 className="pl-10"
               />
               <Search
                 size={20}
                 className="absolute left-3 top-2.5 text-gray-400 cursor-pointer"
-                onClick={handleSearch}
+                onClick={() => fetchEquivalences(searchTerm.trim())} // búsqueda al click
               />
             </div>
           </div>
 
           {/* Resultados */}
           <div className="mb-4">
-            <p className="text-sm text-gray-600">
-              {loading ? 'Cargando...' : `Mostrando ${equivalences.length} equivalencia${equivalences.length !== 1 ? 's' : ''}`}
-            </p>
+            {equivalences.length === 0 ? (
+              <p className="text-sm text-gray-600">No hay equivalencias para mostrar</p>
+            ) : (
+              <p className="text-sm text-gray-600">
+                Mostrando {equivalences.length} equivalencia{equivalences.length !== 1 ? 's' : ''}
+              </p>
+            )}
           </div>
 
           {/* Tabla */}
           <div className="overflow-x-auto">
-            {loading ? (
-              <p>Cargando...</p>
-            ) : equivalences.length === 0 ? (
-              <p>No hay equivalencias para mostrar</p>
+            {equivalences.length === 0 ? (
+              <p className="text-sm text-gray-600">No hay equivalencias para mostrar</p>
             ) : (
               <Table
                 columns={columns}
@@ -180,8 +157,8 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
                 sortKey={sortKey}
                 sortDirection={sortDirection}
                 onSort={handleSort}
-                onRowClick={deleteMode ? (row: ProductEquivalence) => handleDelete(row) : undefined}
-                getRowKey={(row) => row.id} // ✅ agregado
+                onRowClick={deleteMode ? (row: ProductEquivalence) => {/* tu lógica eliminar */} : undefined}
+                getRowKey={(row) => row.id}
               />
             )}
           </div>
@@ -199,16 +176,6 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
           </div>
         </div>
       </div>
-      <ConfirmDialog
-        visible={showConfirm}
-        title="¿Eliminar relación?"
-        message="¿Estás seguro que deseas eliminar esta relación? Esta acción no se puede deshacer."
-        onConfirm={confirmDelete}
-        onCancel={() => {
-          setPendingDelete(null);
-          setShowConfirm(false);
-        }}
-      />
     </div>
   );
 };

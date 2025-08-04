@@ -17,6 +17,12 @@ const db = new sqlite3.Database(dbPath, err => {
   }
 });
 
+app.use((req, res, next) => {
+  console.log(`Petición: ${req.method} ${req.url}`);
+  next();
+});
+
+
 app.get('/api/equivalencias', (req, res) => {
   const sql = `
     SELECT 
@@ -721,4 +727,47 @@ app.get('/api/price-comparisons', (req, res) => {
   });
 });
 
+console.log('Definiendo ruta /api/equivalencias');
+app.get('/api/equivalencias-search', (req, res) => {
+  console.log('Entré en la ruta /api/equivalencias', req.query.search);
+  const { search = '' } = req.query;
+  const searchTerm = `%${search}%`;
+
+  const sql = `
+    SELECT
+      ra.id,
+      lp.proveedor AS supplier,
+      lp.cod_externo AS externalCode,
+      lp.nom_externo AS externalName,
+      lp.fecha AS externalDate,
+      -- li.proveedor no existe en lista_interna, podemos poner NULL o un texto fijo
+      NULL AS internalSupplier,
+      li.cod_interno AS internalCode,
+      li.nom_interno AS internalName,
+      li.fecha AS internalDate,
+      ra.criterio_relacion AS matchingCriteria
+    FROM relacion_articulos ra
+    LEFT JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
+    LEFT JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
+    WHERE
+      lp.cod_externo LIKE ? OR
+      lp.nom_externo LIKE ? OR
+      li.cod_interno LIKE ? OR
+      li.nom_interno LIKE ?
+    ORDER BY ra.id DESC
+  `;
+
+  const params = [searchTerm, searchTerm, searchTerm, searchTerm];
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error('Error al buscar equivalencias:', err.message);
+      return res.status(500).json({ error: 'Error en la búsqueda' });
+    }
+
+    res.json(rows);
+  });
+});
+
 module.exports = app;
+
