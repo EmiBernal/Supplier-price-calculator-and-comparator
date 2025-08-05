@@ -35,7 +35,7 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     try {
       const url = search.trim()
         ? `/api/price-comparisons?search=${encodeURIComponent(search)}`
-        : `/api/price-comparisons`; // mismo endpoint sin query trae todo
+        : `/api/price-comparisons`; 
 
       const response = await fetch(url);
       const text = await response.text(); 
@@ -174,37 +174,6 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* Estadísticas secundarias con íconos */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center space-x-3">
-            <TrendingUp className="text-gray-500" />
-            <div>
-              <div className="text-sm text-gray-600">Prom. Diferencia (%)</div>
-              <div className="text-xl font-bold text-gray-900">{stats.avgPriceDifference.toFixed(2)}%</div>
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center space-x-3">
-            <TrendingDown className="text-blue-500" />
-            <div>
-              <div className="text-sm text-gray-600">Mejor Precio Interno</div>
-              <div className="text-xl font-bold text-blue-700">{stats.betterInternal}</div>
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center space-x-3">
-            <TrendingUp className="text-orange-500" />
-            <div>
-              <div className="text-sm text-gray-600">Mejor Precio Externo</div>
-              <div className="text-xl font-bold text-orange-600">{stats.betterExternal}</div>
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center space-x-3">
-            <Equal className="text-gray-500" />
-            <div>
-              <div className="text-sm text-gray-600">Precios Iguales</div>
-              <div className="text-xl font-bold text-gray-700">{stats.samePrice}</div>
-            </div>
-          </div>
-        </div>
 
         {/* Sección principal */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
