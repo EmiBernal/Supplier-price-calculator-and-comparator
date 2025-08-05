@@ -178,19 +178,7 @@ const columns: Column<ProductEquivalence>[] = [
               />
             </div>
           </div>
-
-          {/* Info */}
-          <div className="mb-4">
-            {equivalences.length === 0 ? (
-              <p className="text-sm text-gray-600">No hay equivalencias para mostrar</p>
-            ) : (
-              <p className="text-sm text-gray-600">
-                Mostrando {equivalences.length} equivalencia{equivalences.length !== 1 ? 's' : ''}
-              </p>
-            )}
-          </div>
-
-          {/* Tabla */}
+        {/* Tabla */}
           <div className="overflow-x-auto">
             {equivalences.length === 0 ? (
               <p className="text-sm text-gray-600">No hay equivalencias para mostrar</p>
