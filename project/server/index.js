@@ -17,12 +17,6 @@ const db = new sqlite3.Database(dbPath, err => {
   }
 });
 
-app.use((req, res, next) => {
-  console.log(`Petición: ${req.method} ${req.url}`);
-  next();
-});
-
-
 app.get('/api/equivalencias', (req, res) => {
   const sql = `
     SELECT 
@@ -470,9 +464,10 @@ app.post('/api/products', (req, res) => {
 
 app.delete('/api/relacion/:id', (req, res) => {
   const id = req.params.id;
-  console.log('DELETE recibido para id:', id);
+  console.log('🟠 DELETE recibido para id:', id);
 
   if (isNaN(Number(id))) {
+    console.log('🔴 ID inválido:', id);
     return res.status(400).json({ error: 'ID inválido' });
   }
 
@@ -484,16 +479,16 @@ app.delete('/api/relacion/:id', (req, res) => {
 
   db.get(sqlGetRelation, [id], (err, row) => {
     if (err) {
-      console.error('Error al buscar relación:', err.message);
+      console.error('❌ Error al buscar relación:', err.message);
       return res.status(500).json({ error: 'Error en base de datos' });
     }
 
     if (!row) {
-      console.log('Relación no encontrada para id:', id);
+      console.log('⚠️ Relación no encontrada para id:', id);
       return res.status(404).json({ error: 'Relación no encontrada' });
     }
 
-    console.log('Relación encontrada:', row);
+    console.log('🟢 Relación encontrada:', row);
 
     const { id_lista_precios, id_lista_interna } = row;
 
@@ -502,34 +497,38 @@ app.delete('/api/relacion/:id', (req, res) => {
 
       db.run(`DELETE FROM relacion_articulos WHERE id = ?`, [id], function (errDelRel) {
         if (errDelRel) {
-          console.error('Error eliminando relación:', errDelRel.message);
+          console.error('❌ Error eliminando relación:', errDelRel.message);
           db.run('ROLLBACK');
           return res.status(500).json({ error: 'Error eliminando relación' });
         }
-        console.log(`Relación con id=${id} eliminada, filas afectadas: ${this.changes}`);
+
+        console.log(`✅ Relación con id=${id} eliminada, filas afectadas: ${this.changes}`);
 
         db.run(`DELETE FROM lista_precios WHERE id_externo = ?`, [id_lista_precios], function (errDelProv) {
           if (errDelProv) {
-            console.error('Error eliminando producto proveedor:', errDelProv.message);
+            console.error('❌ Error eliminando producto proveedor:', errDelProv.message);
             db.run('ROLLBACK');
             return res.status(500).json({ error: 'Error eliminando producto proveedor' });
           }
-          console.log(`Producto proveedor eliminado, filas afectadas: ${this.changes}`);
+
+          console.log(`✅ Producto proveedor eliminado, filas afectadas: ${this.changes}`);
 
           db.run(`DELETE FROM lista_interna WHERE id_interno = ?`, [id_lista_interna], function (errDelInt) {
             if (errDelInt) {
-              console.error('Error eliminando producto interno:', errDelInt.message);
+              console.error('❌ Error eliminando producto interno:', errDelInt.message);
               db.run('ROLLBACK');
               return res.status(500).json({ error: 'Error eliminando producto interno' });
             }
-            console.log(`Producto interno eliminado, filas afectadas: ${this.changes}`);
+
+            console.log(`✅ Producto interno eliminado, filas afectadas: ${this.changes}`);
 
             db.run('COMMIT', (commitErr) => {
               if (commitErr) {
-                console.error('Error haciendo commit:', commitErr.message);
+                console.error('❌ Error haciendo commit:', commitErr.message);
                 return res.status(500).json({ error: 'Error en la base de datos' });
               }
 
+              console.log('🟢 Eliminación confirmada con COMMIT');
               res.status(200).json({ success: true, message: 'Relación y productos eliminados correctamente' });
             });
           });
@@ -727,9 +726,7 @@ app.get('/api/price-comparisons', (req, res) => {
   });
 });
 
-console.log('Definiendo ruta /api/equivalencias');
 app.get('/api/equivalencias-search', (req, res) => {
-  console.log('Entré en la ruta /api/equivalencias', req.query.search);
   const { search = '' } = req.query;
   const searchTerm = `%${search}%`;
 
