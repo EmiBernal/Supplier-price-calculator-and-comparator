@@ -321,7 +321,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                     setSearchQuery(val);
                     handleLiveSearch(val);
                   }}
-                  placeholder="Escribe tu búsqueda"
+                  placeholder="Escriba su búsqueda"
                   autoComplete="off"
                 />
 
@@ -350,7 +350,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
               value={formData.company}
               onChange={(e) => handleInputChange('company', e.target.value)}
               error={errors.supplier}
-              placeholder="Ingresa el nombre de la empresa (Gampack si es producto propio)"
+              placeholder="Ingrese nombre de empresa (Gampack si es propio)"  
             />
 
             {/* Tipo de empresa detectado */}
