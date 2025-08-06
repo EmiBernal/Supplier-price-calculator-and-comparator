@@ -81,18 +81,6 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   { key: 'externalProduct', label: 'Producto Externo', sortable: true },
   { key: 'supplier', label: 'Proveedor', sortable: true },
   {
-    key: 'internalNetPrice',
-    label: 'Neto Interno',
-    sortable: true,
-    render: (value) => `$${(value as number).toFixed(2)}`
-  },
-  {
-    key: 'externalNetPrice',
-    label: 'Neto Externo',
-    sortable: true,
-    render: (value) => `$${(value as number).toFixed(2)}`
-  },
-  {
     key: 'internalFinalPrice',
     label: 'Final Interno',
     sortable: true,
