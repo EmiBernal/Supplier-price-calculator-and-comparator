@@ -92,7 +92,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     setSearching(true);
 
     try {
-      const res = await fetch(`${BASE_URL}/api/products/search?by=${searchCriteria}&q=${encodeURIComponent(query)}`);
+      const res = await fetch(`${BASE_URL}/api/products/search/manual?by=${searchCriteria}&q=${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error(await res.text());
 
       const data = await res.json();
@@ -402,8 +402,14 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
 
             <div className="flex justify-end space-x-4">
               <Button type="button" variant="secondary" onClick={() => onNavigate('home')}>Volver</Button>
-              <Button type="submit" disabled={isSubmitting || (existingProduct && wantsToUpdate === null)}>
-                {isSubmitting ? 'Subiendo...' : 'Subir'}
+              <Button
+                type="submit"
+                disabled={
+                  isSubmitting ||
+                  (existingProduct && wantsToUpdate === null && !crossSuggestedProduct)
+                }
+              >
+              {isSubmitting ? 'Subiendo...' : 'Subir'}
               </Button>
             </div>
           </form>
