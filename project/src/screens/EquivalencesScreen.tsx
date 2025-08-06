@@ -23,7 +23,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
   const fetchEquivalences = async (search: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:4000/api/equivalencias-search?search=${encodeURIComponent(search)}`);
+      const res = await fetch(`http://localhost:4000/api/equivalencias?search=${encodeURIComponent(search)}`);
       if (!res.ok) throw new Error('Error al obtener equivalencias');
       const data = await res.json();
       setEquivalences(data);
