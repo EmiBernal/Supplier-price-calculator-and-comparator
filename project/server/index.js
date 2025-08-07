@@ -186,24 +186,43 @@ app.get('/api/relaciones', (req, res) => {
 });
 
 app.post('/api/relacionar-manual', (req, res) => {
-  const { id_lista_interna, id_lista_precios, criterio } = req.body;
+  const { id_lista_interna, ids_lista_precios, criterio } = req.body;
+
+  if (!id_lista_interna || !Array.isArray(ids_lista_precios) || ids_lista_precios.length === 0) {
+    return res.status(400).json({ error: 'Datos incompletos o inválidos' });
+  }
+
+  const placeholders = ids_lista_precios.map(() => '(?, ?, ?)').join(', ');
+  const params = ids_lista_precios.flatMap(id => [id, id_lista_interna, criterio]);
 
   const sql = `
-    INSERT OR IGNORE INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
-    VALUES (?, ?, ?)
+    INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
+    VALUES ${placeholders}
   `;
 
-  db.run(sql, [id_lista_precios, id_lista_interna, criterio || 'manual'], function (err) {
+  db.run(sql, params, function (err) {
     if (err) {
-      console.error('Error al crear relación manual:', err.message);
-      return res.status(500).json({ error: 'No se pudo crear la relación' });
+      console.error('Error al vincular productos:', err.message);
+      return res.status(500).json({ error: 'Error al vincular productos' });
     }
 
-    // Eliminar de tablas de no relacionados
-    db.run(`DELETE FROM articulos_no_relacionados WHERE id_lista_precios = ?`, [id_lista_precios]);
-    db.run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = ?`, [id_lista_interna]);
+    const deleteExternosSql = `
+      DELETE FROM articulos_no_relacionados WHERE id_lista_precios IN (${ids_lista_precios.map(() => '?').join(',')})
+    `;
+    db.run(deleteExternosSql, ids_lista_precios, (delErr) => {
+      if (delErr) {
+        console.error('Error eliminando artículos no relacionados (externos):', delErr.message);
+      }
+    });
 
-    res.json({ success: true });
+    const deleteInternoSql = `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = ?`;
+    db.run(deleteInternoSql, [id_lista_interna], (delErr) => {
+      if (delErr) {
+        console.error('Error eliminando artículo no relacionado (interno):', delErr.message);
+      }
+    });
+
+    res.status(200).json({ success: true });
   });
 });
 
