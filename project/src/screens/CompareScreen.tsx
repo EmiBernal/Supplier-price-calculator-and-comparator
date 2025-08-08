@@ -3,7 +3,7 @@ import { Navigation } from '../components/Navigation';
 import { Input } from '../components/Input';
 import { Table, Column } from '../components/Table';
 import { PriceComparison } from '../tipos/database';
-import { Search, TrendingUp, TrendingDown, Equal } from 'lucide-react';
+import { Search, List, LayoutGrid } from 'lucide-react';
 import { Screen } from '../types';
 
 interface CompareScreenProps {
@@ -14,8 +14,10 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   const [comparisons, setComparisons] = useState<PriceComparison[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
-  const [sortKey, setSortKey] = useState<keyof PriceComparison | ''>('internalFinalPrice');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [layout, setLayout] = useState<'table' | 'detailed'>('detailed');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [familia, setFamilia] = useState('');
 
   useEffect(() => {
     loadComparisons();
@@ -25,179 +27,142 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     const delayDebounce = setTimeout(() => {
       loadComparisons(searchTerm);
     }, 300);
-
     return () => clearTimeout(delayDebounce);
-  }, [searchTerm]);
-
+  }, [searchTerm, dateFrom, dateTo, familia]);
 
   const loadComparisons = async (search = '') => {
     setLoading(true);
     try {
-      const url = search.trim()
-        ? `/api/price-comparisons?search=${encodeURIComponent(search)}`
-        : `/api/price-comparisons`; 
+      const params = new URLSearchParams();
+      if (search) params.append('search', search);
+      if (dateFrom) params.append('from', dateFrom);
+      if (dateTo) params.append('to', dateTo);
+      if (familia) params.append('familia', familia);
 
+      const url = `/api/price-comparisons?${params.toString()}`;
       const response = await fetch(url);
-      const text = await response.text(); 
-      const data = JSON.parse(text); 
+      const data = await response.json();
       setComparisons(data);
     } catch (error) {
-      console.error('❌ Error parsing response:', error);
+      console.error('Error loading comparisons:', error);
       setComparisons([]);
     } finally {
       setLoading(false);
     }
   };
 
-
-  const handleSearch = () => {
-    loadComparisons(searchTerm);
+  const handleLayoutChange = () => {
+    setLayout((prev) => (prev === 'detailed' ? 'table' : 'detailed'));
   };
 
-  const handleSort = (key: keyof PriceComparison) => {
-  const newDirection = sortKey === key && sortDirection === 'asc' ? 'desc' : 'asc';
-  setSortKey(key);
-  setSortDirection(newDirection);
-
-  const sorted = [...comparisons].sort((a, b) => {
-    const aValue = a[key];
-    const bValue = b[key];
-
-    if (typeof aValue === 'number' && typeof bValue === 'number') {
-      return newDirection === 'asc' ? aValue - bValue : bValue - aValue;
-    }
-
-    if (aValue < bValue) return newDirection === 'asc' ? -1 : 1;
-    if (aValue > bValue) return newDirection === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  setComparisons(sorted);
+  const getDifference = (internal: number, external: number) => {
+  // Diferencia en porcentaje comparada contra el precio externo (competencia)
+  // Si el resultado es positivo, Gampack es más caro
+  // Si es negativo, Gampack es más barato
+  if (external === 0) return 0;
+  const diff = ((internal - external) / external) * 100;
+  return parseFloat(diff.toFixed(2));
 };
-
-
-  const columns: Column<PriceComparison>[] = [
-  { key: 'internalProduct', label: 'Producto Interno', sortable: true },
-  { key: 'externalProduct', label: 'Producto Externo', sortable: true },
-  { key: 'supplier', label: 'Proveedor', sortable: true },
-  {
-    key: 'internalFinalPrice',
-    label: 'Final Interno',
-    sortable: true,
-    render: (value) => `$${(value as number).toFixed(2)}`
-  },
-  {
-    key: 'externalFinalPrice',
-    label: 'Final Externo',
-    sortable: true,
-    render: (value) => `$${(value as number).toFixed(2)}`
-  },
-  {
-    key: 'internalDate',
-    label: 'Fecha Alta Interna',
-    sortable: true
-  },
-  {
-    key: 'externalDate',
-    label: 'Fecha Alta Externa',
-    sortable: true
-  },
-  {
-    key: 'saleConditions',
-    label: 'Relación',
-    sortable: true,
-    render: (value) => (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-        (value as string) === 'automatic' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'
-      }`}>
-        {(value as string).charAt(0).toUpperCase() + (value as string).slice(1)}
-      </span>
-    )
-  }
-];
-
-
-  const stats = {
-    totalProducts: comparisons.length,
-    lowestInternalPrice: comparisons.length > 0 ? Math.min(...comparisons.map(c => c.internalFinalPrice)) : 0,
-    highestInternalPrice: comparisons.length > 0 ? Math.max(...comparisons.map(c => c.internalFinalPrice)) : 0,
-    lowestExternalPrice: comparisons.length > 0 ? Math.min(...comparisons.map(c => c.externalFinalPrice)) : 0,
-    highestExternalPrice: comparisons.length > 0 ? Math.max(...comparisons.map(c => c.externalFinalPrice)) : 0,
-    avgPriceDifference: comparisons.length > 0 ?
-      comparisons.reduce((sum, c) => sum + c.priceDifference, 0) / comparisons.length : 0,
-    betterInternal: comparisons.filter(c => c.internalFinalPrice < c.externalFinalPrice).length,
-    betterExternal: comparisons.filter(c => c.externalFinalPrice < c.internalFinalPrice).length,
-    samePrice: comparisons.filter(c => c.externalFinalPrice === c.internalFinalPrice).length
-  };
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
-        <Navigation
-          onBack={() => onNavigate('home')}
-          title="Comparar Precios"
-        />
+        <Navigation onBack={() => onNavigate('home')} title="Comparar Gampacks" />
 
-        {/* Tarjetas principales */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-          <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-            <div className="text-sm font-medium text-gray-600">Total de Productos</div>
-            <div className="text-2xl font-bold text-gray-900">{stats.totalProducts}</div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div className="relative">
+            <Input placeholder="Buscar producto por nombre o código" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
+            <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
           </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-            <div className="text-sm font-medium text-gray-600">Menor Precio Interno</div>
-            <div className="text-2xl font-bold text-green-600">${stats.lowestInternalPrice.toFixed(2)}</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-            <div className="text-sm font-medium text-gray-600">Menor Precio Externo</div>
-            <div className="text-2xl font-bold text-green-600">${stats.lowestExternalPrice.toFixed(2)}</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-            <div className="text-sm font-medium text-gray-600">Mayor Precio Interno</div>
-            <div className="text-2xl font-bold text-red-600">${stats.highestInternalPrice.toFixed(2)}</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-            <div className="text-sm font-medium text-gray-600">Mayor Precio Externo</div>
-            <div className="text-2xl font-bold text-red-600">${stats.highestExternalPrice.toFixed(2)}</div>
-          </div>
+          <Input type="date" placeholder="Desde" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <Input type="date" placeholder="Hasta" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          <Input placeholder="Familia (categoría)" value={familia} onChange={(e) => setFamilia(e.target.value)} />
         </div>
 
+        <div className="flex justify-between items-center mb-4">
+          <p className="text-sm text-gray-600">Total productos: <strong>{comparisons.length}</strong></p>
+          <button className="px-3 py-2 bg-gray-200 hover:bg-gray-300 rounded flex items-center" onClick={handleLayoutChange}>
+            {layout === 'detailed' ? <List size={18} /> : <LayoutGrid size={18} />}
+            <span className="ml-2 text-sm">Cambiar vista</span>
+          </button>
+        </div>
 
-        {/* Sección principal */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          {/* Búsqueda */}
-          <div className="mb-6">
-            <div className="relative max-w-md">
-              <Input
-                placeholder="Buscar por producto o proveedor..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-              <Search
-                size={20}
-                className="absolute left-3 top-2.5 text-gray-400 cursor-pointer"
-                onClick={handleSearch}
-              />
-            </div>
-          </div>
-
-          {/* Resultados */}
-          <div className="mb-4">
-            <p className="text-sm text-gray-600">
-              {loading ? 'Cargando...' : `Mostrando ${comparisons.length} comparación${comparisons.length !== 1 ? 'es' : ''}`}
-            </p>
-          </div>
-
-          {/* Tabla */}
+        {layout === 'table' ? (
           <Table
-            columns={columns}
+            columns={[
+              { key: 'internalProduct', label: 'Producto Interno', sortable: true },
+              { key: 'externalProduct', label: 'Producto Externo', sortable: true },
+              {
+                key: 'internalFinalPrice',
+                label: 'Final Interno',
+                sortable: true,
+                render: (v) => `$${(v as number).toFixed(2)}`,
+              },
+              {
+                key: 'externalFinalPrice',
+                label: 'Final Externo',
+                sortable: true,
+                render: (v) => `$${(v as number).toFixed(2)}`,
+              },
+              { key: 'internalDate', label: 'Fecha Interna' },
+              { key: 'externalDate', label: 'Fecha Externa' },
+              { key: 'supplier', label: 'Proveedor' },
+              {
+                key: 'priceDifference',
+                label: 'Diferencia',
+                render: (_v, row) => {
+                  const diff = getDifference(row.internalFinalPrice, row.externalFinalPrice);
+                  return (
+                    <span className="transition-all duration-300 font-medium text-indigo-600">
+                      {diff}%
+                    </span>
+                  );
+                },
+              },
+            ]}
             data={comparisons}
-            onSort={handleSort}
-            sortKey={sortKey}
-            sortDirection={sortDirection}
           />
-        </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4">
+            {comparisons.map((item, i) => {
+              const diff = getDifference(item.internalFinalPrice, item.externalFinalPrice);
+              return (
+                <div key={i} className="border rounded-lg p-4 shadow-sm bg-white hover:shadow-md transition duration-300">
+                  <div className="grid grid-cols-2 gap-4 text-xs text-gray-600 mb-2">
+                    <div>
+                      <p className="text-gray-500">Fecha Interna</p>
+                      <p>{item.internalDate}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-gray-500">Fecha Externa</p>
+                      <p>{item.externalDate}</p>
+                      <p className="text-gray-500 mt-1">Proveedor: <span className="font-semibold text-gray-700">{item.supplier}</span></p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 items-end">
+                    <div>
+                      <p className="text-xs text-gray-500">Producto Gampack</p>
+                      <p className="text-base font-semibold text-gray-800">{item.internalProduct}</p>
+                      <p className="text-xs text-gray-500 mt-1">Precio Interno</p>
+                      <p className="text-lg font-bold text-green-600">${item.internalFinalPrice.toFixed(2)}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-gray-500">Diferencia</p>
+                      <p className="text-lg font-semibold text-indigo-600 transition-all duration-300">{diff}%</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">Producto Proveedor</p>
+                      <p className="text-base font-semibold text-gray-800">{item.externalProduct}</p>
+                      <p className="text-xs text-gray-500 mt-1">Precio Externo</p>
+                      <p className="text-lg font-bold text-blue-600">${item.externalFinalPrice.toFixed(2)}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

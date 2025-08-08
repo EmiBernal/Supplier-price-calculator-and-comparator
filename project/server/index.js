@@ -703,5 +703,42 @@ app.get('/api/price-comparisons', (req, res) => {
   });
 });
 
+app.get('/api/gampack/:codigo/relacionados', (req, res) => {
+  const codInterno = req.params.codigo;
+
+  const sql = `
+    SELECT 
+      lp.nom_externo AS name,
+      lp.precio_final AS price,
+      lp.proveedor AS supplier,
+      lp.fecha AS externalDate,
+      li.precio_final AS internalPrice
+    FROM relacion_articulos ra
+    JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
+    JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
+    WHERE li.cod_interno = ?
+  `;
+
+  db.all(sql, [codInterno], (err, rows) => {
+    if (err) {
+      console.error('Error al obtener productos relacionados:', err.message);
+      return res.status(500).json({ error: 'Error al obtener productos relacionados' });
+    }
+
+    const data = rows.map(row => ({
+      name: row.name,
+      price: row.price,
+      supplier: row.supplier,
+      externalDate: row.externalDate,
+      priceDifference: row.price - row.internalPrice,
+      percentageDifference: row.internalPrice !== 0
+        ? ((row.price - row.internalPrice) / row.internalPrice * 100).toFixed(2)
+        : 0
+    }));
+
+    res.json(data);
+  });
+});
+
 module.exports = app;
 
