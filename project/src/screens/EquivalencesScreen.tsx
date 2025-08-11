@@ -114,12 +114,12 @@ const columns: Column<ProductEquivalence>[] = [
       }
 
       const colors = {
-        manual: 'bg-blue-100 text-blue-800',
-        name: 'bg-green-100 text-green-800',
-        codigo: 'bg-yellow-100 text-yellow-800',
+        manual: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+        name: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+        codigo: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
       };
 
-      const color = colors[value as keyof typeof colors] || 'bg-gray-100 text-gray-800';
+      const color = colors[value as keyof typeof colors] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
 
       return (
         <span className={`px-2 py-1 rounded-full text-xs font-medium ${color}`}>
@@ -135,12 +135,12 @@ const columns: Column<ProductEquivalence>[] = [
     render: (_value: any, row: ProductEquivalence) => (
       <div className="relative">
         <details className="relative">
-          <summary className="list-none text-gray-600 hover:text-black px-2 py-1 text-lg cursor-pointer">⋮</summary>
-          <div className="absolute right-0 mt-2 bg-white border border-gray-200 rounded shadow-md z-10">
+          <summary className="list-none text-gray-600 hover:text-black dark:text-gray-400 dark:hover:text-gray-200 px-2 py-1 text-lg cursor-pointer">⋮</summary>
+          <div className="absolute right-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded shadow-md z-10">
             <button
-              className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
+              className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700"
               onClick={(e) => {
-                e.preventDefault(); 
+                e.preventDefault();
                 handleDelete(row.id);
               }}
             >
@@ -154,14 +154,14 @@ const columns: Column<ProductEquivalence>[] = [
 ];
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
         <Navigation
           onBack={() => onNavigate('home')}
           title="Equivalencia entre productos"
         />
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
           {/* Buscador */}
           <div className="mb-6">
             <div className="relative max-w-md">
@@ -173,7 +173,7 @@ const columns: Column<ProductEquivalence>[] = [
               />
               <Search
                 size={20}
-                className="absolute left-3 top-2.5 text-gray-400 cursor-pointer"
+                className="absolute left-3 top-2.5 text-gray-400 dark:text-gray-500 cursor-pointer"
                 onClick={() => fetchEquivalences(searchTerm.trim())}
               />
             </div>
@@ -181,7 +181,7 @@ const columns: Column<ProductEquivalence>[] = [
         {/* Tabla */}
           <div className="overflow-x-auto">
             {equivalences.length === 0 ? (
-              <p className="text-sm text-gray-600">No hay equivalencias para mostrar</p>
+              <p className="text-sm text-gray-600 dark:text-gray-300">No hay equivalencias para mostrar</p>
             ) : (
               <Table
                 columns={columns}
