@@ -652,13 +652,60 @@ app.delete('/api/no-relacionados/:tipo/:id', (req, res) => {
 });
 
 app.get('/api/price-comparisons', (req, res) => {
-  const search = req.query.search || '';
-  const searchLike = `%${search.toLowerCase()}%`;
+  const search = (req.query.search || '').toString().toLowerCase();
+  const dateFrom = (req.query.dateFrom || '').toString(); // YYYY-MM-DD
+  const dateTo = (req.query.dateTo || '').toString();     // YYYY-MM-DD
+  const familia = (req.query.familia || '').toString().toLowerCase();
 
-  const dateFilter = req.query.date || '';
-  const dateLike = `%${dateFilter}%`;
+  const hasFrom = !!dateFrom;
+  const hasTo = !!dateTo;
+  const hasFamilia = !!familia;
 
-  const sql = `
+  const like = `%${search}%`;
+  const familiaLike = `%${familia}%`;
+
+  // Helpers
+  const buildDateRange = (col) => {
+    if (hasFrom && hasTo) return `${col} BETWEEN ? AND ?`;
+    if (hasFrom) return `${col} >= ?`;
+    if (hasTo) return `${col} <= ?`;
+    return '';
+  };
+  const applySearch = (cols) =>
+    search ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
+  const applyFamilia = (cols) =>
+    hasFamilia ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
+
+  const liDateRange = buildDateRange('li.fecha');
+  const lpDateRange = buildDateRange('lp.fecha');
+
+  // ---------- SELECT 1: Pares relacionados (al menos una fecha en rango) ----------
+  const wherePairs = [applySearch(['li.nom_interno', 'lp.nom_externo', 'lp.proveedor'])];
+  const paramsPairs = search ? [like, like, like] : [];
+
+  if (hasFamilia) {
+    wherePairs.push(applyFamilia(['li.familia', 'lp.familia']));
+    paramsPairs.push(familiaLike, familiaLike);
+  }
+
+  if (hasFrom || hasTo) {
+    const dateConds = [];
+    if (liDateRange) {
+      dateConds.push(`(li.fecha IS NOT NULL AND ${liDateRange})`);
+      if (hasFrom && hasTo) paramsPairs.push(dateFrom, dateTo);
+      else if (hasFrom) paramsPairs.push(dateFrom);
+      else paramsPairs.push(dateTo);
+    }
+    if (lpDateRange) {
+      dateConds.push(`(lp.fecha IS NOT NULL AND ${lpDateRange})`);
+      if (hasFrom && hasTo) paramsPairs.push(dateFrom, dateTo);
+      else if (hasFrom) paramsPairs.push(dateFrom);
+      else paramsPairs.push(dateTo);
+    }
+    wherePairs.push('(' + dateConds.join(' OR ') + ')');
+  }
+
+  const sqlPairs = `
     SELECT 
       li.nom_interno AS internalProduct,
       lp.nom_externo AS externalProduct,
@@ -668,22 +715,90 @@ app.get('/api/price-comparisons', (req, res) => {
       li.fecha AS internalDate,
       lp.fecha AS externalDate,
       lp.tipo_empresa AS companyType,
-      ra.criterio_relacion AS saleConditions
+      ra.criterio_relacion AS saleConditions,
+      COALESCE(li.fecha, lp.fecha) AS sortDate
     FROM relacion_articulos ra
     JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
     JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
-    WHERE (
-      LOWER(li.nom_interno) LIKE ?
-      OR LOWER(lp.nom_externo) LIKE ?
-      OR LOWER(lp.proveedor) LIKE ?
-    )
-    ${dateFilter ? 'AND (li.fecha LIKE ? OR lp.fecha LIKE ?)' : ''}
+    WHERE ${wherePairs.join(' AND ')}
   `;
 
-  const params = [searchLike, searchLike, searchLike];
-  if (dateFilter) {
-    params.push(dateLike, dateLike);
+  // ---------- SELECT 2: Internos sin pareja ----------
+  const whereInternal = ['ra.id_lista_precios IS NULL', applySearch(['li.nom_interno'])];
+  const paramsInternal = search ? [like] : [];
+
+  if (hasFamilia) {
+    whereInternal.push(applyFamilia(['li.familia']));
+    paramsInternal.push(familiaLike);
   }
+  if (liDateRange) {
+    whereInternal.push(`li.fecha IS NOT NULL AND ${liDateRange}`);
+    if (hasFrom && hasTo) paramsInternal.push(dateFrom, dateTo);
+    else if (hasFrom) paramsInternal.push(dateFrom);
+    else if (hasTo) paramsInternal.push(dateTo);
+  }
+
+  const sqlInternalOnly = `
+    SELECT
+      li.nom_interno AS internalProduct,
+      NULL AS externalProduct,
+      NULL AS supplier,
+      li.precio_final AS internalFinalPrice,
+      NULL AS externalFinalPrice,
+      li.fecha AS internalDate,
+      NULL AS externalDate,
+      'Gampack' AS companyType,
+      NULL AS saleConditions,
+      li.fecha AS sortDate
+    FROM lista_interna li
+    LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
+    WHERE ${whereInternal.join(' AND ')}
+  `;
+
+  // ---------- SELECT 3: Proveedores sin pareja ----------
+  const whereExternal = ['ra.id_lista_interna IS NULL', applySearch(['lp.nom_externo', 'lp.proveedor'])];
+  const paramsExternal = search ? [like, like] : [];
+
+  if (hasFamilia) {
+    whereExternal.push(applyFamilia(['lp.familia']));
+    paramsExternal.push(familiaLike);
+  }
+  if (lpDateRange) {
+    whereExternal.push(`lp.fecha IS NOT NULL AND ${lpDateRange}`);
+    if (hasFrom && hasTo) paramsExternal.push(dateFrom, dateTo);
+    else if (hasFrom) paramsExternal.push(dateFrom);
+    else if (hasTo) paramsExternal.push(dateTo);
+  }
+
+  const sqlExternalOnly = `
+    SELECT
+      NULL AS internalProduct,
+      lp.nom_externo AS externalProduct,
+      lp.proveedor AS supplier,
+      NULL AS internalFinalPrice,
+      lp.precio_final AS externalFinalPrice,
+      NULL AS internalDate,
+      lp.fecha AS externalDate,
+      lp.tipo_empresa AS companyType,
+      NULL AS saleConditions,
+      lp.fecha AS sortDate
+    FROM lista_precios lp
+    LEFT JOIN relacion_articulos ra ON ra.id_lista_precios = lp.id_externo
+    WHERE ${whereExternal.join(' AND ')}
+  `;
+
+  // ---------- UNION + ORDER ----------
+  const sql = `
+    ${sqlPairs}
+    UNION ALL
+    ${sqlInternalOnly}
+    UNION ALL
+    ${sqlExternalOnly}
+    ORDER BY sortDate DESC
+    LIMIT 1000
+  `;
+
+  const params = [...paramsPairs, ...paramsInternal, ...paramsExternal];
 
   db.all(sql, params, (err, rows) => {
     if (err) {
@@ -692,21 +807,24 @@ app.get('/api/price-comparisons', (req, res) => {
     }
 
     const results = rows.map(row => {
-      const priceDifference = row.externalFinalPrice !== 0
-        ? ((row.internalFinalPrice - row.externalFinalPrice) / row.externalFinalPrice) * 100
-        : 0;
+      const internal = row.internalFinalPrice ?? null;
+      const external = row.externalFinalPrice ?? null;
+      const priceDifference =
+        external && external !== 0 && internal != null
+          ? parseFloat((((internal - external) / external) * 100).toFixed(2))
+          : null;
 
       return {
-        internalProduct: row.internalProduct,
-        externalProduct: row.externalProduct,
-        supplier: row.supplier,
-        internalFinalPrice: row.internalFinalPrice,
-        externalFinalPrice: row.externalFinalPrice,
-        internalDate: row.internalDate,
-        externalDate: row.externalDate,
-        companyType: row.companyType === 'Gampack' ? 'supplier' : 'competitor',
+        internalProduct: row.internalProduct || null,
+        externalProduct: row.externalProduct || null,
+        supplier: row.supplier || null,
+        internalFinalPrice: internal,
+        externalFinalPrice: external,
+        internalDate: row.internalDate || null,
+        externalDate: row.externalDate || null,
+        companyType: row.companyType === 'Gampack' ? 'supplier' : 'competitor', // conservé tu lógica original
         saleConditions: row.saleConditions || 'Desconocido',
-        priceDifference: parseFloat(priceDifference.toFixed(2)),
+        priceDifference,
       };
     });
 
