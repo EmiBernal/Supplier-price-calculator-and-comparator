@@ -655,6 +655,9 @@ app.get('/api/price-comparisons', (req, res) => {
   const search = req.query.search || '';
   const searchLike = `%${search.toLowerCase()}%`;
 
+  const dateFilter = req.query.date || '';
+  const dateLike = `%${dateFilter}%`;
+
   const sql = `
     SELECT 
       li.nom_interno AS internalProduct,
@@ -669,12 +672,20 @@ app.get('/api/price-comparisons', (req, res) => {
     FROM relacion_articulos ra
     JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
     JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
-    WHERE LOWER(li.nom_interno) LIKE ? 
-       OR LOWER(lp.nom_externo) LIKE ? 
-       OR LOWER(lp.proveedor) LIKE ?
+    WHERE (
+      LOWER(li.nom_interno) LIKE ?
+      OR LOWER(lp.nom_externo) LIKE ?
+      OR LOWER(lp.proveedor) LIKE ?
+    )
+    ${dateFilter ? 'AND (li.fecha LIKE ? OR lp.fecha LIKE ?)' : ''}
   `;
 
-  db.all(sql, [searchLike, searchLike, searchLike], (err, rows) => {
+  const params = [searchLike, searchLike, searchLike];
+  if (dateFilter) {
+    params.push(dateLike, dateLike);
+  }
+
+  db.all(sql, params, (err, rows) => {
     if (err) {
       console.error('Error al obtener comparaciones de precios:', err.message);
       return res.status(500).json({ error: 'Error al obtener comparaciones de precios' });
