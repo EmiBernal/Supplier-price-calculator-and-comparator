@@ -248,19 +248,19 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-4xl mx-auto">
         <Navigation onBack={() => onNavigate('home')} title="Registro Manual de Productos" />
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8">
           {/* Buscador */}
-          <div className="mb-6 p-6 border border-gray-300 rounded-lg bg-white shadow-sm relative max-w-4xl mx-auto">
-            <h2 className="text-xl font-semibold mb-5 text-gray-900 text-center">Buscar productos</h2>
+          <div className="mb-6 p-6 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 shadow-sm relative max-w-4xl mx-auto">
+            <h2 className="text-xl font-semibold mb-5 text-gray-900 dark:text-gray-100 text-center">Buscar productos</h2>
             <div className="flex flex-col md:flex-row md:items-end md:space-x-6 space-y-5 md:space-y-0">
               <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Buscar por</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Buscar por</label>
                 <select
-                  className="w-full border border-gray-300 rounded-md p-3 text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-3 text-gray-700 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                   value={searchCriteria}
                   onChange={(e) => {
                     const value = e.target.value as 'productCode' | 'productName' | 'company';
@@ -277,9 +277,9 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
               </div>
 
               <div className="flex-1 relative">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Consulta</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Consulta</label>
                 <input
-                  className="w-full border border-gray-300 rounded-md p-3 text-gray-700 shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-3 text-gray-700 dark:bg-gray-700 dark:text-gray-100 shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
                   type="text"
                   value={searchQuery}
                   onChange={(e) => {
@@ -291,11 +291,11 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                   autoComplete="off"
                 />
                 {searchResults.length > 0 && (
-                  <ul className="absolute z-50 mt-2 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto">
+                  <ul className="absolute z-50 mt-2 w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-64 overflow-y-auto">
                     {searchResults.map((prod, idx) => (
                       <li
                         key={idx}
-                        className="px-5 py-3 text-sm text-gray-800 hover:bg-blue-100 cursor-pointer"
+                        className="px-5 py-3 text-sm text-gray-800 dark:text-gray-200 hover:bg-blue-100 dark:hover:bg-blue-900 cursor-pointer"
                         onClick={() => handleSuggestionClick(prod)}
                       >
                         <strong>{prod.productName}</strong> — {prod.productCode} | <span className="italic">{prod.company}</span>
@@ -318,7 +318,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                 placeholder="Ingrese nombre de empresa (Gampack si es propio)"
               />
 
-              <p className="text-sm text-gray-500 md:col-span-2">
+              <p className="text-sm text-gray-500 dark:text-gray-400 md:col-span-2">
                 Tipo de empresa detectado: <strong>{inferCompanyType(formData.company)}</strong>
               </p>
 
@@ -362,7 +362,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                   error={errors.finalPrice}
                   className="pl-8"
                 />
-                <div className="absolute left-3 top-8 text-gray-500">$</div>
+                <div className="absolute left-3 top-8 text-gray-500 dark:text-gray-400">$</div>
               </div>
 
                {/* Fecha (moved arriba) */}
@@ -377,19 +377,19 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
 
             {/* Errores y mensajes */}
             {errors.general && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-red-600">{errors.general}</p>
+              <div className="p-4 bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 rounded-lg">
+                <p className="text-red-600 dark:text-red-300">{errors.general}</p>
               </div>
             )}
 
             {successMessage && (
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                <p className="text-green-600">{successMessage}</p>
+              <div className="p-4 bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-700 rounded-lg">
+                <p className="text-green-600 dark:text-green-300">{successMessage}</p>
               </div>
             )}
 
             {crossSuggestedProduct && (
-              <div className="p-4 bg-yellow-50 border border-yellow-300 rounded-lg text-sm mt-4">
+              <div className="p-4 bg-yellow-50 dark:bg-yellow-900 border border-yellow-300 dark:border-yellow-700 rounded-lg text-sm mt-4">
                 ⚠️ <strong>Advertencia:</strong> el código ingresado ya existe en <strong>{crossSuggestedProduct.companyType}</strong> con el nombre:<br />
                 <strong>{crossSuggestedProduct.name}</strong> (Código: {crossSuggestedProduct.code}).<br />
                 ¿Deseás relacionar este producto con él?

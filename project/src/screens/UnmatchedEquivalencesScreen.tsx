@@ -64,29 +64,31 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   };
 
   const rowStyle = (selected: boolean) =>
-    selected ? 'bg-blue-100 cursor-pointer' : 'hover:bg-gray-50 cursor-pointer';
+    selected
+      ? 'bg-blue-100 dark:bg-blue-900 cursor-pointer'
+      : 'hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer';
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
         <Navigation onBack={() => onNavigate('home')} title="Relacionar productos manualmente" />
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mt-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mt-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <h2 className="text-lg font-semibold mb-4">Productos Proveedores no relacionados</h2>
-              <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-sm bg-white">
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-gray-50">
+              <h2 className="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100">Productos Proveedores no relacionados</h2>
+              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm bg-white dark:bg-gray-800">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                  <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
                       <th className="px-6 py-3 text-left">Código</th>
                       <th className="px-6 py-3 text-left">Nombre</th>
                       <th className="px-6 py-3 text-left">Proveedor</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-200">
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                     {externals.length === 0 ? (
-                      <tr><td colSpan={3} className="px-6 py-4 text-center text-gray-500">No hay productos no relacionados.</td></tr>
+                      <tr><td colSpan={3} className="px-6 py-4 text-center text-gray-500 dark:text-gray-400">No hay productos no relacionados.</td></tr>
                     ) : (
                       externals.map(item => (
                         <tr key={item.id_externo}
@@ -104,18 +106,18 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
             </div>
 
             <div>
-              <h2 className="text-lg font-semibold mb-4">Productos Gampack no relacionados</h2>
-              <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-sm bg-white">
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-gray-50">
+              <h2 className="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100">Productos Gampack no relacionados</h2>
+              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm bg-white dark:bg-gray-800">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                  <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
                       <th className="px-6 py-3 text-left">Código</th>
                       <th className="px-6 py-3 text-left">Nombre</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-200">
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                     {internals.length === 0 ? (
-                      <tr><td colSpan={2} className="px-6 py-4 text-center text-gray-500">No hay productos no relacionados.</td></tr>
+                      <tr><td colSpan={2} className="px-6 py-4 text-center text-gray-500 dark:text-gray-400">No hay productos no relacionados.</td></tr>
                     ) : (
                       internals.map(item => (
                         <tr key={item.id_interno}

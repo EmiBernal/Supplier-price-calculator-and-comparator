@@ -15,9 +15,8 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState<'table' | 'detailed'>('detailed');
-  const [year, setYear] = useState('');
-  const [month, setMonth] = useState('');
-  const [day, setDay] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [familia, setFamilia] = useState('');
 
   useEffect(() => {
@@ -29,23 +28,15 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
       loadComparisons(searchTerm);
     }, 300);
     return () => clearTimeout(delayDebounce);
-  }, [searchTerm, year, month, day, familia]);
-
-  const buildDateString = () => {
-    let dateParts = [];
-    if (year) dateParts.push(year);
-    if (month) dateParts.push(month.padStart(2, '0'));
-    if (day) dateParts.push(day.padStart(2, '0'));
-    return dateParts.join('-');
-  };
+  }, [searchTerm, dateFrom, dateTo, familia]);
 
   const loadComparisons = async (search = '') => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (search) params.append('search', search);
-      const date = buildDateString();
-      if (date) params.append('date', date);
+      if (dateFrom) params.append('from', dateFrom);
+      if (dateTo) params.append('to', dateTo);
       if (familia) params.append('familia', familia);
 
       const url = `/api/price-comparisons?${params.toString()}`;
@@ -65,47 +56,32 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   };
 
   const getDifference = (internal: number, external: number) => {
-    if (external === 0) return 0;
-    const diff = ((internal - external) / external) * 100;
-    return parseFloat(diff.toFixed(2));
-  };
+  // Diferencia en porcentaje comparada contra el precio externo (competencia)
+  // Si el resultado es positivo, Gampack es más caro
+  // Si es negativo, Gampack es más barato
+  if (external === 0) return 0;
+  const diff = ((internal - external) / external) * 100;
+  return parseFloat(diff.toFixed(2));
+};
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
         <Navigation onBack={() => onNavigate('home')} title="Comparar Gampacks" />
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
           <div className="relative">
             <Input placeholder="Buscar producto por nombre o código" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
-            <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
+            <Search className="absolute left-3 top-2.5 text-gray-400 dark:text-gray-500" size={18} />
           </div>
-          <Input placeholder="Año" value={year} onChange={(e) => setYear(e.target.value)} />
-            <select
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring focus:border-blue-300"
-            >
-              <option value="">Mes</option>
-              <option value="01">Enero</option>
-              <option value="02">Febrero</option>
-              <option value="03">Marzo</option>
-              <option value="04">Abril</option>
-              <option value="05">Mayo</option>
-              <option value="06">Junio</option>
-              <option value="07">Julio</option>
-              <option value="08">Agosto</option>
-              <option value="09">Septiembre</option>
-              <option value="10">Octubre</option>
-              <option value="11">Noviembre</option>
-              <option value="12">Diciembre</option>
-            </select>
-          <Input placeholder="Día" value={day} onChange={(e) => setDay(e.target.value)} />
+          <Input type="date" placeholder="Desde" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <Input type="date" placeholder="Hasta" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           <Input placeholder="Familia (categoría)" value={familia} onChange={(e) => setFamilia(e.target.value)} />
         </div>
+
         <div className="flex justify-between items-center mb-4">
-          <p className="text-sm text-gray-600">Total productos: <strong>{comparisons.length}</strong></p>
-          <button className="px-3 py-2 bg-gray-200 hover:bg-gray-300 rounded flex items-center" onClick={handleLayoutChange}>
+          <p className="text-sm text-gray-600 dark:text-gray-300">Total productos: <strong>{comparisons.length}</strong></p>
+          <button className="px-3 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded flex items-center" onClick={handleLayoutChange}>
             {layout === 'detailed' ? <List size={18} /> : <LayoutGrid size={18} />}
             <span className="ml-2 text-sm">Cambiar vista</span>
           </button>
@@ -151,34 +127,34 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
             {comparisons.map((item, i) => {
               const diff = getDifference(item.internalFinalPrice, item.externalFinalPrice);
               return (
-                <div key={i} className="border rounded-lg p-4 shadow-sm bg-white hover:shadow-md transition duration-300">
-                  <div className="grid grid-cols-2 gap-4 text-xs text-gray-600 mb-2">
+                <div key={i} className="border rounded-lg p-4 shadow-sm bg-white dark:bg-gray-800 dark:border-gray-700 hover:shadow-md transition duration-300">
+                  <div className="grid grid-cols-2 gap-4 text-xs text-gray-600 dark:text-gray-300 mb-2">
                     <div>
-                      <p className="text-gray-500">Fecha Interna</p>
+                      <p className="text-gray-500 dark:text-gray-400">Fecha Interna</p>
                       <p>{item.internalDate}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-gray-500">Fecha Externa</p>
+                      <p className="text-gray-500 dark:text-gray-400">Fecha Externa</p>
                       <p>{item.externalDate}</p>
-                      <p className="text-gray-500 mt-1">Proveedor: <span className="font-semibold text-gray-700">{item.supplier}</span></p>
+                      <p className="text-gray-500 dark:text-gray-400 mt-1">Proveedor: <span className="font-semibold text-gray-700 dark:text-gray-100">{item.supplier}</span></p>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-3 gap-4 items-end">
                     <div>
-                      <p className="text-xs text-gray-500">Producto Gampack</p>
-                      <p className="text-base font-semibold text-gray-800">{item.internalProduct}</p>
-                      <p className="text-xs text-gray-500 mt-1">Precio Interno</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Producto Gampack</p>
+                      <p className="text-base font-semibold text-gray-800 dark:text-gray-100">{item.internalProduct}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Precio Interno</p>
                       <p className="text-lg font-bold text-green-600">${item.internalFinalPrice.toFixed(2)}</p>
                     </div>
-                    <div className="text-center flex flex-col justify-end">
-                      <p className="text-xs text-gray-500">Diferencia</p>
+                    <div className="text-center">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Diferencia</p>
                       <p className="text-lg font-semibold text-indigo-600 transition-all duration-300">{diff}%</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs text-gray-500">Producto Proveedor</p>
-                      <p className="text-base font-semibold text-gray-800">{item.externalProduct}</p>
-                      <p className="text-xs text-gray-500 mt-1">Precio Externo</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Producto Proveedor</p>
+                      <p className="text-base font-semibold text-gray-800 dark:text-gray-100">{item.externalProduct}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Precio Externo</p>
                       <p className="text-lg font-bold text-blue-600">${item.externalFinalPrice.toFixed(2)}</p>
                     </div>
                   </div>
