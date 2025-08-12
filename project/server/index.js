@@ -1,4 +1,3 @@
-// server/app.js (o donde tengas tu backend)
 const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
@@ -18,7 +17,7 @@ const db = new sqlite3.Database(dbPath, err => {
 app.get('/api/equivalencias', (req, res) => {
   const search = req.query.search;
   const params = [];
-  
+
   let sql = `
     SELECT 
       ra.id,
@@ -494,7 +493,7 @@ app.delete('/api/relacion/:id', (req, res) => {
             return res.status(500).json({ error: 'Error eliminando producto proveedor' });
           }
 
-        console.log(`✅ Producto proveedor eliminado, filas afectadas: ${this.changes}`);
+          console.log(`✅ Producto proveedor eliminado, filas afectadas: ${this.changes}`);
 
           db.run(`DELETE FROM lista_interna WHERE id_interno = ?`, [id_lista_interna], function (errDelInt) {
             if (errDelInt) {
@@ -521,81 +520,8 @@ app.delete('/api/relacion/:id', (req, res) => {
   });
 });
 
-app.get('/api/products/search/manual', (req, res) => {
-  const { by, q } = req.query;
-
-  if (!q || typeof q !== 'string') {
-    return res.status(400).json({ error: 'Falta la query de búsqueda' });
-  }
-
-  const searchTerm = `%${q}%`;
-  let sql = '';
-  let params = [];
-
-  if (by === 'productCode') {
-    sql = `
-      SELECT cod_externo AS productCode, nom_externo AS productName, proveedor AS company, precio_final AS finalPrice, fecha
-      FROM lista_precios
-      WHERE cod_externo LIKE ?
-
-      UNION
-
-      SELECT cod_interno AS productCode, nom_interno AS productName, 'Gampack' AS company, precio_final AS finalPrice, fecha
-      FROM lista_interna
-      WHERE cod_interno LIKE ?
-
-      ORDER BY fecha DESC
-    `;
-    params = [searchTerm, searchTerm];
-
-  } else if (by === 'productName') {
-    sql = `
-      SELECT cod_externo AS productCode, nom_externo AS productName, proveedor AS company, precio_final AS finalPrice, fecha
-      FROM lista_precios
-      WHERE nom_externo LIKE ?
-
-      UNION
-
-      SELECT cod_interno AS productCode, nom_interno AS productName, 'Gampack' AS company, precio_final AS finalPrice, fecha
-      FROM lista_interna
-      WHERE nom_interno LIKE ?
-
-      ORDER BY fecha DESC
-    `;
-    params = [searchTerm, searchTerm];
-
-  } else if (by === 'company') {
-    sql = `
-      SELECT cod_externo AS productCode, nom_externo AS productName, proveedor AS company, precio_final AS finalPrice, fecha
-      FROM lista_precios
-      WHERE proveedor LIKE ?
-      ORDER BY fecha DESC
-    `;
-    params = [searchTerm];
-
-  } else {
-    return res.status(400).json({ error: 'Campo de búsqueda no válido' });
-  }
-
-  db.all(sql, params, (err, rows) => {
-    if (err) {
-      console.error('Error en búsqueda:', err.message);
-      return res.status(500).json({ error: 'Error al buscar productos' });
-    }
-
-    const result = rows.map(row => ({
-      productCode: row.productCode,
-      productName: row.productName,
-      company: row.company,
-      finalPrice: row.finalPrice,
-    }));
-
-    res.json({ products: result });
-  });
-});
-
 /**
- * #############  /api/price-comparisons  (MEJORADO)  #############
+ * #############  /api/price-comparisons  (MEJORADO - NUEVARAMA)  #############
  * - Soporta search, dateFrom, dateTo, familia
  * - Devuelve pares + internos sin pareja + proveedores sin pareja
  * - Usa sortDate para ORDER BY en UNION (evita error SQLite)
@@ -628,7 +554,7 @@ app.get('/api/price-comparisons', (req, res) => {
   const liDateRange = buildDateRange('li.fecha');
   const lpDateRange = buildDateRange('lp.fecha');
 
-  // ---------- SELECT 1: Pares relacionados ----------
+  // ---------- SELECT 1: Pares relacionados (al menos una fecha en rango) ----------
   const wherePairs = [applySearch(['li.nom_interno', 'lp.nom_externo', 'lp.proveedor'])];
   const paramsPairs = search ? [like, like, like] : [];
 
