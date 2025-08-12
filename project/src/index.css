@@ -2,6 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Fondo global + transición entre temas */
 html {
-  @apply bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors duration-300;
+  @apply bg-gray-50 text-gray-900 transition-colors duration-300;
+  /* Fallback por si @apply no corre antes del primer paint */
+  background-color: #f9fafb; /* gray-50 */
+}
+
+/* Si usás darkMode: 'class' (Tailwind), se aplica cuando <html class="dark"> */
+html.dark {
+  @apply bg-[#0b0f1a] text-gray-100;
+  /* Fallback para el primer paint en oscuro */
+  background-color: #0b0f1a;
+}
+
+/* Evita parpadeos blancos al hacer overscroll y asegura altura */
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  background-color: transparent; /* evita doble fondo */
+}
+
+/* Suaviza/restringe el rebote donde está soportado */
+@supports (overscroll-behavior: contain) {
+  html { overscroll-behavior-y: contain; }
 }

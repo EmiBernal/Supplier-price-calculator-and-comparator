@@ -11,7 +11,7 @@ export const MainEquivalences: React.FC<MainEquivalencesProps> = ({ onNavigate }
   const [screen, setScreen] = useState<'related' | 'unmatched'>('related');
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-[#0b0f1a] p-6">
       {/* Botones como pestañas modernas */}
       <div className="flex justify-center mb-8 space-x-4">
         <button
@@ -19,7 +19,7 @@ export const MainEquivalences: React.FC<MainEquivalencesProps> = ({ onNavigate }
           className={`px-6 py-3 text-lg font-semibold rounded-xl shadow transition-all duration-200 ${
             screen === 'related'
               ? 'bg-blue-600 text-white scale-105'
-              : 'bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+              : 'bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-white/10 dark:text-white dark:hover:bg-white/20'
           }`}
         >
           Relacionados
@@ -29,8 +29,8 @@ export const MainEquivalences: React.FC<MainEquivalencesProps> = ({ onNavigate }
           className={`px-6 py-3 text-lg font-semibold rounded-xl shadow transition-all duration-200 ${
             screen === 'unmatched'
               ? 'bg-blue-600 text-white scale-105'
-              : 'bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
-          }`}
+              : 'bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg:white/10 dark:text-white dark:hover:bg-white/20'
+          }`.replace('dark:bg:white/10', 'dark:bg-white/10')}
         >
           No relacionados
         </button>
