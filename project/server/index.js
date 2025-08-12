@@ -17,7 +17,7 @@ const db = new sqlite3.Database(dbPath, err => {
 app.get('/api/equivalencias', (req, res) => {
   const search = req.query.search;
   const params = [];
-  
+
   let sql = `
     SELECT 
       ra.id,
@@ -520,137 +520,12 @@ app.delete('/api/relacion/:id', (req, res) => {
   });
 });
 
-app.get('/api/products/search/manual', (req, res) => {
-  const { by, q } = req.query;
-
-  if (!q || typeof q !== 'string') {
-    return res.status(400).json({ error: 'Falta la query de búsqueda' });
-  }
-
-  const searchTerm = `%${q}%`;
-  let sql = '';
-  let params = [];
-
-  if (by === 'productCode') {
-    sql = `
-      SELECT cod_externo AS productCode, nom_externo AS productName, proveedor AS company, precio_final AS finalPrice, fecha
-      FROM lista_precios
-      WHERE cod_externo LIKE ?
-
-      UNION
-
-      SELECT cod_interno AS productCode, nom_interno AS productName, 'Gampack' AS company, precio_final AS finalPrice, fecha
-      FROM lista_interna
-      WHERE cod_interno LIKE ?
-
-      ORDER BY fecha DESC
-    `;
-    params = [searchTerm, searchTerm];
-
-  } else if (by === 'productName') {
-    sql = `
-      SELECT cod_externo AS productCode, nom_externo AS productName, proveedor AS company, precio_final AS finalPrice, fecha
-      FROM lista_precios
-      WHERE nom_externo LIKE ?
-
-      UNION
-
-      SELECT cod_interno AS productCode, nom_interno AS productName, 'Gampack' AS company, precio_final AS finalPrice, fecha
-      FROM lista_interna
-      WHERE nom_interno LIKE ?
-
-      ORDER BY fecha DESC
-    `;
-    params = [searchTerm, searchTerm];
-
-  } else if (by === 'company') {
-    sql = `
-      SELECT cod_externo AS productCode, nom_externo AS productName, proveedor AS company, precio_final AS finalPrice, fecha
-      FROM lista_precios
-      WHERE proveedor LIKE ?
-      ORDER BY fecha DESC
-    `;
-    params = [searchTerm];
-
-  } else {
-    return res.status(400).json({ error: 'Campo de búsqueda no válido' });
-  }
-
-  db.all(sql, params, (err, rows) => {
-    if (err) {
-      console.error('Error en búsqueda:', err.message);
-      return res.status(500).json({ error: 'Error al buscar productos' });
-    }
-
-    const result = rows.map(row => ({
-      productCode: row.productCode,
-      productName: row.productName,
-      company: row.company,
-      finalPrice: row.finalPrice,
-    }));
-
-    res.json({ products: result });
-  });
-});
-
-app.delete('/api/no-relacionados/:tipo/:id', (req, res) => {
-  let tipo = req.params.tipo.toLowerCase();
-  const id = req.params.id;
-
-  // Aceptar 'proveedor' o 'proveedores'
-  if (tipo === 'proveedores') tipo = 'proveedor';
-  if (tipo === 'gampacks') tipo = 'gampack';
-
-  let tablePrincipal = '';
-  let idFieldPrincipal = '';
-  let tableNoRelacionado = '';
-  let idFieldNoRelacionado = '';
-
-  if (tipo === 'proveedor') {
-    tablePrincipal = 'lista_precios';
-    idFieldPrincipal = 'id_externo';
-    tableNoRelacionado = 'articulos_no_relacionados';
-    idFieldNoRelacionado = 'id_lista_precios';
-  } else if (tipo === 'gampack') {
-    tablePrincipal = 'lista_interna';
-    idFieldPrincipal = 'id_interno';
-    tableNoRelacionado = 'articulos_gampack_no_relacionados';
-    idFieldNoRelacionado = 'id_lista_interna';
-  } else {
-    return res.status(400).json({ error: 'Tipo inválido. Debe ser "proveedor" o "gampack".' });
-  }
-
-  // Primero elimino de tabla principal
-  const sqlDeletePrincipal = `DELETE FROM ${tablePrincipal} WHERE ${idFieldPrincipal} = ?`;
-
-  db.run(sqlDeletePrincipal, [id], function (err) {
-    if (err) {
-      console.error('Error al eliminar de tabla principal:', err.message);
-      return res.status(500).json({ error: 'Error al eliminar producto de tabla principal' });
-    }
-
-    if (this.changes === 0) {
-      return res.status(404).json({ error: 'Producto no encontrado en tabla principal' });
-    }
-
-    // Si eliminó producto principal, elimino también de no relacionados
-    const sqlDeleteNoRelacionado = `DELETE FROM ${tableNoRelacionado} WHERE ${idFieldNoRelacionado} = ?`;
-
-    db.run(sqlDeleteNoRelacionado, [id], function (err2) {
-      if (err2) {
-        console.error('Error al eliminar de tabla no relacionados:', err2.message);
-        // Aunque falla eliminar en no relacionados, ya eliminó producto principal, aviso pero 200
-        return res.status(200).json({
-          warning: 'Producto eliminado de tabla principal, pero error eliminando en no relacionados',
-          errorNoRelacionados: err2.message,
-        });
-      }
-
-      res.status(200).json({ success: true, message: 'Producto eliminado correctamente de ambas tablas' });
-    });
-  });
-});
-
+/**
+ * #############  /api/price-comparisons  (MEJORADO - NUEVARAMA)  #############
+ * - Soporta search, dateFrom, dateTo, familia
+ * - Devuelve pares + internos sin pareja + proveedores sin pareja
+ * - Usa sortDate para ORDER BY en UNION (evita error SQLite)
+ */
 app.get('/api/price-comparisons', (req, res) => {
   const search = (req.query.search || '').toString().toLowerCase();
   const dateFrom = (req.query.dateFrom || '').toString(); // YYYY-MM-DD
@@ -822,7 +697,7 @@ app.get('/api/price-comparisons', (req, res) => {
         externalFinalPrice: external,
         internalDate: row.internalDate || null,
         externalDate: row.externalDate || null,
-        companyType: row.companyType === 'Gampack' ? 'supplier' : 'competitor', // conservé tu lógica original
+        companyType: row.companyType === 'Gampack' ? 'supplier' : 'competitor', // conserva tu lógica
         saleConditions: row.saleConditions || 'Desconocido',
         priceDifference,
       };
@@ -870,4 +745,3 @@ app.get('/api/gampack/:codigo/relacionados', (req, res) => {
 });
 
 module.exports = app;
-
