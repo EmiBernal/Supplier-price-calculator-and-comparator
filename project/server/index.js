@@ -2,17 +2,47 @@ const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const multerLib = require('multer');
+const multer = multerLib.default || multerLib;
+const XLSX = require('xlsx');
 
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+
+const upload = multer({
+  limits: { fileSize: 25 * 1024 * 1024}
+});
 
 const dbPath = path.join(__dirname, 'db/database.db');
 const db = new sqlite3.Database(dbPath, err => {
   if (err) console.error('Error al conectar con SQLite:', err.message);
   else console.log('Conectado a la base de datos SQLite en', dbPath);
 });
+
+// === Helpers ===
+function normalizeHeaders(raw) {
+  const arr = Array.isArray(raw) ? raw : [];
+  return Array.from({ length: arr.length }, (_, i) => {
+    const h = arr[i];
+    if (h == null) return '';
+    const s = String(h).trim().replace(/\r?\n/g, ' ').replace(/\s+/g, ' ');
+    return s;
+  });
+}
+
+function parseNumberAR(value) {
+  if (value == null) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  let s = String(value).trim();
+  s = s.replace(/\./g, '').replace(',', '.'); // 1.234,56 -> 1234.56
+  s = s.replace(/[$\sA-Za-z]/g, '');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/* ======== Rutas ======== */
 
 app.get('/api/equivalencias', (req, res) => {
   const search = req.query.search;
@@ -520,12 +550,6 @@ app.delete('/api/relacion/:id', (req, res) => {
   });
 });
 
-/**
- * #############  /api/price-comparisons  (MEJORADO - NUEVARAMA)  #############
- * - Soporta search, dateFrom, dateTo, familia
- * - Devuelve pares + internos sin pareja + proveedores sin pareja
- * - Usa sortDate para ORDER BY en UNION (evita error SQLite)
- */
 app.get('/api/price-comparisons', (req, res) => {
   const search = (req.query.search || '').toString().toLowerCase();
   const dateFrom = (req.query.dateFrom || '').toString(); // YYYY-MM-DD
@@ -742,6 +766,237 @@ app.get('/api/gampack/:codigo/relacionados', (req, res) => {
 
     res.json(data);
   });
+});
+
+app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
+  (async () => {
+    try {
+      if (!req.file) return res.status(400).json({ error: 'Falta archivo (campo "file")' });
+
+      const providerHint = (req.body.provider_hint || '').toString().trim();
+      if (!providerHint) return res.status(400).json({ error: 'El campo proveedor es obligatorio' });
+
+      const isGampack = providerHint.toLowerCase() === 'gampack';
+      const sourceFilename = (req.body.source_filename || '').toString().trim();
+      const headerRow1 = parseInt(req.body.header_row || '1', 10);
+      const headerIndex0 = isNaN(headerRow1) ? 0 : Math.max(0, headerRow1 - 1);
+
+      let mapping = {};
+      if (req.body.mapping) {
+        try { mapping = JSON.parse(req.body.mapping); } catch { mapping = {}; }
+      }
+
+      const wb = XLSX.read(req.file.buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+
+      // Leemos TODA la hoja como matriz
+      const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+      const headersRaw = (matrix[headerIndex0] || []).map(v => String(v ?? ''));
+      const dataRows = matrix.slice(headerIndex0 + 1);
+      console.log('Headers (fila seleccionada):', headersRaw);
+
+      // Convertimos matriz -> objetos con claves = headers crudos
+      const rows = dataRows.map(arr => {
+        const obj = {};
+        for (let i = 0; i < headersRaw.length; i++) {
+          const k = String(headersRaw[i] ?? '');
+          obj[k] = arr?.[i] ?? '';
+        }
+        return obj;
+      });
+
+      // Helpers
+      const normalizeLabel = (v) => String(v ?? '').trim().replace(/\r?\n/g,' ').replace(/\s+/g,' ');
+      const norm = (v) => normalizeLabel(v).toLowerCase();
+      const getCell = (row, key) => {
+        if (!key) return '';
+        if (key in row) return row[key];
+        const nk = norm(key);
+        const realKey = Object.keys(row).find(k => norm(k) === nk);
+        return realKey ? row[realKey] : '';
+      };
+      const parseNumberAR = (value) => {
+        if (value == null) return null;
+        let s = String(value).trim();
+        s = s.replace(/\./g, '').replace(',', '.');
+        s = s.replace(/[$\sA-Za-z]/g, '');
+        const n = Number(s);
+        return Number.isFinite(n) ? n : null;
+      };
+      const run = (sql, params=[]) =>
+        new Promise((resolve, reject) => db.run(sql, params, function (err) {
+          if (err) reject(err); else resolve(this);
+        }));
+      const get = (sql, params=[]) =>
+        new Promise((resolve, reject) => db.get(sql, params, function (err, row) {
+          if (err) reject(err); else resolve(row);
+        }));
+
+      // Columnas (nombre+precio obligatorias; código opcional)
+      const colNom    = isGampack ? (mapping.nom_interno || mapping.nom_externo) : (mapping.nom_externo || mapping.nom_interno);
+      const colCod    = isGampack ? (mapping.cod_interno || mapping.cod_externo) : (mapping.cod_externo || mapping.cod_interno);
+      const colPrecio = mapping.precio_final;
+
+      if (!colNom || !colPrecio) {
+        return res.status(400).json({
+          error: 'Falta asignar columnas obligatorias',
+          detail: { required: isGampack ? ['nom_interno','precio_final'] : ['nom_externo','precio_final'], mapping }
+        });
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      let processed = 0;
+
+      // Upserts que DEVUELVEN id para insertar en *_no_relacionados
+      const upsertListaInterna = async (nombre, codigo, price) => {
+        if (codigo) {
+          const upd = await run(
+            `UPDATE lista_interna
+             SET nom_interno = ?, precio_final = ?, fecha = ?
+             WHERE LOWER(cod_interno) = LOWER(?)`,
+            [nombre, price, today, codigo]
+          );
+          if (!upd.changes) {
+            const ins = await run(
+              `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
+               VALUES (?, ?, ?, ?)`,
+              [nombre, codigo, price, today]
+            );
+            return ins.lastID;
+          } else {
+            const row = await get(
+              `SELECT id_interno FROM lista_interna WHERE LOWER(cod_interno) = LOWER(?) LIMIT 1`,
+              [codigo]
+            );
+            return row?.id_interno ?? null;
+          }
+        } else {
+          const upd = await run(
+            `UPDATE lista_interna
+             SET nom_interno = ?, precio_final = ?, fecha = ?
+             WHERE LOWER(nom_interno) = LOWER(?)`,
+            [nombre, price, today, nombre]
+          );
+          if (!upd.changes) {
+            const ins = await run(
+              `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
+               VALUES (?, NULL, ?, ?)`,
+              [nombre, price, today]
+            );
+            return ins.lastID;
+          } else {
+            const row = await get(
+              `SELECT id_interno FROM lista_interna WHERE LOWER(nom_interno) = LOWER(?) LIMIT 1`,
+              [nombre]
+            );
+            return row?.id_interno ?? null;
+          }
+        }
+      };
+
+      const upsertListaPrecios = async (nombre, codigo, price, proveedor) => {
+        if (codigo) {
+          const upd = await run(
+            `UPDATE lista_precios
+             SET nom_externo = ?, precio_final = ?, tipo_empresa = 'Proveedor', fecha = ?
+             WHERE proveedor = ? AND LOWER(cod_externo) = LOWER(?)`,
+            [nombre, price, today, proveedor, codigo]
+          );
+          if (!upd.changes) {
+            const ins = await run(
+              `INSERT INTO lista_precios
+               (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
+               VALUES (?, ?, ?, 'Proveedor', ?, ?)`,
+              [nombre, codigo, price, today, proveedor]
+            );
+            return ins.lastID;
+          } else {
+            const row = await get(
+              `SELECT id_externo FROM lista_precios WHERE proveedor = ? AND LOWER(cod_externo) = LOWER(?) LIMIT 1`,
+              [proveedor, codigo]
+            );
+            return row?.id_externo ?? null;
+          }
+        } else {
+          const upd = await run(
+            `UPDATE lista_precios
+             SET nom_externo = ?, precio_final = ?, tipo_empresa = 'Proveedor', fecha = ?
+             WHERE proveedor = ? AND LOWER(nom_externo) = LOWER(?)`,
+            [nombre, price, today, proveedor, nombre]
+          );
+          if (!upd.changes) {
+            const ins = await run(
+              `INSERT INTO lista_precios
+               (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
+               VALUES (?, NULL, ?, 'Proveedor', ?, ?)`,
+              [nombre, price, today, proveedor]
+            );
+            return ins.lastID;
+          } else {
+            const row = await get(
+              `SELECT id_externo FROM lista_precios WHERE proveedor = ? AND LOWER(nom_externo) = LOWER(?) LIMIT 1`,
+              [proveedor, nombre]
+            );
+            return row?.id_externo ?? null;
+          }
+        }
+      };
+
+      await run('BEGIN TRANSACTION');
+
+      try {
+        for (const r of rows) {
+          const nombre = String(getCell(r, colNom) ?? '').trim();
+          const codigoRaw = colCod ? String(getCell(r, colCod) ?? '').trim() : '';
+          const codigo = codigoRaw || null;
+          const precioRaw = getCell(r, colPrecio);
+          const price = typeof precioRaw === 'number' ? precioRaw : parseNumberAR(precioRaw);
+
+          if (!nombre || price == null || !Number.isFinite(price)) {
+            continue; // sin nombre o sin precio => skip
+          }
+
+          if (isGampack) {
+            const idInterno = await upsertListaInterna(nombre, codigo, price);
+            if (idInterno) {
+              await run(
+                `INSERT OR IGNORE INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
+                 VALUES (?, ?)`,
+                [idInterno, 'Importado vía carga masiva']
+              );
+              processed++;
+            }
+          } else {
+            const idExterno = await upsertListaPrecios(nombre, codigo, price, providerHint);
+            if (idExterno) {
+              await run(
+                `INSERT OR IGNORE INTO articulos_no_relacionados (id_lista_precios, motivo)
+                 VALUES (?, ?)`,
+                [idExterno, 'Importado vía carga masiva']
+              );
+              processed++;
+            }
+          }
+        }
+
+        await run('COMMIT');
+        return res.json({
+          ok: true,
+          processed,
+          source: sourceFilename || req.file.originalname,
+          header_row_used: headerRow1,
+          saved_to: isGampack ? 'articulos_gampack_no_relacionados' : 'articulos_no_relacionados'
+        });
+      } catch (e) {
+        await run('ROLLBACK');
+        console.error('Fallo importación:', e);
+        return res.status(500).json({ error: 'Fallo importación', detail: e.message });
+      }
+    } catch (err) {
+      console.error('Error en importación:', err);
+      return res.status(500).json({ error: 'Error interno' });
+    }
+  })();
 });
 
 module.exports = app;

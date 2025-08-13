@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Navigation } from '../components/Navigation';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import ImportarListaPrecios from '../components/ImportarListaPrecios';
 import { Screen } from '../types';
 
 interface ManualEntryScreenProps {
@@ -17,6 +18,39 @@ interface FormData {
 }
 
 const BASE_URL = 'http://localhost:4000';
+
+// Botón moderno (solo para este archivo). Usa Tailwind, dark/light y animaciones sutiles.
+function ImportButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="
+        group inline-flex items-center gap-2 rounded-2xl px-4 py-2
+        bg-gradient-to-br from-blue-600 to-indigo-600 text-white
+        dark:from-blue-500 dark:to-indigo-500
+        shadow-sm hover:shadow md:hover:shadow-lg
+        transition-all duration-200
+        focus:outline-none focus:ring-2 focus:ring-blue-400/60 dark:focus:ring-blue-500/60
+        active:scale-[0.98]
+      "
+      title="Importar precios desde un archivo Excel"
+    >
+      {/* Ícono SVG limpio, sin librerías extras */}
+      <svg
+        className="h-5 w-5 transition-transform duration-200 group-hover:translate-y-[1px]"
+        viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M7 10v10a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V10" />
+        <path d="M12 2v12" />
+        <path d="m5 8 7-6 7 6" />
+      </svg>
+      <span className="font-medium">Importar .xlsx</span>
+    </button>
+  );
+}
 
 export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate }) => {
   const [formData, setFormData] = useState<FormData>({
@@ -38,17 +72,18 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
 
+  // Modal Importar
+  const [showImport, setShowImport] = useState(false);
+
   const inferCompanyType = (name: string): 'Gampack' | 'Proveedor' =>
     name.trim().toLowerCase() === 'gampack' ? 'Gampack' : 'Proveedor';
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
-
     if (!formData.company.trim()) newErrors.supplier = 'Proveedor es requerido';
     if (!formData.productName.trim()) newErrors.productName = 'El nombre del producto es requerido';
     if (formData.finalPrice === '' || formData.finalPrice <= 0) newErrors.finalPrice = 'El precio final debe ser mayor a 0';
     if (!formData.date) newErrors.date = 'La fecha es requerida';
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -88,13 +123,10 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
       setSearchResults([]);
       return;
     }
-
     setSearching(true);
-
     try {
       const res = await fetch(`${BASE_URL}/api/products/search/manual?by=${searchCriteria}&q=${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error(await res.text());
-
       const data = await res.json();
       setSearchResults(data.products || []);
     } catch (error) {
@@ -107,7 +139,6 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) return;
-
     setIsSubmitting(true);
     setSuccessMessage('');
     setErrors({});
@@ -252,15 +283,15 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
       <div className="max-w-4xl mx-auto">
         <Navigation onBack={() => onNavigate('home')} title="Registro Manual de Productos" />
 
-        <div className="bg-white dark:bg-white/5 rounded-lg shadow-sm border border-gray-200 dark:border-white/10 p-8">
+        <div className="bg-white dark:bg-white/5 rounded-2xl shadow-sm border border-gray-200 dark:border-white/10 p-8">
           {/* Buscador */}
-          <div className="mb-6 p-6 border border-gray-300 dark:border-white/10 rounded-lg bg-white dark:bg-white/5 shadow-sm relative max-w-4xl mx-auto">
+          <div className="mb-6 p-6 border border-gray-300 dark:border-white/10 rounded-2xl bg-white/80 dark:bg-white/5 backdrop-blur-sm shadow-sm relative max-w-4xl mx-auto">
             <h2 className="text-xl font-semibold mb-5 text-gray-900 dark:text-white text-center">Buscar productos</h2>
             <div className="flex flex-col md:flex-row md:items-end md:space-x-6 space-y-5 md:space-y-0">
               <div className="flex-1">
                 <label className="block text-sm font-medium text-gray-700 dark:text-white/80 mb-2">Buscar por</label>
                 <select
-                  className="w-full border border-gray-300 dark:border-white/10 rounded-md p-3 text-gray-700 dark:bg-white/10 dark:text-white dark:placeholder-white/60 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                  className="w-full border border-gray-300 dark:border-white/10 rounded-xl p-3 text-gray-700 dark:bg-white/10 dark:text-white dark:placeholder-white/60 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50"
                   value={searchCriteria}
                   onChange={(e) => {
                     const value = e.target.value as 'productCode' | 'productName' | 'company';
@@ -279,7 +310,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
               <div className="flex-1 relative">
                 <label className="block text-sm font-medium text-gray-700 dark:text-white/80 mb-2">Consulta</label>
                 <input
-                  className="w-full border border-gray-300 dark:border-white/10 rounded-md p-3 text-gray-700 dark:bg-white/10 dark:text-white dark:placeholder-white/60 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                  className="w-full border border-gray-300 dark:border-white/10 rounded-xl p-3 text-gray-700 dark:bg-white/10 dark:text-white dark:placeholder-white/60 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50"
                   type="text"
                   value={searchQuery}
                   onChange={(e) => {
@@ -291,11 +322,11 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                   autoComplete="off"
                 />
                 {searchResults.length > 0 && (
-                  <ul className="absolute z-50 mt-2 w-full bg-white dark:bg-white/10 border border-gray-300 dark:border-white/10 rounded-md shadow-lg max-h-64 overflow-y-auto backdrop-blur-sm">
+                  <ul className="absolute z-50 mt-2 w-full bg-white dark:bg-[#0f1524] border border-gray-300 dark:border-white/10 rounded-xl shadow-xl max-h-64 overflow-y-auto backdrop-blur-sm">
                     {searchResults.map((prod, idx) => (
                       <li
                         key={idx}
-                        className="px-5 py-3 text-sm text-gray-800 dark:text-white hover:bg-blue-100 dark:hover:bg-white/20 cursor-pointer"
+                        className="px-5 py-3 text-sm text-gray-800 dark:text-white hover:bg-blue-50 dark:hover:bg-white/10 cursor-pointer"
                         onClick={() => handleSuggestionClick(prod)}
                       >
                         <strong>{prod.productName}</strong> — {prod.productCode} | <span className="italic">{prod.company}</span>
@@ -310,19 +341,28 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
           {/* Formulario */}
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
-              <Input
-                label="Empresa"
-                value={formData.company}
-                onChange={(e) => handleInputChange('company', e.target.value)}
-                error={errors.supplier}
-                placeholder="Ingrese nombre de empresa (Gampack si es propio)"
-                className="dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
-              />
+              {/* Empresa */}
+              <div className="flex flex-col gap-2">
+                <Input
+                  label="Empresa"
+                  value={formData.company}
+                  onChange={(e) => handleInputChange('company', e.target.value)}
+                  error={errors.supplier}
+                  placeholder="Ingrese nombre de empresa (Gampack si es propio)"
+                  className="dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
+                />
+              </div>
 
-              <p className="text-sm text-gray-500 dark:text-white/70 md:col-span-2">
+              {/* ÚNICO botón Importar: ocupa el espacio del hueco a la derecha */}
+              <div className="flex items-end justify-start md:justify-end">
+                <ImportButton onClick={() => setShowImport(true)} />
+              </div>
+
+              <p className="text-sm text-gray-600 dark:text-white/70 md:col-span-2">
                 Tipo de empresa detectado: <strong className="dark:text-white">{inferCompanyType(formData.company)}</strong>
               </p>
 
+              {/* Código producto */}
               <Input
                 label="Código producto"
                 value={formData.productCode}
@@ -331,7 +371,10 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                 placeholder="Ingresa el código del producto"
                 className="dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
               />
+              {/* Espacio simétrico para mantener la grilla limpia en desktop */}
+              <div className="hidden md:block" />
 
+              {/* Nombre producto (ocupa 2 columnas) */}
               <div className="relative md:col-span-2">
                 <Input
                   label="Nombre del producto"
@@ -342,7 +385,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                   className="dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
                 />
                 {existingProduct && wantsToUpdate === null && (
-                  <div className="mt-2 bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-300 dark:border-yellow-700 rounded p-3 text-sm text-yellow-800 dark:text-yellow-200 absolute right-0 top-full max-w-md shadow-md z-10">
+                  <div className="mt-2 bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-300 dark:border-yellow-700 rounded-xl p-3 text-sm text-yellow-800 dark:text-yellow-200 absolute right-0 top-full max-w-md shadow-md z-10">
                     Producto ya existente: <strong>{existingProduct.nom_externo ?? existingProduct.nom_interno}</strong> con código <strong>{existingProduct.cod_externo ?? existingProduct.cod_interno}</strong>.<br />
                     ¿Deseas actualizar su precio?
                     <div className="mt-2 flex space-x-2">
@@ -381,19 +424,19 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
 
             {/* Errores y mensajes */}
             {errors.general && (
-              <div className="p-4 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-700 rounded-lg">
+              <div className="p-4 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-700 rounded-xl">
                 <p className="text-red-600 dark:text-red-300">{errors.general}</p>
               </div>
             )}
 
             {successMessage && (
-              <div className="p-4 bg-green-50 dark:bg-green-900/40 border border-green-200 dark:border-green-700 rounded-lg">
+              <div className="p-4 bg-green-50 dark:bg-green-900/40 border border-green-200 dark:border-green-700 rounded-xl">
                 <p className="text-green-600 dark:text-green-300">{successMessage}</p>
               </div>
             )}
 
             {crossSuggestedProduct && (
-              <div className="p-4 bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-300 dark:border-yellow-700 rounded-lg text-sm mt-4">
+              <div className="p-4 bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-300 dark:border-yellow-700 rounded-xl text-sm mt-4">
                 ⚠️ <strong>Advertencia:</strong> el código ingresado ya existe en <strong>{crossSuggestedProduct.companyType}</strong> con el nombre:<br />
                 <strong>{crossSuggestedProduct.name}</strong> (Código: {crossSuggestedProduct.code}).<br />
                 ¿Deseás relacionar este producto con él?
@@ -419,6 +462,61 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
           </form>
         </div>
       </div>
+
+      {/* MODAL Importar Excel: dark/light, blur, card moderna */}
+      {showImport && (
+        <div
+          className="
+            fixed inset-0 z-50
+            bg-black/50 dark:bg-black/60
+            backdrop-blur-sm
+            flex items-center justify-center p-4
+          "
+          role="dialog" aria-modal="true"
+        >
+          <div
+            className="
+              relative w-full max-w-5xl
+              bg-white dark:bg-[#0f1524]
+              text-gray-900 dark:text-white
+              border border-gray-200 dark:border-white/10
+              rounded-2xl shadow-2xl
+              max-h-[90vh] overflow-y-auto
+            "
+          >
+            {/* header del modal */}
+            <div className="sticky top-0 z-10 px-5 py-4 border-b border-gray-200/70 dark:border-white/10 bg-white/90 dark:bg-[#0f1524]/90 backdrop-blur">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Importar lista de precios</h3>
+                <button
+                  onClick={() => setShowImport(false)}
+                  className="
+                    inline-flex items-center justify-center rounded-xl p-2
+                    hover:bg-gray-100 dark:hover:bg-white/10
+                    focus:outline-none focus:ring-2 focus:ring-blue-400/60 dark:focus:ring-blue-500/60
+                    transition
+                  "
+                  aria-label="Cerrar"
+                  title="Cerrar"
+                >
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18" />
+                    <path d="m6 6 12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* contenido del modal */}
+            <div className="p-4">
+              {/* El componente ya trae sus estilos; lo envolvemos con buen contraste */}
+              <div className="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-transparent">
+                <ImportarListaPrecios onClose={() => setShowImport(false)} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
