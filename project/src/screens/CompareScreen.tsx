@@ -67,6 +67,8 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
       if (dateFrom) params.append('dateFrom', dateFrom);
       if (dateTo) params.append('dateTo', dateTo);
       if (familia) params.append('familia', familia);
+      // 🔒 clave: solo pares presentes en relacion_articulos
+      params.append('onlyRelated', '1');
 
       const url = `/api/price-comparisons?${params.toString()}`;
       const res = await fetch(url);
@@ -171,12 +173,37 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
               </span>
             )}
           </p>
+
+          {/* Botón Cambiar vista - moderno y legible en dark */}
           <button
-            className="px-3 py-2 rounded flex items-center bg-gray-200 hover:bg-gray-300 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white border border-transparent dark:border-white/10"
             onClick={handleLayoutChange}
+            aria-pressed={layout === 'table'}
+            className={[
+              // base
+              "group inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200",
+              "shadow-sm ring-1",
+              // light
+              "bg-white text-gray-900 ring-gray-200 hover:bg-gray-50 hover:ring-gray-300 active:bg-gray-100",
+              // dark
+              "dark:bg-gradient-to-br dark:from-white/10 dark:to-white/5 dark:text-white dark:ring-white/15",
+              "dark:hover:from-white/15 dark:hover:to-white/10 dark:hover:ring-white/20",
+              "dark:active:from-white/20 dark:active:to-white/15",
+              // focus
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-900",
+              "dark:focus-visible:ring-white dark:focus-visible:ring-offset-0",
+              // subtle glass
+              "backdrop-blur supports-[backdrop-filter]:backdrop-blur"
+            ].join(" ")}
+            title="Cambiar vista"
           >
-            {layout === 'detailed' ? <List size={18} /> : <LayoutGrid size={18} />}
-            <span className="ml-2 text-sm">Cambiar vista</span>
+            <span className="inline-flex items-center">
+              {layout === 'detailed' ? (
+                <List size={18} className="transition-transform duration-200 group-active:scale-95" />
+              ) : (
+                <LayoutGrid size={18} className="transition-transform duration-200 group-active:scale-95" />
+              )}
+            </span>
+            <span className="transition-colors">Cambiar vista</span>
           </button>
         </div>
 

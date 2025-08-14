@@ -19,24 +19,26 @@ interface FormData {
 
 const BASE_URL = 'http://localhost:4000';
 
-// Botón moderno (solo para este archivo). Usa Tailwind, dark/light y animaciones sutiles.
-function ImportButton({ onClick }: { onClick: () => void }) {
+// Botón moderno y accesible para importar .xlsx
+function ImportButton({ onClick, className = '' }: { onClick: () => void; className?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="
-        group inline-flex items-center gap-2 rounded-2xl px-4 py-2
-        bg-gradient-to-br from-blue-600 to-indigo-600 text-white
-        dark:from-blue-500 dark:to-indigo-500
-        shadow-sm hover:shadow md:hover:shadow-lg
-        transition-all duration-200
-        focus:outline-none focus:ring-2 focus:ring-blue-400/60 dark:focus:ring-blue-500/60
-        active:scale-[0.98]
-      "
+      className={[
+        "group inline-flex items-center gap-2 rounded-2xl px-4 py-2",
+        "bg-gradient-to-br from-blue-600 to-indigo-600 text-white",
+        "dark:from-blue-500 dark:to-indigo-500",
+        "shadow-sm hover:shadow md:hover:shadow-lg",
+        "ring-1 ring-black/0 dark:ring-white/0 hover:ring-black/5 dark:hover:ring-white/10",
+        "backdrop-blur supports-[backdrop-filter]:backdrop-blur",
+        "transition-all duration-200 active:scale-[0.98]",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500",
+        "dark:focus-visible:ring-blue-400 dark:focus-visible:ring-offset-0",
+        className
+      ].join(' ')}
       title="Importar precios desde un archivo Excel"
     >
-      {/* Ícono SVG limpio, sin librerías extras */}
       <svg
         className="h-5 w-5 transition-transform duration-200 group-hover:translate-y-[1px]"
         viewBox="0 0 24 24"
@@ -280,13 +282,41 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0b0f1a] p-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto">
+        {/* Header con acción primaria a la derecha */}
         <Navigation onBack={() => onNavigate('home')} title="Registro Manual de Productos" />
+        <div
+          className="
+            mt-3 mb-4 rounded-2xl px-4 py-3
+            bg-white/70 dark:bg-white/5
+            border border-gray-200/80 dark:border-white/10
+            shadow-sm backdrop-blur supports-[backdrop-filter]:backdrop-blur
+          "
+        >
+          <div className="flex items-center justify-between">
+            <div className="min-w-0">
+              <p className="text-sm text-gray-600 dark:text-white/70 truncate">
+                Cargá productos manualmente o importá desde Excel.
+              </p>
+            </div>
+            {/* Import en la barra de acciones (desktop/tablet) */}
+            <div className="hidden sm:block">
+              <ImportButton onClick={() => setShowImport(true)} />
+            </div>
+          </div>
+        </div>
 
-        <div className="bg-white dark:bg-white/5 rounded-2xl shadow-sm border border-gray-200 dark:border-white/10 p-8">
+        {/* Card principal */}
+        <div className="bg-white dark:bg-white/5 rounded-2xl shadow-sm border border-gray-200 dark:border-white/10 p-6 sm:p-8">
           {/* Buscador */}
-          <div className="mb-6 p-6 border border-gray-300 dark:border-white/10 rounded-2xl bg-white/80 dark:bg-white/5 backdrop-blur-sm shadow-sm relative max-w-4xl mx-auto">
-            <h2 className="text-xl font-semibold mb-5 text-gray-900 dark:text-white text-center">Buscar productos</h2>
+          <div className="mb-6 p-6 border border-gray-300 dark:border-white/10 rounded-2xl bg-white/80 dark:bg-white/5 backdrop-blur-sm shadow-sm relative">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Buscar productos</h2>
+              {/* Import visible en mobile dentro de la card */}
+              <div className="sm:hidden">
+                <ImportButton onClick={() => setShowImport(true)} />
+              </div>
+            </div>
             <div className="flex flex-col md:flex-row md:items-end md:space-x-6 space-y-5 md:space-y-0">
               <div className="flex-1">
                 <label className="block text-sm font-medium text-gray-700 dark:text-white/80 mb-2">Buscar por</label>
@@ -318,7 +348,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                     setSearchQuery(val);
                     handleLiveSearch(val);
                   }}
-                  placeholder="Escriba su búsqueda"
+                  placeholder="Escribí tu búsqueda"
                   autoComplete="off"
                 />
                 {searchResults.length > 0 && (
@@ -340,7 +370,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
 
           {/* Formulario */}
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Empresa */}
               <div className="flex flex-col gap-2">
                 <Input
@@ -351,16 +381,10 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                   placeholder="Ingrese nombre de empresa (Gampack si es propio)"
                   className="dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
                 />
+                <p className="text-sm text-gray-600 dark:text-white/70">
+                  Tipo detectado: <strong className="dark:text-white">{inferCompanyType(formData.company)}</strong>
+                </p>
               </div>
-
-              {/* ÚNICO botón Importar: ocupa el espacio del hueco a la derecha */}
-              <div className="flex items-end justify-start md:justify-end">
-                <ImportButton onClick={() => setShowImport(true)} />
-              </div>
-
-              <p className="text-sm text-gray-600 dark:text-white/70 md:col-span-2">
-                Tipo de empresa detectado: <strong className="dark:text-white">{inferCompanyType(formData.company)}</strong>
-              </p>
 
               {/* Código producto */}
               <Input
@@ -368,26 +392,24 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                 value={formData.productCode}
                 onChange={(e) => handleInputChange('productCode', e.target.value)}
                 error={errors.productCode}
-                placeholder="Ingresa el código del producto"
+                placeholder="Ingresá el código del producto"
                 className="dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
               />
-              {/* Espacio simétrico para mantener la grilla limpia en desktop */}
-              <div className="hidden md:block" />
 
-              {/* Nombre producto (ocupa 2 columnas) */}
+              {/* Nombre producto (2 columnas) */}
               <div className="relative md:col-span-2">
                 <Input
                   label="Nombre del producto"
                   value={formData.productName}
                   onChange={(e) => handleInputChange('productName', e.target.value)}
                   error={errors.productName}
-                  placeholder="Ingresa el nombre del producto"
+                  placeholder="Ingresá el nombre del producto"
                   className="dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
                 />
                 {existingProduct && wantsToUpdate === null && (
                   <div className="mt-2 bg-yellow-50 dark:bg-yellow-900/40 border border-yellow-300 dark:border-yellow-700 rounded-xl p-3 text-sm text-yellow-800 dark:text-yellow-200 absolute right-0 top-full max-w-md shadow-md z-10">
                     Producto ya existente: <strong>{existingProduct.nom_externo ?? existingProduct.nom_interno}</strong> con código <strong>{existingProduct.cod_externo ?? existingProduct.cod_interno}</strong>.<br />
-                    ¿Deseas actualizar su precio?
+                    ¿Deseás actualizar su precio?
                     <div className="mt-2 flex space-x-2">
                       <Button type="button" onClick={() => setWantsToUpdate(true)}>Sí</Button>
                       <Button type="button" variant="secondary" onClick={() => setWantsToUpdate(false)}>No</Button>
@@ -447,17 +469,21 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
               </div>
             )}
 
-            <div className="flex justify-end space-x-4">
-              <Button type="button" variant="secondary" onClick={() => onNavigate('home')}>Volver</Button>
-              <Button
-                type="submit"
-                disabled={
-                  isSubmitting ||
-                  (existingProduct && wantsToUpdate === null && !crossSuggestedProduct)
-                }
-              >
-                {isSubmitting ? 'Subiendo...' : 'Subir'}
-              </Button>
+            <div className="flex justify-between items-center gap-3">
+              {/* Acceso secundario a importar, por si el usuario scrollea mucho */}
+              <ImportButton onClick={() => setShowImport(true)} className="sm:hidden" />
+              <div className="ml-auto flex items-center gap-3">
+                <Button type="button" variant="secondary" onClick={() => onNavigate('home')}>Volver</Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    isSubmitting ||
+                    (existingProduct && wantsToUpdate === null && !crossSuggestedProduct)
+                  }
+                >
+                  {isSubmitting ? 'Subiendo...' : 'Subir'}
+                </Button>
+              </div>
             </div>
           </form>
         </div>
@@ -493,7 +519,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                   className="
                     inline-flex items-center justify-center rounded-xl p-2
                     hover:bg-gray-100 dark:hover:bg-white/10
-                    focus:outline-none focus:ring-2 focus:ring-blue-400/60 dark:focus:ring-blue-500/60
+                    focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400
                     transition
                   "
                   aria-label="Cerrar"
@@ -509,7 +535,6 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
 
             {/* contenido del modal */}
             <div className="p-4">
-              {/* El componente ya trae sus estilos; lo envolvemos con buen contraste */}
               <div className="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-transparent">
                 <ImportarListaPrecios onClose={() => setShowImport(false)} />
               </div>
