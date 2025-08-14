@@ -86,11 +86,21 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     setLayout((prev) => (prev === 'detailed' ? 'table' : 'detailed'));
   };
 
-  // acepta números opcionales y puede devolver null (N/A)
-  const getDifference = (internal?: number | null, external?: number | null) => {
+  // Helpers diferencia
+  const getDifferencePct = (internal?: number | null, external?: number | null) => {
     if (external == null || external === 0 || internal == null) return null;
     const diff = ((internal - external) / external) * 100;
     return parseFloat(diff.toFixed(2));
+  };
+  const getDifferenceAmt = (internal?: number | null, external?: number | null) => {
+    if (internal == null || external == null) return null;
+    const amt = internal - external;
+    return parseFloat(amt.toFixed(2));
+  };
+  const formatSignedMoney = (n: number) => {
+    const sign = n > 0 ? '+' : n < 0 ? '−' : '';
+    const abs = Math.abs(n).toFixed(2);
+    return `${sign}$${abs}`;
   };
 
   const clearFilters = () => {
@@ -174,24 +184,18 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
             )}
           </p>
 
-          {/* Botón Cambiar vista - moderno y legible en dark */}
+          {/* Botón Cambiar vista - accesible y legible en dark */}
           <button
             onClick={handleLayoutChange}
             aria-pressed={layout === 'table'}
             className={[
-              // base
-              "group inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200",
-              "shadow-sm ring-1",
-              // light
+              "group inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 shadow-sm ring-1",
+              // Light
               "bg-white text-gray-900 ring-gray-200 hover:bg-gray-50 hover:ring-gray-300 active:bg-gray-100",
-              // dark
-              "dark:bg-gradient-to-br dark:from-white/10 dark:to-white/5 dark:text-white dark:ring-white/15",
-              "dark:hover:from-white/15 dark:hover:to-white/10 dark:hover:ring-white/20",
-              "dark:active:from-white/20 dark:active:to-white/15",
-              // focus
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-900",
-              "dark:focus-visible:ring-white dark:focus-visible:ring-offset-0",
-              // subtle glass
+              // Dark (ya no queda blanco)
+              "dark:bg-white/10 dark:text-white dark:ring-white/15 dark:hover:bg-white/15 dark:hover:ring-white/20 dark:active:bg-white/20",
+              // Focus
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-900 dark:focus-visible:ring-white dark:focus-visible:ring-offset-0",
               "backdrop-blur supports-[backdrop-filter]:backdrop-blur"
             ].join(" ")}
             title="Cambiar vista"
@@ -221,8 +225,15 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
                 key: 'priceDifference',
                 label: 'Diferencia',
                 render: (_v, row) => {
-                  const diff = getDifference(row.internalFinalPrice as number | null, row.externalFinalPrice as number | null);
-                  return <span className="inline-block px-2 py-0.5 rounded dark:bg-white/10 dark:text-white font-medium">{diff == null ? 'N/A' : `${diff}%`}</span>;
+                  const pct = getDifferencePct(row.internalFinalPrice as number | null, row.externalFinalPrice as number | null);
+                  const amt = getDifferenceAmt(row.internalFinalPrice as number | null, row.externalFinalPrice as number | null);
+                  if (pct == null || amt == null) return <span className="dark:text-white">N/A</span>;
+                  return (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-white/10 dark:text-white">{pct}%</span>
+                      <span className="text-sm text-gray-700 dark:text-white/80">{formatSignedMoney(amt)}</span>
+                    </span>
+                  );
                 },
               },
             ]}
@@ -234,7 +245,8 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
             {!loading && comparisons.map((item, i) => {
               const internal = typeof item.internalFinalPrice === 'number' ? item.internalFinalPrice : null;
               const external = typeof item.externalFinalPrice === 'number' ? item.externalFinalPrice : null;
-              const diff = getDifference(internal, external);
+              const pct = getDifferencePct(internal, external);
+              const amt = getDifferenceAmt(internal, external);
 
               return (
                 <div key={i} className="border rounded-xl p-4 shadow-sm bg-white dark:bg-white/5 border-gray-200 dark:border-white/10 hover:shadow-md transition duration-300">
@@ -261,7 +273,14 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
                     </div>
                     <div className="text-center">
                       <p className="text-xs text-gray-500 dark:text-white/60">Diferencia</p>
-                      <p className="text-lg font-semibold dark:text-white bg-white/10 inline-block px-2 py-0.5 rounded">{diff == null ? 'N/A' : `${diff}%`}</p>
+                      {pct == null || amt == null ? (
+                        <p className="text-sm dark:text-white/80">N/A</p>
+                      ) : (
+                        <div className="inline-flex flex-col items-center gap-1">
+                          <span className="px-2 py-0.5 rounded text-sm font-semibold bg-gray-100 text-gray-800 dark:bg-white/10 dark:text-white">{pct}%</span>
+                          <span className="text-sm text-gray-700 dark:text-white/80">{formatSignedMoney(amt)}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="text-right">
                       <p className="text-xs text-gray-500 dark:text-white/60">Producto Proveedor</p>
