@@ -19,6 +19,35 @@ interface FormData {
 
 const BASE_URL = 'http://localhost:4000';
 
+// 🔧 NUEVO: normaliza cualquier forma de producto (manual o Excel)
+function normalizeProduct(p: any) {
+  const company =
+    p.company ?? p.proveedor ?? p.supplier ?? p.companyName ?? p.empresa ?? '';
+
+  const productCode =
+    p.productCode ?? p.code ?? p.codigo ?? p.cod_externo ?? p.cod_interno ?? '';
+
+  const productName =
+    p.productName ??
+    p.name ??
+    p.descripcion ??
+    p.description ??
+    p.nom_externo ??
+    p.nom_interno ??
+    '';
+
+  const finalPrice =
+    p.finalPrice ?? p.precio_final ?? p.precio ?? p.price ?? null;
+
+  return {
+    ...p,
+    company,
+    productCode,
+    productName,
+    finalPrice,
+  };
+}
+
 // Botón moderno y accesible para importar .xlsx
 function ImportButton({ onClick, className = '' }: { onClick: () => void; className?: string }) {
   return (
@@ -120,23 +149,29 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     }
   };
 
-  const handleLiveSearch = async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    setSearching(true);
-    try {
-      const res = await fetch(`${BASE_URL}/api/products/search/manual?by=${searchCriteria}&q=${encodeURIComponent(query)}`);
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setSearchResults(data.products || []);
-    } catch (error) {
-      console.error('Error al buscar productos:', error);
-    } finally {
-      setSearching(false);
-    }
-  };
+const handleLiveSearch = async (query: string) => {
+  if (!query.trim()) {
+    setSearchResults([]);
+    return;
+  }
+  setSearching(true);
+  try {
+    const res = await fetch(
+      `${BASE_URL}/api/products/search/manual?by=${searchCriteria}&q=${encodeURIComponent(query)}`
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    // 🔧 Normalizamos resultados (incluye los venidos de Excel)
+    const normalized = (data.products || []).map(normalizeProduct);
+    setSearchResults(normalized);
+  } catch (error) {
+    console.error('Error al buscar productos:', error);
+  } finally {
+    setSearching(false);
+  }
+};
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -257,18 +292,20 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     handleSubmitWithLink(accept);
   };
 
-  const handleSuggestionClick = (prod: any) => {
-    setFormData({
-      company: prod.company,
-      productCode: prod.productCode,
-      productName: prod.productName,
-      finalPrice: prod.finalPrice ?? '',
-      date: new Date().toISOString().split('T')[0],
-    });
-    setSearchQuery('');
-    setSearchResults([]);
-    setWantsToUpdate(true);
-  };
+const handleSuggestionClick = (prod: any) => {
+  const np = normalizeProduct(prod);
+  setFormData({
+    company: np.company,
+    productCode: np.productCode,
+    productName: np.productName,
+    finalPrice: np.finalPrice ?? '',
+    date: new Date().toISOString().split('T')[0],
+  });
+  setSearchQuery('');
+  setSearchResults([]);
+  setWantsToUpdate(true);
+};
+
 
   const handleInputChange = (field: keyof FormData, value: string | number) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -351,19 +388,34 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
                   placeholder="Escribí tu búsqueda"
                   autoComplete="off"
                 />
-                {searchResults.length > 0 && (
-                  <ul className="absolute z-50 mt-2 w-full bg-white dark:bg-[#0f1524] border border-gray-300 dark:border-white/10 rounded-xl shadow-xl max-h-64 overflow-y-auto backdrop-blur-sm">
-                    {searchResults.map((prod, idx) => (
-                      <li
-                        key={idx}
-                        className="px-5 py-3 text-sm text-gray-800 dark:text-white hover:bg-blue-50 dark:hover:bg-white/10 cursor-pointer"
-                        onClick={() => handleSuggestionClick(prod)}
-                      >
-                        <strong>{prod.productName}</strong> — {prod.productCode} | <span className="italic">{prod.company}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                  {searchResults.length > 0 && (
+                    <ul
+                      className="absolute z-50 mt-2 w-full
+                                bg-white dark:bg-[#0f1524]
+                                border border-gray-300 dark:border-white/10
+                                rounded-xl shadow-xl max-h-64 overflow-y-auto backdrop-blur-sm"
+                    >
+                      {searchResults.map((raw, idx) => {
+                        const prod = normalizeProduct(raw);
+                        const name = prod.productName || '(Sin nombre)';
+                        const code = prod.productCode || '—';
+                        const comp = prod.company || '—';
+
+                        return (
+                          <li
+                            key={idx}
+                            className="px-5 py-3 text-sm
+                                      text-gray-800 dark:text-white
+                                      hover:bg-blue-50 dark:hover:bg-white/10
+                                      cursor-pointer"
+                            onClick={() => handleSuggestionClick(prod)}
+                          >
+                            <strong>{name}</strong> — {code} | <span className="italic">{comp}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
               </div>
             </div>
           </div>

@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Navigation } from '../components/Navigation';
 import { Input } from '../components/Input';
 import { Table, Column } from '../components/Table';
 import { ProductEquivalence } from '../tipos/database';
 import { Search } from 'lucide-react';
 import { Screen } from '../types';
+import { Button } from '../components/Button';
 
 interface EquivalencesScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -26,7 +26,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
       const res = await fetch(`http://localhost:4000/api/equivalencias?search=${encodeURIComponent(search)}`);
       if (!res.ok) throw new Error('Error al obtener equivalencias');
       const data = await res.json();
-      setEquivalences(data);
+      setEquivalences(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching equivalences:', error);
       setEquivalences([]);
@@ -73,16 +73,13 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
   };
 
   const handleDelete = async (id: number) => {
-    console.log('🔴 Enviando DELETE para id:', id);
     try {
       const res = await fetch(`http://localhost:4000/api/relacion/${id}`, {
         method: 'DELETE',
       });
-
       const data = await res.json();
-      console.log('🟢 Respuesta del backend:', data);
-      if (data.success) {
-        setEquivalences((prev) => prev.filter((eq) => eq.id !== id));
+      if (data?.success) {
+        setEquivalences((prev) => prev.filter((eq) => (eq as any).id !== id));
       } else {
         alert('Error eliminando relación');
       }
@@ -107,21 +104,17 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
       render: (value?: string) => {
         if (!value) {
           return (
-            <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-white/80">
+            <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-white/80">
               Sin criterio
             </span>
           );
         }
-
-        const colors = {
+        const colors: Record<string, string> = {
           manual: 'bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-200',
           name: 'bg-green-100 text-green-800 dark:bg-green-500/20 dark:text-green-200',
           codigo: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-500/20 dark:text-yellow-200',
         };
-
-        // @ts-ignore
         const color = colors[value] || 'bg-gray-100 text-gray-800 dark:bg-white/10 dark:text-white';
-
         return (
           <span className={`px-2 py-1 rounded-full text-xs font-medium ${color}`}>
             {value.charAt(0).toUpperCase() + value.slice(1)}
@@ -139,12 +132,12 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
             <summary className="list-none text-gray-600 hover:text-black dark:text-white/70 dark:hover:text-white px-2 py-1 text-lg cursor-pointer">
               ⋮
             </summary>
-            <div className="absolute right-0 mt-2 bg-white dark:bg-white/10 border border-gray-200 dark:border-white/10 rounded shadow-md z-10 backdrop-blur-sm">
+            <div className="absolute right-0 mt-2 min-w-[140px] bg-white dark:bg-[#0e1526] border border-gray-200 dark:border-white/10 rounded shadow-md z-10 backdrop-blur-sm">
               <button
-                className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:text-red-300 dark:hover:bg-white/20"
+                className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:text-red-300 dark:hover:bg-white/10"
                 onClick={(e) => {
                   e.preventDefault();
-                  handleDelete(row.id);
+                  handleDelete((row as any).id);
                 }}
               >
                 Eliminar
@@ -159,20 +152,17 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0b0f1a] p-6">
       <div className="max-w-7xl mx-auto">
-        <Navigation
-          onBack={() => onNavigate('home')}
-          title="Equivalencia entre productos"
-        />
 
-        <div className="bg-white dark:bg-white/5 rounded-lg shadow-sm border border-gray-200 dark:border-white/10 p-6">
+
+        <div className="bg-white dark:bg-[#0e1526] rounded-lg shadow-sm border border-gray-200 dark:border-white/10 p-6">
           {/* Buscador */}
           <div className="mb-6">
             <div className="relative max-w-md">
               <Input
-                placeholder="Busca por nombre o por código..."
+                placeholder="Buscá por nombre o por código…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
+                className="pl-10 bg-white dark:bg-white/10 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-white/60 border-gray-200 dark:border-white/10 focus:border-blue-300 dark:focus:border-white/30 focus:ring-blue-200/50 dark:focus:ring-white/20"
               />
               <Search
                 size={20}
@@ -184,7 +174,9 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
 
           {/* Tabla */}
           <div className="overflow-x-auto">
-            {equivalences.length === 0 ? (
+            {loading ? (
+              <p className="text-sm text-gray-600 dark:text-white/70">Cargando…</p>
+            ) : equivalences.length === 0 ? (
               <p className="text-sm text-gray-600 dark:text-white/70">No hay equivalencias para mostrar</p>
             ) : (
               <Table
@@ -193,7 +185,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
                 sortKey={sortKey}
                 sortDirection={sortDirection}
                 onSort={handleSort}
-                getRowKey={(row) => row.id}
+                getRowKey={(row) => (row as any).id}
               />
             )}
           </div>

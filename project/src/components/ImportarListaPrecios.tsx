@@ -231,7 +231,7 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
                        dark:focus:ring-blue-500/40 dark:focus:border-blue-500/60"
           />
           <div className="text-xs mt-1 text-gray-600 dark:text-white/60">
-            Sugerencia: probá 1, 2, 3... hasta que arriba veas los headers correctos.
+            Sugerencia: probá 1, 2, 3... hasta que puedas ver los headers correctos.
           </div>
         </div>
       )}

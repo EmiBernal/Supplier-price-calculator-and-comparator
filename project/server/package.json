@@ -15,9 +15,11 @@
     "framer-motion": "^12.23.12",
     "multer": "^2.0.2",
     "sqlite3": "^5.1.7",
+    "string-similarity": "^4.0.4",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/string-similarity": "^4.0.2",
     "jest": "^30.0.5",
     "nodemon": "^3.1.10",
     "supertest": "^7.1.4"
