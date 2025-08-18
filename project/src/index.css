@@ -29,3 +29,16 @@ body {
 @supports (overscroll-behavior: contain) {
   html { overscroll-behavior-y: contain; }
 }
+
+/* Fix de visibilidad para <select> en modo oscuro (popup nativo) */
+.dark select.select-dark option {
+  /* El menú desplegable suele usar estilos nativos; esto ayuda en Chromium/Firefox */
+  color: #0f172a;            /* slate-900: texto oscuro para buen contraste */
+  background-color: #ffffff; /* fondo claro para que se lea el texto */
+}
+
+/* Opcional: forzar el color del item seleccionado dentro del control (no popup) */
+.dark select.select-dark {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.06);
+}

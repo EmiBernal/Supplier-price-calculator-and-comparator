@@ -24,19 +24,15 @@ DROP TABLE IF EXISTS lista_interna;
 CREATE TABLE lista_precios (
   id_externo   INTEGER PRIMARY KEY AUTOINCREMENT,
   nom_externo  TEXT    NOT NULL,
-  cod_externo  TEXT,                 -- puede ser NULL
+  cod_externo  TEXT,
   precio_final REAL    NOT NULL,
   tipo_empresa TEXT    NOT NULL,
-  fecha        TEXT    NOT NULL,
+  fecha        TEXT    NOT NULL,      -- YYYY-MM-DD
   proveedor    TEXT    NOT NULL
 );
-
--- Único parcial: evita duplicados cuando HAY código
 CREATE UNIQUE INDEX IF NOT EXISTS ux_lp_cod_prov_not_null
   ON lista_precios(cod_externo, proveedor)
   WHERE cod_externo IS NOT NULL;
-
--- Búsquedas/updates por nombre+proveedor (case-insensitive en nombre)
 CREATE INDEX IF NOT EXISTS ix_lp_nom_prov
   ON lista_precios(LOWER(nom_externo), proveedor);
 
@@ -44,17 +40,13 @@ CREATE INDEX IF NOT EXISTS ix_lp_nom_prov
 CREATE TABLE lista_interna (
   id_interno   INTEGER PRIMARY KEY AUTOINCREMENT,
   nom_interno  TEXT    NOT NULL,
-  cod_interno  TEXT,                 -- puede ser NULL
+  cod_interno  TEXT,
   precio_final REAL    NOT NULL,
-  fecha        TEXT    NOT NULL
+  fecha        TEXT    NOT NULL       -- YYYY-MM-DD
 );
-
--- Único parcial: evita duplicados cuando HAY código
 CREATE UNIQUE INDEX IF NOT EXISTS ux_li_cod_not_null
   ON lista_interna(cod_interno)
   WHERE cod_interno IS NOT NULL;
-
--- Búsquedas/updates por nombre (case-insensitive)
 CREATE INDEX IF NOT EXISTS ix_li_nom
   ON lista_interna(LOWER(nom_interno));
 
@@ -63,11 +55,13 @@ CREATE TABLE relacion_articulos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   id_lista_precios INTEGER NOT NULL,  -- proveedor
   id_lista_interna INTEGER NOT NULL,  -- gampack
-  criterio_relacion TEXT NOT NULL,
+  criterio_relacion TEXT NOT NULL,    -- 'manual' | 'automatic' | 'name' | 'codigo' etc.
+  created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP), -- fecha/hora de creación de la relación
   FOREIGN KEY (id_lista_precios) REFERENCES lista_precios(id_externo) ON DELETE CASCADE,
   FOREIGN KEY (id_lista_interna) REFERENCES lista_interna(id_interno) ON DELETE CASCADE,
   UNIQUE(id_lista_precios)
 );
+CREATE INDEX IF NOT EXISTS ix_rel_created_at ON relacion_articulos(created_at);
 
 -- No relacionados (externos)
 CREATE TABLE articulos_no_relacionados (

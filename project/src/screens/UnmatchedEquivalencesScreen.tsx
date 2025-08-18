@@ -53,21 +53,18 @@ type InternalItem = {
 type Suggestion = {
   internal: InternalItem;
   external: ExternalItem;
-  reason: string;   // p.ej. "Nombre similar (0.83)"
-  score: number;    // 0..1
-  id: string;       
+  reason: string;
+  score: number;
+  id: string;
 };
 
-const SIMILARITY_THRESHOLD = 0.60;   // ajustable
-const MAX_CANDIDATES_PER_INTERNAL = Infinity; // para no inundar la UI
-const BATCH_SIZE = 200;              // tamaño de lote para no bloquear
+const SIMILARITY_THRESHOLD = 0.60;
+const MAX_CANDIDATES_PER_INTERNAL = Infinity;
+const BATCH_SIZE = 200;
 
 const sortIcon = (dir?: SortDir) =>
-  dir ? (
-    <span className="inline-block ml-1 select-none">{dir === 'asc' ? '▲' : '▼'}</span>
-  ) : (
-    <span className="inline-block ml-1 opacity-30 select-none">↕</span>
-  );
+  dir ? <span className="inline-block ml-1 select-none">{dir === 'asc' ? '▲' : '▼'}</span>
+      : <span className="inline-block ml-1 opacity-30 select-none">↕</span>;
 
 function classHeader(active: boolean) {
   return `px-6 py-3 text-left font-medium cursor-pointer select-none ${
@@ -148,6 +145,9 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const [sortIntKey, setSortIntKey] = useState<SortKeyInternal>('fecha');
   const [sortIntDir, setSortIntDir] = useState<SortDir>('desc');
 
+  // Top button
+  const [showTop, setShowTop] = useState(false);
+
   useEffect(() => {
     fetch('http://localhost:4000/api/no-relacionados/proveedores')
       .then(res => res.json())
@@ -160,6 +160,49 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       .catch(() => setInternals([]));
   }, []);
 
+  // Evitar refresco con Ctrl/Cmd+R y F5 en esta pantalla + atajo 't' para Top
+// Evitar refresco con Ctrl/Cmd+R y F5 en esta pantalla + atajo 't' para Top
+useEffect(() => {
+  const isEditable = (el: EventTarget | null) => {
+    const n = (el as HTMLElement | null);
+    if (!n) return false;
+    const tag = (n.tagName || '').toLowerCase();
+    return (
+      (tag === 'input' || tag === 'textarea' || tag === 'select') ||
+      (n as HTMLElement).isContentEditable
+    );
+  };
+
+  const onKey = (e: KeyboardEvent) => {
+    const targetIsEditable = isEditable(e.target);
+
+    // bloquear refresh sólo con combinaciones de navegador
+    const k = e.key.toLowerCase();
+    if ((k === 'r' && (e.ctrlKey || e.metaKey)) || e.key === 'F5') {
+      e.preventDefault();
+      return;
+    }
+
+    // atajo "t" => sólo si NO estoy escribiendo en un campo
+    if (!targetIsEditable && k === 't' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  window.addEventListener('keydown', onKey);
+  return () => window.removeEventListener('keydown', onKey);
+}, []);
+
+
+  // Mostrar botón Top al hacer scroll
+  useEffect(() => {
+    const onScroll = () => setShowTop(window.scrollY > 400);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   /* ---------- Índice eficiente por tokens + trigramas (externos) ---------- */
   const extIndexed = useMemo(() => {
     type ExtIdx = {
@@ -169,7 +212,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       toks: string[];
     };
     const items: ExtIdx[] = [];
-    const inv = new Map<string, number[]>(); // token -> indices en items
+    const inv = new Map<string, number[]>();
     externals.forEach((e, idx) => {
       const nameSan = sanitizeText(e.nom_externo ?? '');
       const tri = buildTrigramFreq(nameSan);
@@ -184,7 +227,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     return { items, inv };
   }, [externals]);
 
-  /* ---------- Auto-relación por nombre (modo batch, no bloquea UI) ---------- */
+  /* ---------- Auto-relación por nombre ---------- */
   const generateAutoMatches = useCallback(async () => {
     if (internals.length === 0 || extIndexed.items.length === 0) {
       setSuggestions([]);
@@ -194,7 +237,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     setLoadingAuto(true);
 
     const acc: Suggestion[] = [];
-    const seen = new Set<string>(); // para de-dupe
+    const seen = new Set<string>();
 
     for (let start = 0; start < internals.length; start += BATCH_SIZE) {
       const end = Math.min(start + BATCH_SIZE, internals.length);
@@ -208,18 +251,16 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
         const iToks = Array.from(new Set(tokenizeName(iName)));
         if (iToks.length === 0) continue;
 
-        // 1) Candidatos por tokens compartidos
-        const candidateIdx = new Map<number, number>(); // idx externo -> overlapCount
+        const candidateIdx = new Map<number, number>();
         iToks.forEach(t => {
           const arr = extIndexed.inv.get(t);
           if (!arr) return;
           arr.forEach(idx => candidateIdx.set(idx, (candidateIdx.get(idx) || 0) + 1));
         });
 
-        // 2) Rankeo por overlap de tokens y cálculo de similitud en top-N
         const ranked = [...candidateIdx.entries()]
           .sort((a, b) => b[1] - a[1])
-          .slice(0, 50) // límite defensivo
+          .slice(0, 50)
           .map(([idx]) => extIndexed.items[idx]);
 
         let local: Suggestion[] = [];
@@ -238,19 +279,15 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
           }
         }
 
-        // 3) Limitar sugerencias por interno
         local.sort((a, b) => b.score - a.score);
         local.slice(0, MAX_CANDIDATES_PER_INTERNAL).forEach(s => {
           seen.add(s.id);
           acc.push(s);
         });
       }
-
-      // ceder tiempo al event loop para no congelar
       await new Promise(r => setTimeout(r, 0));
     }
 
-    // Orden global
     acc.sort((a, b) => b.score - a.score);
     setSuggestions(acc);
     setReviewOpen(true);
@@ -292,7 +329,6 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const rejectSuggestion = (s: Suggestion) => {
     setIgnoredPairs(prev => new Set(prev).add(s.id));
     setSuggestions(prev => prev.filter(x => x.id !== s.id));
-    // NO quita productos de las tablas (quedan donde estaban)
   };
 
   /* ---------- Filtrado/sort de tablas ---------- */
@@ -369,62 +405,51 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0b0f1a] p-6">
+      {/* CSS específico para mejorar opciones en modo oscuro */}
+      <style>{`
+        .dark select option, .dark datalist option {
+          color: #0f172a;           /* slate-900 */
+          background: #ffffff;
+        }
+      `}</style>
+
       <div className="max-w-7xl mx-auto">
         <Navigation onBack={() => onNavigate('home')} title="" />
 
         <header className="relative mt-1 mb-4">
-          <div
-            className="
-              rounded-2xl border border-gray-200 dark:border-white/10
-              bg-white/70 dark:bg-[#0e1526]/60
-              backdrop-blur
-              shadow-sm
-              px-5 py-4
-            "
-          >
+          <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-white/70 dark:bg-[#0e1526]/60 backdrop-blur shadow-sm px-5 py-4">
             <div className="flex items-start justify-between gap-4">
-              {/* Lado izquierdo: breadcrumb mini + H1 + subtítulo */}
               <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   Gampack · Vinculaciones
                 </div>
 
                 <h1 className="mt-1 text-2xl md:text-3xl font-extrabold leading-tight tracking-tight">
-                  <span className="
-                    bg-clip-text text-transparent
-                    bg-gradient-to-r from-blue-600 via-indigo-500 to-fuchsia-500
-                    dark:from-blue-300 dark:via-indigo-300 dark:to-pink-300
-                  ">
+                  <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-600 via-indigo-500 to-fuchsia-500 dark:from-blue-300 dark:via-indigo-300 dark:to-pink-300">
                     Relacionar productos
                   </span>
-                  <span className="ml-2 text-gray-900 dark:text-gray-100">
-                    manualmente
-                  </span>
+                  <span className="ml-2 text-gray-900 dark:text-gray-100">manualmente</span>
                 </h1>
 
                 <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
                   Detectá coincidencias por <b>nombre</b>, revisá el motivo y confirmá o descartá cada relación.
                 </p>
 
-                {/* Chips con conteos (toman el estado actual) */}
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center rounded-full border border-blue-200 dark:border-blue-400/30 px-2.5 py-1 text-xs
-                                  text-blue-700 dark:text-blue-200 bg-blue-50 dark:bg-blue-900/20">
+                  <span className="inline-flex items-center rounded-full border border-blue-200 dark:border-blue-400/30 px-2.5 py-1 text-xs text-blue-700 dark:text-blue-200 bg-blue-50 dark:bg-blue-900/20">
                     Gampack: <span className="ml-1 font-semibold">{internals.length}</span>
                   </span>
-                  <span className="inline-flex items-center rounded-full border border-indigo-200 dark:border-indigo-400/30 px-2.5 py-1 text-xs
-                                  text-indigo-700 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-900/20">
+                  <span className="inline-flex items-center rounded-full border border-indigo-200 dark:border-indigo-400/30 px-2.5 py-1 text-xs text-indigo-700 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-900/20">
                     Proveedores: <span className="ml-1 font-semibold">{externals.length}</span>
                   </span>
                   {suggestions.length > 0 && (
-                    <span className="inline-flex items-center rounded-full border border-emerald-200 dark:border-emerald-400/30 px-2.5 py-1 text-xs
-                                    text-emerald-700 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-900/20">
+                    <span className="inline-flex items-center rounded-full border border-emerald-200 dark:border-emerald-400/30 px-2.5 py-1 text-xs text-emerald-700 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-900/20">
                       Sugerencias: <span className="ml-1 font-semibold">{suggestions.length}</span>
                     </span>
                   )}
                 </div>
               </div>
-              {/* Lado derecho: CTA */}
+
               <div className="flex-shrink-0">
                 <Button onClick={generateAutoMatches} disabled={loadingAuto}>
                   {loadingAuto ? 'Buscando coincidencias…' : 'Relacionar automáticamente'}
@@ -434,10 +459,9 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
           </div>
         </header>
 
-
-        {/* PANEL DE REVISIÓN: resultados de auto-relación por nombre */}
+        {/* PANEL DE REVISIÓN */ }
         {reviewOpen && (
-          <div className="sticky top-2 z-30 mt-4 mb-4 rounded-2xl border border-blue-300/40 dark:border-blue-300/20 bg-blue-50/70 dark:bg-blue-900/20 shadow-xl p-4">
+          <div className="mt-4 mb-4 rounded-2xl border border-blue-300/40 dark:border-blue-300/20 bg-blue-50/70 dark:bg-blue-900/20 shadow-xl p-4">
             <div className="flex items-start gap-3">
               <div className="text-2xl">🤖</div>
               <div className="flex-1">
@@ -491,7 +515,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
           </div>
         )}
 
-        {/* Barra fija para vincular manual desde tablas (queda igual) */}
+        {/* Barra fija para vincular manual desde tablas */}
         <div className="sticky top-0 z-20 bg-gray-50/95 dark:bg-[#0b0f1a]/95 backdrop-blur py-3 mb-4 flex items-center justify-between border-b border-gray-200 dark:border-white/10">
           <div className="text-sm text-gray-700 dark:text-gray-200">
             {selectedInternal
@@ -499,42 +523,43 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
               : 'Ningún producto Gampack seleccionado'}
             {selectedExternals.length > 0 && ` | ${selectedExternals.length} proveedor(es) seleccionado(s)`}
           </div>
-          <Button
-            onClick={async () => {
-              if (!selectedInternal || selectedExternals.length === 0) {
-                alert('Seleccioná un producto Gampack y al menos un proveedor');
-                return;
-              }
-              const body = {
-                id_lista_interna: selectedInternal.id_interno,
-                ids_lista_precios: selectedExternals.map(e => e.id_externo),
-                criterio: 'manual',
-              };
-              try {
-                const res = await fetch('http://localhost:4000/api/relacionar-manual', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(body),
-                });
-                if (res.ok) {
-                  // limpiar estados como antes
-                  setExternals(prev => prev.filter(e => !selectedExternals.some(se => se.id_externo === e.id_externo)));
-                  setInternals(prev => prev.filter(i => i.id_interno !== selectedInternal.id_interno));
-                  setSelectedExternals([]);
-                  setSelectedInternal(null);
-                  setSuggestions(prev => prev.filter(s => s.internal.id_interno !== selectedInternal.id_interno && !selectedExternals.some(se => se.id_externo === s.external.id_externo)));
-                } else {
-                  const error = await res.json().catch(() => ({}));
-                  alert(`Error: ${error.message || 'No se pudo vincular'}`);
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={async () => {
+                if (!selectedInternal || selectedExternals.length === 0) {
+                  alert('Seleccioná un producto Gampack y al menos un proveedor');
+                  return;
                 }
-              } catch {
-                alert('Error al conectar con el servidor');
-              }
-            }}
-            disabled={selectedExternals.length === 0 || !selectedInternal}
-          >
-            Vincular manualmente
-          </Button>
+                const body = {
+                  id_lista_interna: selectedInternal.id_interno,
+                  ids_lista_precios: selectedExternals.map(e => e.id_externo),
+                  criterio: 'manual',
+                };
+                try {
+                  const res = await fetch('http://localhost:4000/api/relacionar-manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                  });
+                  if (res.ok) {
+                    setExternals(prev => prev.filter(e => !selectedExternals.some(se => se.id_externo === e.id_externo)));
+                    setInternals(prev => prev.filter(i => i.id_interno !== selectedInternal.id_interno));
+                    setSelectedExternals([]);
+                    setSelectedInternal(null);
+                    setSuggestions(prev => prev.filter(s => s.internal.id_interno !== selectedInternal.id_interno && !selectedExternals.some(se => se.id_externo === s.external.id_externo)));
+                  } else {
+                    const error = await res.json().catch(() => ({}));
+                    alert(`Error: ${error.message || 'No se pudo vincular'}`);
+                  }
+                } catch {
+                  alert('Error al conectar con el servidor');
+                }
+              }}
+              disabled={selectedExternals.length === 0 || !selectedInternal}
+            >
+              Vincular manualmente
+            </Button>
+          </div>
         </div>
 
         {/* Tablas */}
@@ -656,8 +681,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
           <div className="mt-6 text-center">
             <Button
               onClick={() => {
-                // acción manual existente
-                const click = document.createElement('span'); // dummy para no duplicar lógica
+                const click = document.createElement('span');
                 click.click();
               }}
               disabled={selectedExternals.length === 0 || !selectedInternal}
@@ -667,6 +691,18 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
           </div>
         </div>
       </div>
+
+      {/* Botón flotante Top */}
+      {showTop && (
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          title="Volver arriba (atajo: T)"
+          aria-label="Volver arriba"
+          className="fixed bottom-6 right-6 inline-flex items-center gap-2 rounded-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white shadow-lg transition"
+        >
+          ↑ Top
+        </button>
+      )}
     </div>
   );
 };

@@ -1,7 +1,18 @@
 {
-  "files": [],
-  "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
-  ]
+  "compilerOptions": {
+    // 👇 evita líos con exports/esm de librerías
+    "moduleResolution": "Bundler",
+
+    // 👇 permite default imports desde CJS/UMD/ESM mixto
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+
+    // opcionales pero prácticos
+    "strict": true,
+    "skipLibCheck": true,
+    "target": "ES2020",
+    "module": "ESNext",
+    "jsx": "react-jsx"
+  },
+  "include": ["src"]
 }

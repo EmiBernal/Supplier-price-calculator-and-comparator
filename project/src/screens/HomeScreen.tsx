@@ -1,121 +1,197 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Screen } from '../types';
-import { Upload, GitCompare, BarChart3, ArrowRight } from 'lucide-react';
+import { Upload, GitCompare, BarChart3, ArrowRight, Package, Factory, Link2 } from 'lucide-react';
 import { TitleHeader } from '../components/TitleHeader';
 
 interface HomeScreenProps {
   onNavigate: (screen: Screen) => void;
 }
 
+type Stats = {
+  totalProducts: number;
+  internalCount: number;
+  externalCount: number;
+  activeSuppliers: number;
+  suppliersWithNewPriceToday: number;
+  pendingLinks: number;
+};
+
 export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        setLoadingStats(true);
+        const res = await fetch('http://localhost:4000/api/stats');
+        if (!res.ok) throw new Error('Stats error');
+        const data = await res.json();
+        setStats(data);
+      } catch (e) {
+        console.error('No se pudieron cargar las stats:', e);
+        setStats({
+          totalProducts: 0,
+          internalCount: 0,
+          externalCount: 0,
+          activeSuppliers: 0,
+          suppliersWithNewPriceToday: 0,
+          pendingLinks: 0,
+        });
+      } finally {
+        setLoadingStats(false);
+      }
+    };
+    fetchStats();
+  }, []);
+
+  const number = (n?: number) => (typeof n === 'number' ? n.toLocaleString('es-AR') : '0');
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 dark:from-[#0b0f1a] dark:to-[#0b0f1a]">
-      <div className="max-w-6xl mx-auto px-6 py-10">
-        {/* Hero con logo + título reutilizable */}
-        <div className="flex items-center gap-5 mb-3">
-          <div className="relative w-16 h-16">
-            <div className="absolute inset-0 rounded-2xl bg-[#22378C] ring-4 ring-[#6CC04A] shadow-xl" />
-            <div className="absolute inset-0 rounded-2xl bg-gradient-to-b from-white/10 to-transparent pointer-events-none" />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-white text-2xl font-extrabold tracking-wide">GP</span>
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-[#e0f2fe] via-[#f0fdf4] to-[#fef9c3] dark:from-[#0b0f1a] dark:via-[#101624] dark:to-[#1c1f2b] transition-colors">
+      {/* CONTENT */}
+      <main className="flex-1 relative">
+        <div className="relative max-w-7xl mx-auto px-6 py-12">
+          {/* Partículas decorativas */}
+          <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="absolute top-12 left-20 w-20 h-20 bg-[#6CC04A]/20 blur-2xl rounded-full animate-pulse" />
+            <div className="absolute bottom-16 right-24 w-28 h-28 bg-[#22378C]/20 blur-3xl rounded-full animate-pulse delay-700" />
+            <div className="absolute top-1/3 right-1/4 w-16 h-16 bg-pink-400/10 blur-2xl rounded-full animate-bounce-slow" />
+          </div>
+
+          {/* Hero */}
+          <div className="flex items-center gap-5 mb-10">
+            <div className="relative w-16 h-16 shrink-0">
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-tr from-[#22378C] to-[#6CC04A] shadow-2xl" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-white text-2xl font-extrabold tracking-wide">GP</span>
+              </div>
+            </div>
+            <div className="flex-1">
+              <TitleHeader
+                eyebrow="Gampack · Plataforma"
+                titleMain="Comparador de precios"
+                titleAfter=""
+                subtitle="Organización de proveedores y sistema de comparación de precios."
+              />
             </div>
           </div>
-          <div className="flex-1">
-            <TitleHeader
-              eyebrow="Gampack · Plataforma"
-              titleMain="Comparador de precios"
-              titleAfter=""
-              subtitle="Organización de proveedores y sistema de comparación de precios."
-            />
+
+          {/* Grid principal (tarjetas grandes) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {/* Ingreso y búsqueda */}
+            <button
+              onClick={() => onNavigate('manual')}
+              className="group text-left rounded-3xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 hover:bg-white/90 dark:hover:bg-white/10 transition-all shadow-lg hover:shadow-2xl p-8 min-h-44 md:min-h-56 backdrop-blur-xl transform hover:scale-[1.02]"
+            >
+              <div className="flex items-center justify-between">
+                <div className="p-4 rounded-2xl bg-blue-100 dark:bg-white/10">
+                  <Upload size={24} strokeWidth={1.8} className="text-blue-700 dark:text-blue-300" aria-hidden />
+                </div>
+                <ArrowRight size={20} strokeWidth={1.8} className="text-gray-600 dark:text-gray-300 opacity-50 transition-transform group-hover:translate-x-2" aria-hidden />
+              </div>
+              <h3 className="mt-5 text-xl font-semibold text-gray-900 dark:text-white">Ingreso y búsqueda</h3>
+              <p className="mt-2 text-sm text-gray-600 dark:text-white/80 max-w-[28ch]">Cargar o buscar productos manualmente.</p>
+            </button>
+
+            {/* Vinculaciones (Equivalencias) */}
+            <button
+              onClick={() => onNavigate('equivalences')}
+              className="group text-left rounded-3xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 hover:bg-white/90 dark:hover:bg-white/10 transition-all shadow-lg hover:shadow-2xl p-8 min-h-44 md:min-h-56 backdrop-blur-xl transform hover:scale-[1.02]"
+            >
+              <div className="flex items-center justify-between">
+                <div className="p-4 rounded-2xl bg-green-100 dark:bg-white/10">
+                  <GitCompare size={24} strokeWidth={1.8} className="text-green-600 dark:text-green-300" aria-hidden />
+                </div>
+                <ArrowRight size={20} strokeWidth={1.8} className="text-gray-600 dark:text-gray-300 opacity-50 transition-transform group-hover:translate-x-2" aria-hidden />
+              </div>
+              <h3 className="mt-5 text-xl font-semibold text-gray-900 dark:text-white">Vinculaciones</h3>
+              <p className="mt-2 text-sm text-gray-600 dark:text-white/80">
+                <span className="block">Relacionar productos manualmente</span>
+                <span className="block">Detectá coincidencias por nombre, revisá el motivo y confirmá o descartá cada relación.</span>
+              </p>
+            </button>
+
+            {/* Comparador de precios */}
+            <button
+              onClick={() => onNavigate('compare')}
+              className="group text-left rounded-3xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 hover:bg-white/90 dark:hover:bg-white/10 transition-all shadow-lg hover:shadow-2xl p-8 min-h-44 md:min-h-56 backdrop-blur-xl transform hover:scale-[1.02]"
+            >
+              <div className="flex items-center justify-between">
+                <div className="p-4 rounded-2xl bg-indigo-100 dark:bg-white/10">
+                  <BarChart3 size={24} strokeWidth={1.8} className="text-indigo-700 dark:text-indigo-300" aria-hidden />
+                </div>
+                <ArrowRight size={20} strokeWidth={1.8} className="text-gray-600 dark:text-gray-300 opacity-50 transition-transform group-hover:translate-x-2" aria-hidden />
+              </div>
+              <h3 className="mt-5 text-xl font-semibold text-gray-900 dark:text-white">Comparador de precios</h3>
+              <p className="mt-2 text-sm text-gray-600 dark:text-white/80 max-w-[28ch]">Análisis y diferencias por proveedor.</p>
+            </button>
           </div>
+
+          {/* Banda de KPIs */}
+          <section className="mt-14 grid grid-cols-1 sm:grid-cols-3 gap-6">
+            {/* Productos cargados */}
+            <div className="rounded-2xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-6 shadow-md hover:shadow-lg transition-all">
+              <div className="flex items-center gap-3 text-gray-900 dark:text-white">
+                <div className="p-2 rounded-xl bg-blue-100 dark:bg-white/10">
+                  <Package size={18} strokeWidth={1.8} className="text-blue-700 dark:text-blue-200" aria-hidden />
+                </div>
+                <span className="text-sm opacity-70">Productos cargados</span>
+              </div>
+              <div className="mt-3 text-2xl font-bold text-gray-900 dark:text-white">
+                {loadingStats ? '—' : number(stats?.totalProducts)}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-white/60">
+                {loadingStats ? '' : `${number(stats?.internalCount)} internos · ${number(stats?.externalCount)} externos`}
+              </div>
+            </div>
+
+            {/* Proveedores activos */}
+            <div className="rounded-2xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-6 shadow-md hover:shadow-lg transition-all">
+              <div className="flex items-center gap-3 text-gray-900 dark:text-white">
+                <div className="p-2 rounded-xl bg-green-100 dark:bg-white/10">
+                  <Factory size={18} strokeWidth={1.8} className="text-green-700 dark:text-green-200" aria-hidden />
+                </div>
+                <span className="text-sm opacity-70">Proveedores activos</span>
+              </div>
+              <div className="mt-3 text-2xl font-bold text-gray-900 dark:text-white">
+                {loadingStats ? '—' : number(stats?.activeSuppliers)}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-white/60">
+                {loadingStats ? '' : `${number(stats?.suppliersWithNewPriceToday)} con precio nuevo hoy`}
+              </div>
+            </div>
+
+            {/* Pendientes de vinculación (contador) */}
+            <button
+              onClick={() => onNavigate('equivalences')}
+              className="text-left rounded-2xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-6 shadow-md hover:shadow-lg transition-all"
+            >
+              <div className="flex items-center gap-3 text-gray-900 dark:text-white">
+                <div className="p-2 rounded-xl bg-purple-100 dark:bg-white/10">
+                  <Link2 size={18} strokeWidth={1.8} className="text-purple-700 dark:text-purple-200" aria-hidden />
+                </div>
+                <span className="text-sm opacity-70">Pendientes de vinculación</span>
+              </div>
+              <div className="mt-3 text-2xl font-bold text-gray-900 dark:text-white">
+                {loadingStats ? '—' : number(stats?.pendingLinks)}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-white/60">
+                Hacé clic para revisar y confirmar/descartar relaciones
+              </div>
+            </button>
+          </section>
         </div>
+      </main>
 
-        {/* Grid de acciones */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
-          {/* Card 1 */}
-          <button
-            onClick={() => onNavigate('manual')}
-            className="
-              group text-left
-              rounded-2xl border border-gray-200 dark:border-white/10
-              bg-white/80 dark:bg-white/5
-              hover:bg-white dark:hover:bg-white/10
-              transition-all shadow-sm hover:shadow-md
-              p-6
-            "
-          >
-            <div className="flex items-center justify-between">
-              <div className="p-3 rounded-xl bg-blue-100 dark:bg-white/10">
-                <Upload size={22} className="text-blue-600" />
-              </div>
-              <ArrowRight className="opacity-0 group-hover:opacity-100 transition" />
-            </div>
-            <h3 className="mt-4 text-lg font-semibold text-gray-900 dark:text-white">
-              Ingreso y búsqueda
-            </h3>
-            <p className="mt-1 text-sm text-gray-600 dark:text-white/80">
-              Cargar o buscar productos manualmente.
-            </p>
-          </button>
-
-          {/* Card 2 */}
-          <button
-            onClick={() => onNavigate('equivalences')}
-            className="
-              group text-left
-              rounded-2xl border border-gray-200 dark:border-white/10
-              bg-white/80 dark:bg-white/5
-              hover:bg-white dark:hover:bg-white/10
-              transition-all shadow-sm hover:shadow-md
-              p-6
-            "
-          >
-            <div className="flex items-center justify-between">
-              <div className="p-3 rounded-xl bg-green-100 dark:bg-white/10">
-                <GitCompare size={22} className="text-green-600" />
-              </div>
-              <ArrowRight className="opacity-0 group-hover:opacity-100 transition" />
-            </div>
-            <h3 className="mt-4 text-lg font-semibold text-gray-900 dark:text-white">
-              Equivalencias
-            </h3>
-            <p className="mt-1 text-sm text-gray-600 dark:text-white/80">
-              Gestioná relaciones de productos y pendientes.
-            </p>
-          </button>
-
-          {/* Card 3 */}
-          <button
-            onClick={() => onNavigate('compare')}
-            className="
-              group text-left
-              rounded-2xl border border-gray-200 dark:border-white/10
-              bg-white/80 dark:bg-white/5
-              hover:bg-white dark:hover:bg-white/10
-              transition-all shadow-sm hover:shadow-md
-              p-6
-            "
-          >
-            <div className="flex items-center justify-between">
-              <div className="p-3 rounded-xl bg-indigo-100 dark:bg-white/10">
-                <BarChart3 size={22} className="text-blue-700" />
-              </div>
-              <ArrowRight className="opacity-0 group-hover:opacity-100 transition" />
-            </div>
-            <h3 className="mt-4 text-lg font-semibold text-gray-900 dark:text-white">
-              Comparador de precios
-            </h3>
-            <p className="mt-1 text-sm text-gray-600 dark:text-white/80">
-              Análisis y diferencias por proveedor.
-            </p>
-          </button>
-        </div>
-
-        {/* Footer */}
-        <div className="mt-10 text-gray-500 dark:text-white/70 text-sm text-center">
+      {/* FOOTER */}
+      <footer className="mt-auto border-t border-black/5 dark:border-white/10 bg-gradient-to-r from-white/80 to-white/60 dark:from-[#0b0f1a]/70 dark:to-[#101624]/70 backdrop-blur">
+        <div className="max-w-7xl mx-auto px-6 py-6 text-gray-700 dark:text-white/70 text-sm text-center">
           © Comparador de precios de Gampack 2025. Todos los derechos reservados.
         </div>
-      </div>
+      </footer>
     </div>
   );
 };
+
+export default HomeScreen;
