@@ -2,17 +2,47 @@ const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const multerLib = require('multer');
+const multer = multerLib.default || multerLib;
+const XLSX = require('xlsx');
 
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+
+const upload = multer({
+  limits: { fileSize: 25 * 1024 * 1024}
+});
 
 const dbPath = path.join(__dirname, 'db/database.db');
 const db = new sqlite3.Database(dbPath, err => {
   if (err) console.error('Error al conectar con SQLite:', err.message);
   else console.log('Conectado a la base de datos SQLite en', dbPath);
 });
+
+// === Helpers ===
+function normalizeHeaders(raw) {
+  const arr = Array.isArray(raw) ? raw : [];
+  return Array.from({ length: arr.length }, (_, i) => {
+    const h = arr[i];
+    if (h == null) return '';
+    const s = String(h).trim().replace(/\r?\n/g, ' ').replace(/\s+/g, ' ');
+    return s;
+  });
+}
+
+function parseNumberAR(value) {
+  if (value == null) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  let s = String(value).trim();
+  s = s.replace(/\./g, '').replace(',', '.'); // 1.234,56 -> 1234.56
+  s = s.replace(/[$\sA-Za-z]/g, '');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/* ======== Rutas ======== */
 
 app.get('/api/equivalencias', (req, res) => {
   const search = req.query.search;
@@ -24,6 +54,7 @@ app.get('/api/equivalencias', (req, res) => {
       ra.id_lista_precios,
       ra.id_lista_interna,
       ra.criterio_relacion,
+      ra.created_at AS relation_created_at,
       lp.cod_externo,
       lp.nom_externo,
       lp.proveedor,
@@ -49,7 +80,7 @@ app.get('/api/equivalencias', (req, res) => {
     params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
   }
 
-  sql += ' ORDER BY lp.fecha DESC';
+  sql += ' ORDER BY datetime(relation_created_at) DESC, datetime(lp.fecha) DESC';
 
   db.all(sql, params, (err, rows) => {
     if (err) {
@@ -62,11 +93,12 @@ app.get('/api/equivalencias', (req, res) => {
       supplier: row.proveedor,
       externalCode: row.cod_externo,
       externalName: row.nom_externo,
-      externalDate: row.fecha_externo,
+      externalDate: row.fecha_externo, // fecha del producto externo
       internalSupplier: 'Gampack',
       internalCode: row.cod_interno,
       internalName: row.nom_interno,
-      internalDate: row.fecha_interno,
+      internalDate: row.fecha_interno, // fecha del producto interno
+      relationDate: row.relation_created_at, // <-- NUEVO: fecha de la relación
       matchingCriteria: row.criterio_relacion,
     }));
 
@@ -168,14 +200,14 @@ app.post('/api/check-product', (req, res) => {
 app.get('/api/relaciones', (req, res) => {
   const sql = `
     SELECT r.*, 
+           r.created_at AS relation_created_at,
            lp.cod_externo, lp.nom_externo, 
            li.cod_interno, li.nom_interno
     FROM relacion_articulos r
     LEFT JOIN lista_precios lp ON r.id_lista_precios = lp.id_externo
     LEFT JOIN lista_interna li ON r.id_lista_interna = li.id_interno
-    ORDER BY r.id DESC
+    ORDER BY datetime(r.created_at) DESC
   `;
-
   db.all(sql, [], (err, rows) => {
     if (err) {
       console.error('Error al obtener relaciones:', err.message);
@@ -520,17 +552,13 @@ app.delete('/api/relacion/:id', (req, res) => {
   });
 });
 
-/**
- * #############  /api/price-comparisons  (MEJORADO - NUEVARAMA)  #############
- * - Soporta search, dateFrom, dateTo, familia
- * - Devuelve pares + internos sin pareja + proveedores sin pareja
- * - Usa sortDate para ORDER BY en UNION (evita error SQLite)
- */
 app.get('/api/price-comparisons', (req, res) => {
   const search = (req.query.search || '').toString().toLowerCase();
   const dateFrom = (req.query.dateFrom || '').toString(); // YYYY-MM-DD
   const dateTo = (req.query.dateTo || '').toString();     // YYYY-MM-DD
   const familia = (req.query.familia || '').toString().toLowerCase();
+  const onlyRelated = String(req.query.onlyRelated || '0') === '1';
+  const dateMode = (req.query.dateMode || 'product').toString(); // 'product' | 'relation'
 
   const hasFrom = !!dateFrom;
   const hasTo = !!dateTo;
@@ -539,31 +567,35 @@ app.get('/api/price-comparisons', (req, res) => {
   const like = `%${search}%`;
   const familiaLike = `%${familia}%`;
 
-  // Helpers
+  const applySearch = (cols) =>
+    search ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
+  const applyFamilia = (cols) =>
+    hasFamilia ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
+
+  // helpers de rango según columna
   const buildDateRange = (col) => {
     if (hasFrom && hasTo) return `${col} BETWEEN ? AND ?`;
     if (hasFrom) return `${col} >= ?`;
     if (hasTo) return `${col} <= ?`;
     return '';
   };
-  const applySearch = (cols) =>
-    search ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
-  const applyFamilia = (cols) =>
-    hasFamilia ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
 
-  const liDateRange = buildDateRange('li.fecha');
-  const lpDateRange = buildDateRange('lp.fecha');
+  // columnas de fecha según modo
+  const liDateRange = dateMode === 'product' ? buildDateRange('li.fecha') : '';
+  const lpDateRange = dateMode === 'product' ? buildDateRange('lp.fecha') : '';
+  const relDateRange = dateMode === 'relation' ? buildDateRange("DATE(ra.created_at)") : '';
 
-  // ---------- SELECT 1: Pares relacionados (al menos una fecha en rango) ----------
+  // ---------- SELECT: Pares relacionados ----------
   const wherePairs = [applySearch(['li.nom_interno', 'lp.nom_externo', 'lp.proveedor'])];
   const paramsPairs = search ? [like, like, like] : [];
 
   if (hasFamilia) {
+    // si no tenés columnas 'familia', podés quitar esto o ajustarlo
     wherePairs.push(applyFamilia(['li.familia', 'lp.familia']));
     paramsPairs.push(familiaLike, familiaLike);
   }
 
-  if (hasFrom || hasTo) {
+  if (dateMode === 'product' && (hasFrom || hasTo)) {
     const dateConds = [];
     if (liDateRange) {
       dateConds.push(`(li.fecha IS NOT NULL AND ${liDateRange})`);
@@ -580,37 +612,49 @@ app.get('/api/price-comparisons', (req, res) => {
     wherePairs.push('(' + dateConds.join(' OR ') + ')');
   }
 
+  if (dateMode === 'relation' && (hasFrom || hasTo)) {
+    wherePairs.push(`${relDateRange}`);
+    if (hasFrom && hasTo) paramsPairs.push(dateFrom, dateTo);
+    else if (hasFrom) paramsPairs.push(dateFrom);
+    else paramsPairs.push(dateTo);
+  }
+
   const sqlPairs = `
     SELECT 
       li.nom_interno AS internalProduct,
       lp.nom_externo AS externalProduct,
-      lp.proveedor AS supplier,
+      lp.proveedor   AS supplier,
       li.precio_final AS internalFinalPrice,
       lp.precio_final AS externalFinalPrice,
-      li.fecha AS internalDate,
-      lp.fecha AS externalDate,
+      li.fecha       AS internalDate,
+      lp.fecha       AS externalDate,
       lp.tipo_empresa AS companyType,
       ra.criterio_relacion AS saleConditions,
-      COALESCE(li.fecha, lp.fecha) AS sortDate
+      ra.created_at  AS relationDate,
+      ${dateMode === 'relation'
+        ? `ra.created_at`
+        : `COALESCE(li.fecha, lp.fecha)`} AS sortDate
     FROM relacion_articulos ra
     JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
     JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
     WHERE ${wherePairs.join(' AND ')}
   `;
 
-  // ---------- SELECT 2: Internos sin pareja ----------
+  // ---------- SELECT: Internos sin pareja ----------
   const whereInternal = ['ra.id_lista_precios IS NULL', applySearch(['li.nom_interno'])];
   const paramsInternal = search ? [like] : [];
-
   if (hasFamilia) {
     whereInternal.push(applyFamilia(['li.familia']));
     paramsInternal.push(familiaLike);
   }
-  if (liDateRange) {
-    whereInternal.push(`li.fecha IS NOT NULL AND ${liDateRange}`);
-    if (hasFrom && hasTo) paramsInternal.push(dateFrom, dateTo);
-    else if (hasFrom) paramsInternal.push(dateFrom);
-    else if (hasTo) paramsInternal.push(dateTo);
+  if (dateMode === 'product') {
+    const dr = buildDateRange('li.fecha');
+    if (dr) {
+      whereInternal.push(`li.fecha IS NOT NULL AND ${dr}`);
+      if (hasFrom && hasTo) paramsInternal.push(dateFrom, dateTo);
+      else if (hasFrom) paramsInternal.push(dateFrom);
+      else if (hasTo) paramsInternal.push(dateTo);
+    }
   }
 
   const sqlInternalOnly = `
@@ -624,25 +668,28 @@ app.get('/api/price-comparisons', (req, res) => {
       NULL AS externalDate,
       'Gampack' AS companyType,
       NULL AS saleConditions,
+      NULL AS relationDate,
       li.fecha AS sortDate
     FROM lista_interna li
     LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
     WHERE ${whereInternal.join(' AND ')}
   `;
 
-  // ---------- SELECT 3: Proveedores sin pareja ----------
+  // ---------- SELECT: Proveedores sin pareja ----------
   const whereExternal = ['ra.id_lista_interna IS NULL', applySearch(['lp.nom_externo', 'lp.proveedor'])];
   const paramsExternal = search ? [like, like] : [];
-
   if (hasFamilia) {
     whereExternal.push(applyFamilia(['lp.familia']));
     paramsExternal.push(familiaLike);
   }
-  if (lpDateRange) {
-    whereExternal.push(`lp.fecha IS NOT NULL AND ${lpDateRange}`);
-    if (hasFrom && hasTo) paramsExternal.push(dateFrom, dateTo);
-    else if (hasFrom) paramsExternal.push(dateFrom);
-    else if (hasTo) paramsExternal.push(dateTo);
+  if (dateMode === 'product') {
+    const dr = buildDateRange('lp.fecha');
+    if (dr) {
+      whereExternal.push(`lp.fecha IS NOT NULL AND ${dr}`);
+      if (hasFrom && hasTo) paramsExternal.push(dateFrom, dateTo);
+      else if (hasFrom) paramsExternal.push(dateFrom);
+      else if (hasTo) paramsExternal.push(dateTo);
+    }
   }
 
   const sqlExternalOnly = `
@@ -656,24 +703,36 @@ app.get('/api/price-comparisons', (req, res) => {
       lp.fecha AS externalDate,
       lp.tipo_empresa AS companyType,
       NULL AS saleConditions,
+      NULL AS relationDate,
       lp.fecha AS sortDate
     FROM lista_precios lp
     LEFT JOIN relacion_articulos ra ON ra.id_lista_precios = lp.id_externo
     WHERE ${whereExternal.join(' AND ')}
   `;
 
-  // ---------- UNION + ORDER ----------
-  const sql = `
-    ${sqlPairs}
-    UNION ALL
-    ${sqlInternalOnly}
-    UNION ALL
-    ${sqlExternalOnly}
-    ORDER BY sortDate DESC
-    LIMIT 1000
-  `;
-
-  const params = [...paramsPairs, ...paramsInternal, ...paramsExternal];
+  // ---------- Construcción final ----------
+  let sql, params;
+  if (onlyRelated) {
+    sql = `
+      ${sqlPairs}
+      ORDER BY datetime(sortDate) DESC
+      LIMIT 1000
+    `;
+    params = [...paramsPairs];
+  } else {
+    // Nota: cuando dateMode = 'relation', los "sin pareja" no aplican (no hay relación),
+    // así que solo tendrán filtro por fecha si dateMode='product'.
+    sql = `
+      ${sqlPairs}
+      UNION ALL
+      ${sqlInternalOnly}
+      UNION ALL
+      ${sqlExternalOnly}
+      ORDER BY datetime(sortDate) DESC
+      LIMIT 1000
+    `;
+    params = [...paramsPairs, ...paramsInternal, ...paramsExternal];
+  }
 
   db.all(sql, params, (err, rows) => {
     if (err) {
@@ -697,7 +756,8 @@ app.get('/api/price-comparisons', (req, res) => {
         externalFinalPrice: external,
         internalDate: row.internalDate || null,
         externalDate: row.externalDate || null,
-        companyType: row.companyType === 'Gampack' ? 'supplier' : 'competitor', // conserva tu lógica
+        relationDate: row.relationDate || null,  // <-- NUEVO, útil para UI
+        companyType: row.companyType === 'Gampack' ? 'supplier' : 'competitor',
         saleConditions: row.saleConditions || 'Desconocido',
         priceDifference,
       };
@@ -742,6 +802,290 @@ app.get('/api/gampack/:codigo/relacionados', (req, res) => {
 
     res.json(data);
   });
+});
+
+app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
+  (async () => {
+    try {
+      if (!req.file) return res.status(400).json({ error: 'Falta archivo (campo "file")' });
+
+      const providerHint = (req.body.provider_hint || '').toString().trim();
+      if (!providerHint) return res.status(400).json({ error: 'El campo proveedor es obligatorio' });
+
+      const isGampack = providerHint.toLowerCase() === 'gampack';
+      const sourceFilename = (req.body.source_filename || '').toString().trim();
+      const headerRow1 = parseInt(req.body.header_row || '1', 10);
+      const headerIndex0 = isNaN(headerRow1) ? 0 : Math.max(0, headerRow1 - 1);
+
+      let mapping = {};
+      if (req.body.mapping) {
+        try { mapping = JSON.parse(req.body.mapping); } catch { mapping = {}; }
+      }
+
+      const wb = XLSX.read(req.file.buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+
+      // Leemos TODA la hoja como matriz
+      const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+      const headersRaw = (matrix[headerIndex0] || []).map(v => String(v ?? ''));
+      const dataRows = matrix.slice(headerIndex0 + 1);
+      console.log('Headers (fila seleccionada):', headersRaw);
+
+      // Convertimos matriz -> objetos con claves = headers crudos
+      const rows = dataRows.map(arr => {
+        const obj = {};
+        for (let i = 0; i < headersRaw.length; i++) {
+          const k = String(headersRaw[i] ?? '');
+          obj[k] = arr?.[i] ?? '';
+        }
+        return obj;
+      });
+
+      // Helpers
+      const normalizeLabel = (v) => String(v ?? '').trim().replace(/\r?\n/g,' ').replace(/\s+/g,' ');
+      const norm = (v) => normalizeLabel(v).toLowerCase();
+      const getCell = (row, key) => {
+        if (!key) return '';
+        if (key in row) return row[key];
+        const nk = norm(key);
+        const realKey = Object.keys(row).find(k => norm(k) === nk);
+        return realKey ? row[realKey] : '';
+      };
+      const parseNumberAR = (value) => {
+        if (value == null) return null;
+        let s = String(value).trim();
+        s = s.replace(/\./g, '').replace(',', '.');
+        s = s.replace(/[$\sA-Za-z]/g, '');
+        const n = Number(s);
+        return Number.isFinite(n) ? n : null;
+      };
+      const run = (sql, params=[]) =>
+        new Promise((resolve, reject) => db.run(sql, params, function (err) {
+          if (err) reject(err); else resolve(this);
+        }));
+      const get = (sql, params=[]) =>
+        new Promise((resolve, reject) => db.get(sql, params, function (err, row) {
+          if (err) reject(err); else resolve(row);
+        }));
+
+      // Columnas (nombre+precio obligatorias; código opcional)
+      const colNom    = isGampack ? (mapping.nom_interno || mapping.nom_externo) : (mapping.nom_externo || mapping.nom_interno);
+      const colCod    = isGampack ? (mapping.cod_interno || mapping.cod_externo) : (mapping.cod_externo || mapping.cod_interno);
+      const colPrecio = mapping.precio_final;
+
+      if (!colNom || !colPrecio) {
+        return res.status(400).json({
+          error: 'Falta asignar columnas obligatorias',
+          detail: { required: isGampack ? ['nom_interno','precio_final'] : ['nom_externo','precio_final'], mapping }
+        });
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      let processed = 0;
+
+      // Upserts que DEVUELVEN id para insertar en *_no_relacionados
+      const upsertListaInterna = async (nombre, codigo, price) => {
+        if (codigo) {
+          const upd = await run(
+            `UPDATE lista_interna
+             SET nom_interno = ?, precio_final = ?, fecha = ?
+             WHERE LOWER(cod_interno) = LOWER(?)`,
+            [nombre, price, today, codigo]
+          );
+          if (!upd.changes) {
+            const ins = await run(
+              `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
+               VALUES (?, ?, ?, ?)`,
+              [nombre, codigo, price, today]
+            );
+            return ins.lastID;
+          } else {
+            const row = await get(
+              `SELECT id_interno FROM lista_interna WHERE LOWER(cod_interno) = LOWER(?) LIMIT 1`,
+              [codigo]
+            );
+            return row?.id_interno ?? null;
+          }
+        } else {
+          const upd = await run(
+            `UPDATE lista_interna
+             SET nom_interno = ?, precio_final = ?, fecha = ?
+             WHERE LOWER(nom_interno) = LOWER(?)`,
+            [nombre, price, today, nombre]
+          );
+          if (!upd.changes) {
+            const ins = await run(
+              `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
+               VALUES (?, NULL, ?, ?)`,
+              [nombre, price, today]
+            );
+            return ins.lastID;
+          } else {
+            const row = await get(
+              `SELECT id_interno FROM lista_interna WHERE LOWER(nom_interno) = LOWER(?) LIMIT 1`,
+              [nombre]
+            );
+            return row?.id_interno ?? null;
+          }
+        }
+      };
+
+      const upsertListaPrecios = async (nombre, codigo, price, proveedor) => {
+        if (codigo) {
+          const upd = await run(
+            `UPDATE lista_precios
+             SET nom_externo = ?, precio_final = ?, tipo_empresa = 'Proveedor', fecha = ?
+             WHERE proveedor = ? AND LOWER(cod_externo) = LOWER(?)`,
+            [nombre, price, today, proveedor, codigo]
+          );
+          if (!upd.changes) {
+            const ins = await run(
+              `INSERT INTO lista_precios
+               (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
+               VALUES (?, ?, ?, 'Proveedor', ?, ?)`,
+              [nombre, codigo, price, today, proveedor]
+            );
+            return ins.lastID;
+          } else {
+            const row = await get(
+              `SELECT id_externo FROM lista_precios WHERE proveedor = ? AND LOWER(cod_externo) = LOWER(?) LIMIT 1`,
+              [proveedor, codigo]
+            );
+            return row?.id_externo ?? null;
+          }
+        } else {
+          const upd = await run(
+            `UPDATE lista_precios
+             SET nom_externo = ?, precio_final = ?, tipo_empresa = 'Proveedor', fecha = ?
+             WHERE proveedor = ? AND LOWER(nom_externo) = LOWER(?)`,
+            [nombre, price, today, proveedor, nombre]
+          );
+          if (!upd.changes) {
+            const ins = await run(
+              `INSERT INTO lista_precios
+               (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
+               VALUES (?, NULL, ?, 'Proveedor', ?, ?)`,
+              [nombre, price, today, proveedor]
+            );
+            return ins.lastID;
+          } else {
+            const row = await get(
+              `SELECT id_externo FROM lista_precios WHERE proveedor = ? AND LOWER(nom_externo) = LOWER(?) LIMIT 1`,
+              [proveedor, nombre]
+            );
+            return row?.id_externo ?? null;
+          }
+        }
+      };
+
+      await run('BEGIN TRANSACTION');
+
+      try {
+        for (const r of rows) {
+          const nombre = String(getCell(r, colNom) ?? '').trim();
+          const codigoRaw = colCod ? String(getCell(r, colCod) ?? '').trim() : '';
+          const codigo = codigoRaw || null;
+          const precioRaw = getCell(r, colPrecio);
+          const price = typeof precioRaw === 'number' ? precioRaw : parseNumberAR(precioRaw);
+
+          if (!nombre || price == null || !Number.isFinite(price)) {
+            continue; // sin nombre o sin precio => skip
+          }
+
+          if (isGampack) {
+            const idInterno = await upsertListaInterna(nombre, codigo, price);
+            if (idInterno) {
+              await run(
+                `INSERT OR IGNORE INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
+                 VALUES (?, ?)`,
+                [idInterno, 'Importado vía carga masiva']
+              );
+              processed++;
+            }
+          } else {
+            const idExterno = await upsertListaPrecios(nombre, codigo, price, providerHint);
+            if (idExterno) {
+              await run(
+                `INSERT OR IGNORE INTO articulos_no_relacionados (id_lista_precios, motivo)
+                 VALUES (?, ?)`,
+                [idExterno, 'Importado vía carga masiva']
+              );
+              processed++;
+            }
+          }
+        }
+
+        await run('COMMIT');
+        return res.json({
+          ok: true,
+          processed,
+          source: sourceFilename || req.file.originalname,
+          header_row_used: headerRow1,
+          saved_to: isGampack ? 'articulos_gampack_no_relacionados' : 'articulos_no_relacionados'
+        });
+      } catch (e) {
+        await run('ROLLBACK');
+        console.error('Fallo importación:', e);
+        return res.status(500).json({ error: 'Fallo importación', detail: e.message });
+      }
+    } catch (err) {
+      console.error('Error en importación:', err);
+      return res.status(500).json({ error: 'Error interno' });
+    }
+  })();
+});
+
+app.get('/api/stats', (req, res) => {
+  const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
+
+  const q = {
+    internalCount: `SELECT COUNT(*) AS c FROM lista_interna`,
+    externalCount: `SELECT COUNT(*) AS c FROM lista_precios`,
+    activeSuppliers: `SELECT COUNT(DISTINCT proveedor) AS c FROM lista_precios`,
+    suppliersWithNewPriceToday: `SELECT COUNT(DISTINCT proveedor) AS c FROM lista_precios WHERE fecha = ?`,
+    pendingExternal: `SELECT COUNT(*) AS c FROM articulos_no_relacionados`,
+    pendingInternal: `SELECT COUNT(*) AS c FROM articulos_gampack_no_relacionados`,
+  };
+
+  const runGet = (sql, params=[]) =>
+    new Promise((resolve, reject) => {
+      db.get(sql, params, (err, row) => err ? reject(err) : resolve(row?.c ?? 0));
+    });
+
+  (async () => {
+    try {
+      const [
+        internalCount,
+        externalCount,
+        activeSuppliers,
+        suppliersWithNewPriceToday,
+        pendingExternal,
+        pendingInternal,
+      ] = await Promise.all([
+        runGet(q.internalCount),
+        runGet(q.externalCount),
+        runGet(q.activeSuppliers),
+        runGet(q.suppliersWithNewPriceToday, [today]),
+        runGet(q.pendingExternal),
+        runGet(q.pendingInternal),
+      ]);
+
+      const totalProducts = internalCount + externalCount;
+      const pendingLinks = pendingExternal + pendingInternal;
+
+      res.json({
+        totalProducts,
+        internalCount,
+        externalCount,
+        activeSuppliers,
+        suppliersWithNewPriceToday,
+        pendingLinks,
+      });
+    } catch (e) {
+      console.error('Error /api/stats:', e);
+      res.status(500).json({ error: 'stats_failed' });
+    }
+  })();
 });
 
 module.exports = app;
