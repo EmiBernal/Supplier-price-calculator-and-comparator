@@ -234,33 +234,6 @@ useEffect(() => {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={criteriaFilter}
-                onChange={(e) => setCriteriaFilter(e.target.value)}
-                className="select-dark rounded-lg border border-gray-300 dark:border-white/10 bg-white dark:bg-white/10 text-sm px-3 py-2 text-gray-800 dark:text-white"
-                title="Filtrar por criterio"
-              >
-                <option value="">Todos los criterios</option>
-                <option value="manual">Manual</option>
-                <option value="name">Name</option>
-                <option value="codigo">Código</option>
-              </select>
-
-              <button
-                onClick={() => fetchEquivalences(searchTerm.trim())}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-white/10 bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/15 px-3 py-2 text-sm text-gray-700 dark:text-white/80"
-                title="Refrescar"
-              >
-                <RefreshCw size={16} /> Refrescar
-              </button>
-
-              <button
-                onClick={() => setSearchTerm('')}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-white/10 bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/15 px-3 py-2 text-sm text-gray-700 dark:text-white/80"
-                title="Limpiar búsqueda"
-              >
-                <X size={16} /> Limpiar
-              </button>
 
               <span className="ml-1 text-xs text-gray-600 dark:text-white/60">
                 {filteredEquivalences().length} registros
