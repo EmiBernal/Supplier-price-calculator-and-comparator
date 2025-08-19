@@ -236,6 +236,19 @@ app.put('/api/relacion/:id', (req, res) => {
   });
 });
 
+app.get('/api/providers/summary', (req, res) => {
+  const sql = `
+    SELECT proveedor AS proveedor, COUNT(*) AS products
+    FROM lista_precios
+    WHERE proveedor IS NOT NULL AND TRIM(proveedor) <> ''
+    GROUP BY proveedor
+    ORDER BY proveedor COLLATE NOCASE ASC
+  `;
+  db.all(sql, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'db_error' });
+    res.json(rows || []);
+  });
+});
 
 app.get('/api/lista_precios', (req, res) => {
   const search = req.query.search || '';
@@ -952,13 +965,13 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
       const wb = XLSX.read(req.file.buffer);
       const ws = wb.Sheets[wb.SheetNames[0]];
 
-      // Leemos TODA la hoja como matriz
+      // Leemos hoja completa como matriz
       const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
       const headersRaw = (matrix[headerIndex0] || []).map(v => String(v ?? ''));
       const dataRows = matrix.slice(headerIndex0 + 1);
       console.log('Headers (fila seleccionada):', headersRaw);
 
-      // Convertimos matriz -> objetos con claves = headers crudos
+      // Matriz -> objetos
       const rows = dataRows.map(arr => {
         const obj = {};
         for (let i = 0; i < headersRaw.length; i++) {
@@ -969,13 +982,15 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
       });
 
       // Helpers
-      const normalizeLabel = (v) => String(v ?? '').trim().replace(/\r?\n/g,' ').replace(/\s+/g,' ');
-      const norm = (v) => normalizeLabel(v).toLowerCase();
+      const normalizeLabel = (v) =>
+        String(v ?? '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+      const normLower = (v) => normalizeLabel(v).toLowerCase();
+
       const getCell = (row, key) => {
         if (!key) return '';
         if (key in row) return row[key];
-        const nk = norm(key);
-        const realKey = Object.keys(row).find(k => norm(k) === nk);
+        const nk = normLower(key);
+        const realKey = Object.keys(row).find(k => normLower(k) === nk);
         return realKey ? row[realKey] : '';
       };
       const parseNumberAR = (value) => {
@@ -995,7 +1010,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
           if (err) reject(err); else resolve(row);
         }));
 
-      // Columnas (nombre+precio obligatorias; código opcional)
+      // Columnas obligatorias
       const colNom    = isGampack ? (mapping.nom_interno || mapping.nom_externo) : (mapping.nom_externo || mapping.nom_interno);
       const colCod    = isGampack ? (mapping.cod_interno || mapping.cod_externo) : (mapping.cod_externo || mapping.cod_interno);
       const colPrecio = mapping.precio_final;
@@ -1010,117 +1025,131 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
       const today = new Date().toISOString().slice(0, 10);
       let processed = 0;
 
-      // Upserts que DEVUELVEN id para insertar en *_no_relacionados
-      const upsertListaInterna = async (nombre, codigo, price) => {
+      // Normalización proveedor
+      const proveedorCanon = normalizeLabel(providerHint);
+      const proveedorLower = normLower(providerHint);
+
+      // ---------- INTERNOS ----------
+      const findIdInterno = async ({ codigo, nombre }) => {
+        const nombreN = normalizeLabel(nombre);
         if (codigo) {
-          const upd = await run(
-            `UPDATE lista_interna
-             SET nom_interno = ?, precio_final = ?, fecha = ?
-             WHERE LOWER(cod_interno) = LOWER(?)`,
-            [nombre, price, today, codigo]
+          const row = await get(
+            `SELECT id_interno FROM lista_interna
+             WHERE TRIM(LOWER(cod_interno)) = TRIM(LOWER(?)) LIMIT 1`,
+            [codigo]
           );
-          if (!upd.changes) {
-            const ins = await run(
-              `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
-               VALUES (?, ?, ?, ?)`,
-              [nombre, codigo, price, today]
-            );
-            return ins.lastID;
-          } else {
-            const row = await get(
-              `SELECT id_interno FROM lista_interna WHERE LOWER(cod_interno) = LOWER(?) LIMIT 1`,
-              [codigo]
-            );
-            return row?.id_interno ?? null;
-          }
-        } else {
-          const upd = await run(
-            `UPDATE lista_interna
-             SET nom_interno = ?, precio_final = ?, fecha = ?
-             WHERE LOWER(nom_interno) = LOWER(?)`,
-            [nombre, price, today, nombre]
-          );
-          if (!upd.changes) {
-            const ins = await run(
-              `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
-               VALUES (?, NULL, ?, ?)`,
-              [nombre, price, today]
-            );
-            return ins.lastID;
-          } else {
-            const row = await get(
-              `SELECT id_interno FROM lista_interna WHERE LOWER(nom_interno) = LOWER(?) LIMIT 1`,
-              [nombre]
-            );
-            return row?.id_interno ?? null;
-          }
+          if (row) return row.id_interno;
         }
+        const rowByName = await get(
+          `SELECT id_interno FROM lista_interna
+           WHERE TRIM(LOWER(nom_interno)) = TRIM(LOWER(?)) LIMIT 1`,
+          [nombreN]
+        );
+        if (rowByName) return rowByName.id_interno;
+
+        const rowFromNR = await get(
+          `SELECT li.id_interno
+           FROM articulos_gampack_no_relacionados ngr
+           JOIN lista_interna li ON li.id_interno = ngr.id_lista_interna
+           WHERE ( ? IS NOT NULL AND TRIM(LOWER(li.cod_interno)) = TRIM(LOWER(?)) )
+              OR TRIM(LOWER(li.nom_interno)) = TRIM(LOWER(?))
+           LIMIT 1`,
+          [codigo || null, codigo || null, nombreN]
+        );
+        return rowFromNR?.id_interno ?? null;
       };
 
-      const upsertListaPrecios = async (nombre, codigo, price, proveedor) => {
-        if (codigo) {
-          const upd = await run(
-            `UPDATE lista_precios
-             SET nom_externo = ?, precio_final = ?, tipo_empresa = 'Proveedor', fecha = ?
-             WHERE proveedor = ? AND LOWER(cod_externo) = LOWER(?)`,
-            [nombre, price, today, proveedor, codigo]
+      const upsertListaInterna = async ({ nombre, codigo, price, today }) => {
+        const nombreN = normalizeLabel(nombre);
+        const existingId = await findIdInterno({ codigo, nombre: nombreN });
+        if (existingId) {
+          await run(
+            `UPDATE lista_interna
+             SET nom_interno = ?, precio_final = ?, fecha = ?
+             WHERE id_interno = ?`,
+            [nombreN, price, today, existingId]
           );
-          if (!upd.changes) {
-            const ins = await run(
-              `INSERT INTO lista_precios
-               (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
-               VALUES (?, ?, ?, 'Proveedor', ?, ?)`,
-              [nombre, codigo, price, today, proveedor]
-            );
-            return ins.lastID;
-          } else {
-            const row = await get(
-              `SELECT id_externo FROM lista_precios WHERE proveedor = ? AND LOWER(cod_externo) = LOWER(?) LIMIT 1`,
-              [proveedor, codigo]
-            );
-            return row?.id_externo ?? null;
-          }
-        } else {
-          const upd = await run(
-            `UPDATE lista_precios
-             SET nom_externo = ?, precio_final = ?, tipo_empresa = 'Proveedor', fecha = ?
-             WHERE proveedor = ? AND LOWER(nom_externo) = LOWER(?)`,
-            [nombre, price, today, proveedor, nombre]
-          );
-          if (!upd.changes) {
-            const ins = await run(
-              `INSERT INTO lista_precios
-               (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
-               VALUES (?, NULL, ?, 'Proveedor', ?, ?)`,
-              [nombre, price, today, proveedor]
-            );
-            return ins.lastID;
-          } else {
-            const row = await get(
-              `SELECT id_externo FROM lista_precios WHERE proveedor = ? AND LOWER(nom_externo) = LOWER(?) LIMIT 1`,
-              [proveedor, nombre]
-            );
-            return row?.id_externo ?? null;
-          }
+          return existingId;
         }
+        const ins = await run(
+          `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
+           VALUES (?, ?, ?, ?)`,
+          [nombreN, codigo || null, price, today]
+        );
+        return ins.lastID;
       };
 
+      // ---------- EXTERNOS ----------
+      const findIdExterno = async ({ proveedorLower, codigo, nombre }) => {
+        const nombreN = normalizeLabel(nombre);
+        if (codigo) {
+          const row = await get(
+            `SELECT id_externo FROM lista_precios
+             WHERE TRIM(LOWER(proveedor)) = ?
+               AND TRIM(LOWER(cod_externo)) = TRIM(LOWER(?))
+             LIMIT 1`,
+            [proveedorLower, codigo]
+          );
+          if (row) return row.id_externo;
+        }
+        const rowByName = await get(
+          `SELECT id_externo FROM lista_precios
+           WHERE TRIM(LOWER(proveedor)) = ?
+             AND TRIM(LOWER(nom_externo)) = TRIM(LOWER(?))
+           LIMIT 1`,
+          [proveedorLower, nombreN]
+        );
+        if (rowByName) return rowByName.id_externo;
+
+        const rowFromNR = await get(
+          `SELECT lp.id_externo
+           FROM articulos_no_relacionados nr
+           JOIN lista_precios lp ON lp.id_externo = nr.id_lista_precios
+           WHERE TRIM(LOWER(lp.proveedor)) = ?
+             AND ( (? IS NOT NULL AND TRIM(LOWER(lp.cod_externo)) = TRIM(LOWER(?)))
+                   OR TRIM(LOWER(lp.nom_externo)) = TRIM(LOWER(?)) )
+           LIMIT 1`,
+          [proveedorLower, codigo || null, codigo || null, nombreN]
+        );
+        return rowFromNR?.id_externo ?? null;
+      };
+
+      const upsertListaPrecios = async ({ nombre, codigo, price, proveedorCanon, proveedorLower, today }) => {
+        const nombreN = normalizeLabel(nombre);
+        const existingId = await findIdExterno({ proveedorLower, codigo, nombre: nombreN });
+        if (existingId) {
+          await run(
+            `UPDATE lista_precios
+             SET nom_externo = ?, precio_final = ?, tipo_empresa = 'Proveedor', fecha = ?
+             WHERE id_externo = ?`,
+            [nombreN, price, today, existingId]
+          );
+          return existingId;
+        }
+        const ins = await run(
+          `INSERT INTO lista_precios
+           (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
+           VALUES (?, ?, ?, 'Proveedor', ?, ?)`,
+          [nombreN, codigo || null, price, today, proveedorCanon]
+        );
+        return ins.lastID;
+      };
+
+      // ---------- LOOP PRINCIPAL ----------
       await run('BEGIN TRANSACTION');
-
       try {
         for (const r of rows) {
-          const nombre = String(getCell(r, colNom) ?? '').trim();
-          const codigoRaw = colCod ? String(getCell(r, colCod) ?? '').trim() : '';
-          const codigo = codigoRaw || null;
+          const nombre = String(getCell(r, colNom) ?? '');
+          const nombreN = normalizeLabel(nombre);
+          const codigoRaw = colCod ? String(getCell(r, colCod) ?? '') : '';
+          const codigo = normalizeLabel(codigoRaw) || null;
           const precioRaw = getCell(r, colPrecio);
           const price = typeof precioRaw === 'number' ? precioRaw : parseNumberAR(precioRaw);
 
-          if (!nombre || price == null || !Number.isFinite(price)) {
-            continue; // sin nombre o sin precio => skip
-          }
+          if (!nombreN || price == null || !Number.isFinite(price)) continue;
 
           if (isGampack) {
-            const idInterno = await upsertListaInterna(nombre, codigo, price);
+            const idInterno = await upsertListaInterna({ nombre: nombreN, codigo, price, today });
             if (idInterno) {
               await run(
                 `INSERT OR IGNORE INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
@@ -1130,7 +1159,10 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
               processed++;
             }
           } else {
-            const idExterno = await upsertListaPrecios(nombre, codigo, price, providerHint);
+            const idExterno = await upsertListaPrecios({
+              nombre: nombreN, codigo, price,
+              proveedorCanon, proveedorLower, today
+            });
             if (idExterno) {
               await run(
                 `INSERT OR IGNORE INTO articulos_no_relacionados (id_lista_precios, motivo)
