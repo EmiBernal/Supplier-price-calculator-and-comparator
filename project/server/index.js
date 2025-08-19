@@ -90,6 +90,8 @@ app.get('/api/equivalencias', (req, res) => {
 
     const result = rows.map(row => ({
       id: row.id,
+      id_lista_precios: row.id_lista_precios,
+      id_lista_interna: row.id_lista_interna,
       supplier: row.proveedor,
       externalCode: row.cod_externo,
       externalName: row.nom_externo,
@@ -109,6 +111,131 @@ app.get('/api/equivalencias', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
+
+// === EDITAR RELACIÓN + DATOS ASOCIADOS ===
+function toYMD(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+app.put('/api/relacion/:id', (req, res) => {
+  const relationId = Number(req.params.id);
+  const { matchingCriteria, lista_precios, lista_interna } = req.body || {};
+
+  if (!relationId) {
+    return res.status(400).json({ success: false, message: 'id de relación inválido' });
+  }
+  if (!lista_precios?.id_externo || !lista_interna?.id_interno) {
+    return res.status(400).json({ success: false, message: 'Faltan id_externo o id_interno' });
+  }
+
+  const lp = {
+    id_externo: Number(lista_precios.id_externo),
+    proveedor: lista_precios.proveedor ?? null,
+    cod_externo: lista_precios.cod_externo ?? null,
+    nom_externo: lista_precios.nom_externo ?? null,
+    fecha: toYMD(lista_precios.fecha)
+  };
+  const li = {
+    id_interno: Number(lista_interna.id_interno),
+    cod_interno: lista_interna.cod_interno ?? null,
+    nom_interno: lista_interna.nom_interno ?? null,
+    fecha: toYMD(lista_interna.fecha)
+  };
+  const criterio = matchingCriteria ?? null;
+
+  db.serialize(() => {
+    db.run('BEGIN TRANSACTION');
+
+    db.get(
+      `SELECT id, id_lista_precios, id_lista_interna
+         FROM relacion_articulos
+        WHERE id = ?`,
+      [relationId],
+      (err, rel) => {
+        if (err) {
+          db.run('ROLLBACK');
+          return res.status(500).json({ success: false, message: 'Error leyendo relación' });
+        }
+        if (!rel) {
+          db.run('ROLLBACK');
+          return res.status(404).json({ success: false, message: 'Relación no encontrada' });
+        }
+        // Coherencia: mantenemos el pareo fijo
+        if (rel.id_lista_precios !== lp.id_externo || rel.id_lista_interna !== li.id_interno) {
+          db.run('ROLLBACK');
+          return res.status(400).json({ success: false, message: 'IDs no coinciden con la relación' });
+        }
+
+        // UPDATE lista_precios
+        db.run(
+          `UPDATE lista_precios
+              SET proveedor = COALESCE(?, proveedor),
+                  cod_externo = ?,
+                  nom_externo = COALESCE(?, nom_externo),
+                  fecha = COALESCE(?, fecha)
+            WHERE id_externo = ?`,
+          [lp.proveedor, lp.cod_externo, lp.nom_externo, lp.fecha, lp.id_externo],
+          function (err2) {
+            if (err2) {
+              db.run('ROLLBACK');
+              return res.status(500).json({ success: false, message: 'Error actualizando lista_precios' });
+            }
+
+            // UPDATE lista_interna
+            db.run(
+              `UPDATE lista_interna
+                  SET cod_interno = ?,
+                      nom_interno = COALESCE(?, nom_interno),
+                      fecha = COALESCE(?, fecha)
+                WHERE id_interno = ?`,
+              [li.cod_interno, li.nom_interno, li.fecha, li.id_interno],
+              function (err3) {
+                if (err3) {
+                  db.run('ROLLBACK');
+                  return res.status(500).json({ success: false, message: 'Error actualizando lista_interna' });
+                }
+
+                const updateCriterio = (next) => {
+                  if (criterio === null || criterio === undefined) return next();
+                  db.run(
+                    `UPDATE relacion_articulos
+                        SET criterio_relacion = ?
+                      WHERE id = ?`,
+                    [criterio, relationId],
+                    function (err4) {
+                      if (err4) {
+                        db.run('ROLLBACK');
+                        return res.status(500).json({ success: false, message: 'Error actualizando criterio de relación' });
+                      }
+                      next();
+                    }
+                  );
+                };
+
+                updateCriterio(() => {
+                  db.run('COMMIT', (err5) => {
+                    if (err5) {
+                      db.run('ROLLBACK');
+                      return res.status(500).json({ success: false, message: 'Error al confirmar cambios' });
+                    }
+                    return res.json({ success: true });
+                  });
+                });
+              }
+            );
+          }
+        );
+      }
+    );
+  });
+});
+
 
 app.get('/api/lista_precios', (req, res) => {
   const search = req.query.search || '';
