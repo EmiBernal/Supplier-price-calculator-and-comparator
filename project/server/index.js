@@ -962,6 +962,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         try { mapping = JSON.parse(req.body.mapping); } catch { mapping = {}; }
       }
 
+      // --- XLSX ---
       const wb = XLSX.read(req.file.buffer);
       const ws = wb.Sheets[wb.SheetNames[0]];
 
@@ -971,7 +972,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
       const dataRows = matrix.slice(headerIndex0 + 1);
       console.log('Headers (fila seleccionada):', headersRaw);
 
-      // Matriz -> objetos
+      // Matriz -> objetos (keys = encabezados crudos)
       const rows = dataRows.map(arr => {
         const obj = {};
         for (let i = 0; i < headersRaw.length; i++) {
@@ -981,9 +982,8 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         return obj;
       });
 
-      // Helpers
-      const normalizeLabel = (v) =>
-        String(v ?? '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+      // --- Helpers comunes ---
+      const normalizeLabel = (v) => String(v ?? '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
       const normLower = (v) => normalizeLabel(v).toLowerCase();
 
       const getCell = (row, key) => {
@@ -993,14 +993,16 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         const realKey = Object.keys(row).find(k => normLower(k) === nk);
         return realKey ? row[realKey] : '';
       };
+
       const parseNumberAR = (value) => {
         if (value == null) return null;
         let s = String(value).trim();
-        s = s.replace(/\./g, '').replace(',', '.');
-        s = s.replace(/[$\sA-Za-z]/g, '');
+        // elimina miles ".", cambia coma decimal por ".", quita $ y letras
+        s = s.replace(/\./g, '').replace(',', '.').replace(/[$\sA-Za-z]/g, '');
         const n = Number(s);
         return Number.isFinite(n) ? n : null;
       };
+
       const run = (sql, params=[]) =>
         new Promise((resolve, reject) => db.run(sql, params, function (err) {
           if (err) reject(err); else resolve(this);
@@ -1010,7 +1012,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
           if (err) reject(err); else resolve(row);
         }));
 
-      // Columnas obligatorias
+      // Columnas mapeadas (precio y nombre obligatorios; código opcional)
       const colNom    = isGampack ? (mapping.nom_interno || mapping.nom_externo) : (mapping.nom_externo || mapping.nom_interno);
       const colCod    = isGampack ? (mapping.cod_interno || mapping.cod_externo) : (mapping.cod_externo || mapping.cod_interno);
       const colPrecio = mapping.precio_final;
@@ -1023,116 +1025,119 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
       }
 
       const today = new Date().toISOString().slice(0, 10);
-      let processed = 0;
 
-      // Normalización proveedor
-      const proveedorCanon = normalizeLabel(providerHint);
-      const proveedorLower = normLower(providerHint);
+      // Contadores
+      let inserted = 0;
+      let updated = 0;
+      let updatedPriceChanged = 0;
+      let skipped = 0;
 
-      // ---------- INTERNOS ----------
-      const findIdInterno = async ({ codigo, nombre }) => {
+      // Normalización proveedor (externos)
+      const proveedorCanon = normalizeLabel(providerHint);  // se guarda así
+      const proveedorLower = normLower(providerHint);       // se compara así
+
+      // --------- RESOLVER EXISTENTES (devuelve id + precio actual) ---------
+      const getExistingInterno = async ({ codigo, nombre }) => {
         const nombreN = normalizeLabel(nombre);
         if (codigo) {
-          const row = await get(
-            `SELECT id_interno FROM lista_interna
-             WHERE TRIM(LOWER(cod_interno)) = TRIM(LOWER(?)) LIMIT 1`,
+          const byCode = await get(
+            `SELECT id_interno AS id, precio_final AS price
+             FROM lista_interna
+             WHERE TRIM(LOWER(cod_interno)) = TRIM(LOWER(?))
+             LIMIT 1`,
             [codigo]
           );
-          if (row) return row.id_interno;
+          if (byCode) return byCode;
         }
-        const rowByName = await get(
-          `SELECT id_interno FROM lista_interna
-           WHERE TRIM(LOWER(nom_interno)) = TRIM(LOWER(?)) LIMIT 1`,
+        const byName = await get(
+          `SELECT id_interno AS id, precio_final AS price
+           FROM lista_interna
+           WHERE TRIM(LOWER(nom_interno)) = TRIM(LOWER(?))
+           LIMIT 1`,
           [nombreN]
         );
-        if (rowByName) return rowByName.id_interno;
-
-        const rowFromNR = await get(
-          `SELECT li.id_interno
-           FROM articulos_gampack_no_relacionados ngr
-           JOIN lista_interna li ON li.id_interno = ngr.id_lista_interna
-           WHERE ( ? IS NOT NULL AND TRIM(LOWER(li.cod_interno)) = TRIM(LOWER(?)) )
-              OR TRIM(LOWER(li.nom_interno)) = TRIM(LOWER(?))
-           LIMIT 1`,
-          [codigo || null, codigo || null, nombreN]
-        );
-        return rowFromNR?.id_interno ?? null;
+        return byName || null;
       };
 
-      const upsertListaInterna = async ({ nombre, codigo, price, today }) => {
-        const nombreN = normalizeLabel(nombre);
-        const existingId = await findIdInterno({ codigo, nombre: nombreN });
-        if (existingId) {
-          await run(
-            `UPDATE lista_interna
-             SET nom_interno = ?, precio_final = ?, fecha = ?
-             WHERE id_interno = ?`,
-            [nombreN, price, today, existingId]
-          );
-          return existingId;
-        }
-        const ins = await run(
-          `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
-           VALUES (?, ?, ?, ?)`,
-          [nombreN, codigo || null, price, today]
-        );
-        return ins.lastID;
-      };
-
-      // ---------- EXTERNOS ----------
-      const findIdExterno = async ({ proveedorLower, codigo, nombre }) => {
+      const getExistingExterno = async ({ proveedorLower, codigo, nombre }) => {
         const nombreN = normalizeLabel(nombre);
         if (codigo) {
-          const row = await get(
-            `SELECT id_externo FROM lista_precios
+          const byCode = await get(
+            `SELECT id_externo AS id, precio_final AS price
+             FROM lista_precios
              WHERE TRIM(LOWER(proveedor)) = ?
                AND TRIM(LOWER(cod_externo)) = TRIM(LOWER(?))
              LIMIT 1`,
             [proveedorLower, codigo]
           );
-          if (row) return row.id_externo;
+          if (byCode) return byCode;
         }
-        const rowByName = await get(
-          `SELECT id_externo FROM lista_precios
+        const byName = await get(
+          `SELECT id_externo AS id, precio_final AS price
+           FROM lista_precios
            WHERE TRIM(LOWER(proveedor)) = ?
              AND TRIM(LOWER(nom_externo)) = TRIM(LOWER(?))
            LIMIT 1`,
           [proveedorLower, nombreN]
         );
-        if (rowByName) return rowByName.id_externo;
+        return byName || null;
+      };
 
-        const rowFromNR = await get(
-          `SELECT lp.id_externo
-           FROM articulos_no_relacionados nr
-           JOIN lista_precios lp ON lp.id_externo = nr.id_lista_precios
-           WHERE TRIM(LOWER(lp.proveedor)) = ?
-             AND ( (? IS NOT NULL AND TRIM(LOWER(lp.cod_externo)) = TRIM(LOWER(?)))
-                   OR TRIM(LOWER(lp.nom_externo)) = TRIM(LOWER(?)) )
-           LIMIT 1`,
-          [proveedorLower, codigo || null, codigo || null, nombreN]
-        );
-        return rowFromNR?.id_externo ?? null;
+      // --------- UPSERTS ---------
+      const upsertListaInterna = async ({ nombre, codigo, price, today }) => {
+        const nombreN = normalizeLabel(nombre);
+        const codigoN = codigo ? normalizeLabel(codigo) : null;
+        const existing = await getExistingInterno({ codigo: codigoN, nombre: nombreN });
+
+        if (existing?.id) {
+          // update
+          await run(
+            `UPDATE lista_interna
+             SET nom_interno = ?, precio_final = ?, fecha = ?
+             WHERE id_interno = ?`,
+            [nombreN, price, today, existing.id]
+          );
+          updated++;
+          if (existing.price !== price) updatedPriceChanged++;
+          return existing.id;
+        } else {
+          // insert
+          const ins = await run(
+            `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
+             VALUES (?, ?, ?, ?)`,
+            [nombreN, codigoN, price, today]
+          );
+          inserted++;
+          return ins.lastID;
+        }
       };
 
       const upsertListaPrecios = async ({ nombre, codigo, price, proveedorCanon, proveedorLower, today }) => {
         const nombreN = normalizeLabel(nombre);
-        const existingId = await findIdExterno({ proveedorLower, codigo, nombre: nombreN });
-        if (existingId) {
+        const codigoN = codigo ? normalizeLabel(codigo) : null;
+        const existing = await getExistingExterno({ proveedorLower, codigo: codigoN, nombre: nombreN });
+
+        if (existing?.id) {
+          // update
           await run(
             `UPDATE lista_precios
              SET nom_externo = ?, precio_final = ?, tipo_empresa = 'Proveedor', fecha = ?
              WHERE id_externo = ?`,
-            [nombreN, price, today, existingId]
+            [nombreN, price, today, existing.id]
           );
-          return existingId;
+          updated++;
+          if (existing.price !== price) updatedPriceChanged++;
+          return existing.id;
+        } else {
+          // insert
+          const ins = await run(
+            `INSERT INTO lista_precios (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
+             VALUES (?, ?, ?, 'Proveedor', ?, ?)`,
+            [nombreN, codigoN, price, today, proveedorCanon]
+          );
+          inserted++;
+          return ins.lastID;
         }
-        const ins = await run(
-          `INSERT INTO lista_precios
-           (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
-           VALUES (?, ?, ?, 'Proveedor', ?, ?)`,
-          [nombreN, codigo || null, price, today, proveedorCanon]
-        );
-        return ins.lastID;
       };
 
       // ---------- LOOP PRINCIPAL ----------
@@ -1146,7 +1151,10 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
           const precioRaw = getCell(r, colPrecio);
           const price = typeof precioRaw === 'number' ? precioRaw : parseNumberAR(precioRaw);
 
-          if (!nombreN || price == null || !Number.isFinite(price)) continue;
+          if (!nombreN || price == null || !Number.isFinite(price)) {
+            skipped++;
+            continue;
+          }
 
           if (isGampack) {
             const idInterno = await upsertListaInterna({ nombre: nombreN, codigo, price, today });
@@ -1156,12 +1164,10 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
                  VALUES (?, ?)`,
                 [idInterno, 'Importado vía carga masiva']
               );
-              processed++;
             }
           } else {
             const idExterno = await upsertListaPrecios({
-              nombre: nombreN, codigo, price,
-              proveedorCanon, proveedorLower, today
+              nombre: nombreN, codigo, price, proveedorCanon, proveedorLower, today
             });
             if (idExterno) {
               await run(
@@ -1169,18 +1175,28 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
                  VALUES (?, ?)`,
                 [idExterno, 'Importado vía carga masiva']
               );
-              processed++;
             }
           }
         }
 
         await run('COMMIT');
+
+        const message = `Importación finalizada: ${updated} modificados (${updatedPriceChanged} con cambio de precio) y ${inserted} nuevos.${skipped ? ` Omitidos: ${skipped}.` : ''}`;
+
         return res.json({
           ok: true,
-          processed,
+          isGampack,
           source: sourceFilename || req.file.originalname,
           header_row_used: headerRow1,
-          saved_to: isGampack ? 'articulos_gampack_no_relacionados' : 'articulos_no_relacionados'
+          counts: {
+            inserted,
+            updated,
+            updated_price_changed: updatedPriceChanged,
+            skipped
+          },
+          processed: inserted + updated, // 👈 agregado para compatibilidad
+          saved_to: isGampack ? 'articulos_gampack_no_relacionados' : 'articulos_no_relacionados',
+          message
         });
       } catch (e) {
         await run('ROLLBACK');

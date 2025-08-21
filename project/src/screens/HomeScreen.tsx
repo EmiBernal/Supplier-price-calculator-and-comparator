@@ -53,28 +53,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
     fetchStats();
   }, []);
 
-  // Carga inteligente de proveedores:
-  // 1) Intenta /api/providers/summary (si existe)
-  // 2) Fallback: /api/lista_precios y agrupar en el front
+  // Carga inteligente de proveedores
   useEffect(() => {
     const fetchProvidersSmart = async () => {
       setLoadingProviders(true);
       try {
-        // Intento #1: resumen del backend (si está implementado)
         const r1 = await fetch('http://localhost:4000/api/providers/summary');
         if (r1.ok) {
           const rows: ProviderStat[] = await r1.json();
           setProviders(rows || []);
           return;
         }
-        // Si 404/500, cae al fallback
         throw new Error('summary_not_available');
       } catch {
         try {
-          // Intento #2: traer lista_precios y agrupar en el front
           const r2 = await fetch('http://localhost:4000/api/lista_precios?search=');
           if (!r2.ok) throw new Error('fallback_error');
-          const all = await r2.json(); // [{ proveedor, ... }]
+          const all = await r2.json();
           const countByProv = new Map<string, number>();
           for (const row of all) {
             const prov = (row?.proveedor ?? '').toString().trim();
@@ -103,7 +98,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
 
   const number = (n?: number) => (typeof n === 'number' ? n.toLocaleString('es-AR') : '0');
 
-  // Filtro rápido en-proveedor
   const filteredProviders = useMemo(() => {
     const q = providerQuery.trim().toLowerCase();
     if (!q) return providers;
@@ -111,17 +105,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
   }, [providers, providerQuery]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-[#e0f2fe] via-[#f0fdf4] to-[#fef9c3] dark:from-[#0b0f1a] dark:via-[#101624] dark:to-[#1c1f2b] transition-colors">
+    // BASE SÓLIDA como en ManualEntryScreen
+    <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-[#0b0f1a] transition-colors">
+      {/* OVERLAYS decorativos separados para light/dark (sin interferir con la base) */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+        {/* Versión LIGHT */}
+        <div className="absolute inset-0 bg-gradient-to-br from-[#e0f2fe] via-[#f0fdf4] to-[#fef9c3] opacity-80 dark:opacity-0 transition-opacity" />
+        {/* Versión DARK */}
+        <div className="absolute inset-0 opacity-0 dark:opacity-100 transition-opacity bg-gradient-to-br from-[#0b0f1a] via-[#101624] to-[#1c1f2b]" />
+        {/* Partículas (neutralizadas con opacidad baja) */}
+        <div className="absolute top-12 left-20 w-20 h-20 bg-[#6CC04A]/20 blur-2xl rounded-full" />
+        <div className="absolute bottom-16 right-24 w-28 h-28 bg-[#22378C]/20 blur-3xl rounded-full" />
+        <div className="absolute top-1/3 right-1/4 w-16 h-16 bg-pink-400/10 blur-2xl rounded-full" />
+      </div>
+
       {/* CONTENT */}
       <main className="flex-1 relative">
         <div className="relative max-w-7xl mx-auto px-6 py-12">
-          {/* Partículas decorativas */}
-          <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="absolute top-12 left-20 w-20 h-20 bg-[#6CC04A]/20 blur-2xl rounded-full animate-pulse" />
-            <div className="absolute bottom-16 right-24 w-28 h-28 bg-[#22378C]/20 blur-3xl rounded-full animate-pulse delay-700" />
-            <div className="absolute top-1/3 right-1/4 w-16 h-16 bg-pink-400/10 blur-2xl rounded-full animate-bounce-slow" />
-          </div>
-
           {/* Hero */}
           <div className="flex items-center gap-5 mb-10">
             <div className="relative w-16 h-16 shrink-0">
@@ -157,7 +157,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
               <p className="mt-2 text-sm text-gray-600 dark:text-white/80 max-w-[28ch]">Cargar o buscar productos manualmente.</p>
             </button>
 
-            {/* Vinculaciones (Equivalencias) */}
+            {/* Vinculaciones */}
             <button
               onClick={() => onNavigate('equivalences')}
               className="group text-left rounded-3xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 hover:bg-white/90 dark:hover:bg-white/10 transition-all shadow-lg hover:shadow-2xl p-8 min-h-44 md:min-h-56 backdrop-blur-xl transform hover:scale-[1.02]"
@@ -209,7 +209,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
               </div>
             </div>
 
-            {/* Proveedores activos (expandible con lista, búsqueda y scroll) */}
+            {/* Proveedores activos */}
             <div className="rounded-2xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-6 shadow-md hover:shadow-lg transition-all">
               <button
                 onClick={() => setOpenProviders(o => !o)}
@@ -243,7 +243,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
                 }`}
               >
                 <div className="overflow-hidden">
-                  {/* Buscador pequeño dentro del panel */}
+                  {/* Buscador */}
                   <div className="relative mb-3">
                     <input
                       value={providerQuery}
@@ -284,7 +284,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
               </div>
             </div>
 
-            {/* Pendientes de vinculación (contador) */}
+            {/* Pendientes de vinculación */}
             <button
               onClick={() => onNavigate('equivalences')}
               className="text-left rounded-2xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-6 shadow-md hover:shadow-lg transition-all"
@@ -306,8 +306,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
         </div>
       </main>
 
-      {/* FOOTER */}
-      <footer className="mt-auto border-t border-black/5 dark:border-white/10 bg-gradient-to-r from-white/80 to-white/60 dark:from-[#0b0f1a]/70 dark:to-[#101624]/70 backdrop-blur">
+      {/* FOOTER: superficie, no gradiente base */}
+      <footer className="mt-auto border-t border-gray-200 dark:border-white/10 bg-white/70 dark:bg-white/5 backdrop-blur">
         <div className="max-w-7xl mx-auto px-6 py-6 text-gray-700 dark:text-white/70 text-sm text-center">
           © Comparador de precios de Gampack 2025. Todos los derechos reservados.
         </div>

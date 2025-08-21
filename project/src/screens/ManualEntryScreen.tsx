@@ -345,6 +345,81 @@ const handleSuggestionClick = (prod: any) => {
 
         {/* Card principal */}
         <div className="bg-white dark:bg-white/5 rounded-2xl shadow-sm border border-gray-200 dark:border-white/10 p-6 sm:p-8">
+          {/* Buscador */}
+          <div className="mb-6 p-6 border border-gray-300 dark:border-white/10 rounded-2xl bg-white/80 dark:bg-white/5 backdrop-blur-sm shadow-sm relative">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Buscar productos</h2>
+              {/* Import visible en mobile dentro de la card */}
+              <div className="sm:hidden">
+                <ImportButton onClick={() => setShowImport(true)} />
+              </div>
+            </div>
+            <div className="flex flex-col md:flex-row md:items-end md:space-x-6 space-y-5 md:space-y-0">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-white/80 mb-2">Buscar por</label>
+                <select
+                  className="w-full border border-gray-300 dark:border-white/10 rounded-xl p-3 text-gray-700 dark:bg-white/10 dark:text-white dark:placeholder-white/60 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                  value={searchCriteria}
+                  onChange={(e) => {
+                    const value = e.target.value as 'productCode' | 'productName' | 'company';
+                    setSearchCriteria(value);
+                    setSearchQuery('');
+                    setSearchResults([]);
+                    handleLiveSearch('');
+                  }}
+                >
+                  <option value="productCode">Código</option>
+                  <option value="productName">Nombre</option>
+                  <option value="company">Proveedor</option>
+                </select>
+              </div>
+
+              <div className="flex-1 relative">
+                <label className="block text-sm font-medium text-gray-700 dark:text-white/80 mb-2">Consulta</label>
+                <input
+                  className="w-full border border-gray-300 dark:border-white/10 rounded-xl p-3 text-gray-700 dark:bg-white/10 dark:text-white dark:placeholder-white/60 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSearchQuery(val);
+                    handleLiveSearch(val);
+                  }}
+                  placeholder="Escribí tu búsqueda"
+                  autoComplete="off"
+                />
+                  {searchResults.length > 0 && (
+                    <ul
+                      className="absolute z-50 mt-2 w-full
+                                bg-white dark:bg-[#0f1524]
+                                border border-gray-300 dark:border-white/10
+                                rounded-xl shadow-xl max-h-64 overflow-y-auto backdrop-blur-sm"
+                    >
+                      {searchResults.map((raw, idx) => {
+                        const prod = normalizeProduct(raw);
+                        const name = prod.productName || '(Sin nombre)';
+                        const code = prod.productCode || '—';
+                        const comp = prod.company || '—';
+
+                        return (
+                          <li
+                            key={idx}
+                            className="px-5 py-3 text-sm
+                                      text-gray-800 dark:text-white
+                                      hover:bg-blue-50 dark:hover:bg-white/10
+                                      cursor-pointer"
+                            onClick={() => handleSuggestionClick(prod)}
+                          >
+                            <strong>{name}</strong> — {code} | <span className="italic">{comp}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+              </div>
+            </div>
+          </div>
+
           {/* Formulario */}
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
