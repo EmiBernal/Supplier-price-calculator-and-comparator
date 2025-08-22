@@ -4,6 +4,13 @@ import Fuse from 'fuse.js';
 
 type Row = Record<string, any>;
 
+type ImportResult = {
+  ok: boolean;
+  message: string;
+  processed?: number;
+  counts?: { inserted: number; updated: number; updated_price_changed: number; skipped: number };
+};
+
 // Label prolija para mostrar
 function normalizeHeaderLabel(v: any): string {
   return String(v ?? '').trim().replace(/\r?\n/g, ' ').replace(/\s+/g, ' ');
@@ -56,32 +63,25 @@ function detectMappingRaw(headersRaw: any[]): { nom?: string; cod?: string; prec
 
 export default function ImportarListaPrecios({ onClose }: { onClose?: () => void }) {
   const [file, setFile] = useState<File | null>(null);
-
-  // Matriz completa de la hoja (header:1)
   const [sheetRows, setSheetRows] = useState<any[][]>([]);
-  // Índice 1-based para el usuario (internamente usaremos index 0-based)
   const [headerRowNumber, setHeaderRowNumber] = useState<number>(1);
-
-  // Headers crudos de la fila elegida + labels para mostrar
   const [headersRaw, setHeadersRaw] = useState<any[]>([]);
   const [headersLabel, setHeadersLabel] = useState<string[]>([]);
-
-  // Filas ya en forma de objetos con claves = headers crudos elegidos
   const [rows, setRows] = useState<Row[]>([]);
-
-  // Mapeos (valores = header crudo)
   const [mapNom, setMapNom] = useState<string>('');
-  const [mapCod, setMapCod] = useState<string>('');     // opcional
+  const [mapCod, setMapCod] = useState<string>('');
   const [mapPrecio, setMapPrecio] = useState<string>('');
-
   const [proveedorManual, setProveedorManual] = useState<string>('');
   const isGampack = useMemo(() => proveedorManual.trim().toLowerCase() === 'gampack', [proveedorManual]);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string>('');
+  const [result, setResult] = useState<ImportResult | null>(null);
 
   const labelNom = isGampack ? 'Columna para nom_interno' : 'Columna para nom_externo';
   const labelCod = isGampack ? 'Columna para cod_interno (opcional)' : 'Columna para cod_externo (opcional)';
   const labelPrecio = 'Columna para precio_final';
 
-  // Construye objetos fila a partir de la matriz completa y una fila de headers seleccionada
   const rebuildRowsFromMatrix = (matrix: any[][], hdrIndex0: number) => {
     const hdrRawRow = (matrix[hdrIndex0] || []).map((v) => String(v ?? ''));
     const dataRows = matrix.slice(hdrIndex0 + 1);
@@ -97,7 +97,6 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
     setHeadersLabel(hdrRawRow.map(normalizeHeaderLabel));
     setRows(objs);
 
-    // Autodetección según los headers crudos de esta fila
     const auto = detectMappingRaw(hdrRawRow);
     setMapNom(String(auto.nom ?? ''));
     setMapCod(String(auto.cod ?? ''));
@@ -109,11 +108,8 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
     const data = await f.arrayBuffer();
     const wb = XLSX.read(data);
     const ws = wb.Sheets[wb.SheetNames[0]];
-    // Matriz completa (no asumimos que headers están en la fila 1)
     const matrix: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' }) as any[][];
     setSheetRows(matrix);
-
-    // Por defecto, headers en fila 1 (index 0)
     setHeaderRowNumber(1);
     rebuildRowsFromMatrix(matrix, 0);
   };
@@ -122,22 +118,23 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
     const max = Math.max(1, sheetRows.length);
     const clamped = Math.min(Math.max(1, val), max);
     setHeaderRowNumber(clamped);
-    // Recalcular en base a esa fila (1-based -> 0-based)
     rebuildRowsFromMatrix(sheetRows, clamped - 1);
   };
 
   const submit = async () => {
-    if (!file) return alert('Seleccioná un archivo');
-    if (!proveedorManual.trim()) return alert('Ingresá el proveedor');
-    if (!mapNom || !mapPrecio) return alert('Asigná columnas para nombre y precio');
+    setErrorMsg('');
+    setResult(null);
+
+    if (!file) { setErrorMsg('Seleccioná un archivo.'); return; }
+    if (!proveedorManual.trim()) { setErrorMsg('Ingresá el proveedor ("Gampack" si es interno).'); return; }
+    if (!mapNom || !mapPrecio) { setErrorMsg('Asigná columnas para nombre y precio.'); return; }
 
     const fd = new FormData();
     fd.append('file', file);
     fd.append('provider_hint', proveedorManual.trim());
     fd.append('source_filename', file.name);
-    fd.append('header_row', String(headerRowNumber)); // <— NUEVO: enviamos la fila elegida
+    fd.append('header_row', String(headerRowNumber));
 
-    // Enviar SIEMPRE headers CRUDOS
     const mapping: any = { precio_final: mapPrecio };
     if (isGampack) {
       mapping.nom_interno = mapNom;
@@ -148,21 +145,33 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
     }
     fd.append('mapping', JSON.stringify(mapping));
 
-    const res = await fetch('/api/imports/lista-precios', { method: 'POST', body: fd });
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/imports/lista-precios', { method: 'POST', body: fd });
 
-    let data: any = null;
-    const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) {
-      try { data = await res.json(); } catch { data = null; }
+      let data: ImportResult | null = null;
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        try { data = await res.json(); } catch { data = null; }
+      }
+
+      if (!res.ok || !data) {
+        const msg = (data as any)?.error || `HTTP ${res.status}`;
+        setErrorMsg('Error: ' + msg);
+        return;
+      }
+
+      // ✅ Mostrar cartel de resultados con contadores
+      setResult(data);
+    } catch (e: any) {
+      setErrorMsg('Error de red al importar.');
+    } finally {
+      setSubmitting(false);
     }
+  };
 
-    if (!res.ok) {
-      const msg = (data && data.error) ? data.error : `HTTP ${res.status}`;
-      alert('Error: ' + msg);
-      return;
-    }
-
-    alert(`Importación OK (items: ${data?.processed ?? 0})`);
+  const closeAll = () => {
+    setResult(null);
     onClose && onClose();
   };
 
@@ -212,7 +221,7 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
         />
       </div>
 
-      {/* NUEVO: Fila de encabezados */}
+      {/* Fila de encabezados */}
       {sheetRows.length > 0 && (
         <div>
           <label className="text-sm block mb-2 text-gray-700 dark:text-white/80">
@@ -236,7 +245,7 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
         </div>
       )}
 
-      {/* Mapeo: usa headers de la fila elegida */}
+      {/* Mapeo */}
       {headersRaw.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
@@ -298,14 +307,21 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
         </div>
       )}
 
+      {/* Errores */}
+      {errorMsg && (
+        <div className="p-3 rounded-xl border border-red-200 dark:border-red-700 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-200 text-sm">
+          {errorMsg}
+        </div>
+      )}
+
       <div className="flex gap-2">
         <button
           className="rounded-xl px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition
                      dark:bg-blue-500 dark:hover:bg-blue-600"
-          disabled={!rows.length || !proveedorManual.trim() || !mapNom || !mapPrecio}
+          disabled={submitting || !rows.length || !proveedorManual.trim() || !mapNom || !mapPrecio}
           onClick={submit}
         >
-          Importar
+          {submitting ? 'Importando…' : 'Importar'}
         </button>
         {onClose && (
           <button className="rounded-xl px-4 py-2 text-gray-700 hover:bg-gray-100
@@ -315,6 +331,50 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
           </button>
         )}
       </div>
+
+      {/* CARTEL DE RESULTADOS */}
+      {result && (
+        <div className="mt-4 rounded-2xl border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/30 p-4">
+          <div className="flex items-start gap-3">
+            <svg className="mt-0.5 h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 12l2 2 4-4" />
+              <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+            </svg>
+            <div>
+              <h4 className="font-semibold text-green-800 dark:text-green-200">Importación finalizada</h4>
+              <p className="text-sm text-green-800/90 dark:text-green-200/90 mt-1">{result.message}</p>
+              {result.counts && (
+                <ul className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                  <li className="rounded-lg px-3 py-2 bg-white/70 dark:bg-white/10 border border-green-200/60 dark:border-white/10">
+                    <span className="block text-xs opacity-70">Nuevos</span>
+                    <span className="text-lg font-semibold">{result.counts.inserted}</span>
+                  </li>
+                  <li className="rounded-lg px-3 py-2 bg-white/70 dark:bg-white/10 border border-green-200/60 dark:border-white/10">
+                    <span className="block text-xs opacity-70">Modificados</span>
+                    <span className="text-lg font-semibold">{result.counts.updated}</span>
+                  </li>
+                  <li className="rounded-lg px-3 py-2 bg-white/70 dark:bg-white/10 border border-green-200/60 dark:border-white/10">
+                    <span className="block text-xs opacity-70">Con cambio de precio</span>
+                    <span className="text-lg font-semibold">{result.counts.updated_price_changed}</span>
+                  </li>
+                  <li className="rounded-lg px-3 py-2 bg-white/70 dark:bg-white/10 border border-green-200/60 dark:border-white/10">
+                    <span className="block text-xs opacity-70">Omitidos</span>
+                    <span className="text-lg font-semibold">{result.counts.skipped}</span>
+                  </li>
+                </ul>
+              )}
+              <div className="mt-3">
+                <button
+                  onClick={closeAll}
+                  className="rounded-xl px-4 py-2 bg-gray-900 text-white hover:bg-black/80 dark:bg-white dark:text-gray-900 dark:hover:bg-white/90 transition"
+                >
+                  Entendido
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

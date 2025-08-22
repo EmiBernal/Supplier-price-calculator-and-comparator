@@ -55,10 +55,10 @@ type Suggestion = {
   external: ExternalItem;
   reason: string;
   score: number;
-  id: string;
+  id: string; // `${internalId}|${externalId}`
 };
 
-const SIMILARITY_THRESHOLD = 0.60;
+const DEFAULT_SIMILARITY_THRESHOLD = 0.60;
 const MAX_CANDIDATES_PER_INTERNAL = Infinity;
 const BATCH_SIZE = 200;
 
@@ -127,11 +127,12 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const [selectedExternals, setSelectedExternals] = useState<ExternalItem[]>([]);
   const [selectedInternal, setSelectedInternal] = useState<InternalItem | null>(null);
 
-  // Sugerencias + descartes
+  // Panel de revisión
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [ignoredPairs, setIgnoredPairs] = useState<Set<string>>(new Set());
   const [reviewOpen, setReviewOpen] = useState(false);
   const [loadingAuto, setLoadingAuto] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // búsquedas
   const [searchExt, setSearchExt] = useState('');
@@ -144,6 +145,9 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const [sortExtDir, setSortExtDir] = useState<SortDir>('desc');
   const [sortIntKey, setSortIntKey] = useState<SortKeyInternal>('fecha');
   const [sortIntDir, setSortIntDir] = useState<SortDir>('desc');
+
+  // UX mejorada: umbral ajustable
+  const [threshold, setThreshold] = useState<number>(DEFAULT_SIMILARITY_THRESHOLD);
 
   // Top button
   const [showTop, setShowTop] = useState(false);
@@ -160,40 +164,38 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       .catch(() => setInternals([]));
   }, []);
 
-  // Evitar refresco con Ctrl/Cmd+R y F5 en esta pantalla + atajo 't' para Top
-// Evitar refresco con Ctrl/Cmd+R y F5 en esta pantalla + atajo 't' para Top
-useEffect(() => {
-  const isEditable = (el: EventTarget | null) => {
-    const n = (el as HTMLElement | null);
-    if (!n) return false;
-    const tag = (n.tagName || '').toLowerCase();
-    return (
-      (tag === 'input' || tag === 'textarea' || tag === 'select') ||
-      (n as HTMLElement).isContentEditable
-    );
-  };
+  // Evitar refresco con Ctrl/Cmd+R y F5 + atajo 't' para Top
+  useEffect(() => {
+    const isEditable = (el: EventTarget | null) => {
+      const n = (el as HTMLElement | null);
+      if (!n) return false;
+      const tag = (n.tagName || '').toLowerCase();
+      return (
+        (tag === 'input' || tag === 'textarea' || tag === 'select') ||
+        (n as HTMLElement).isContentEditable
+      );
+    };
 
-  const onKey = (e: KeyboardEvent) => {
-    const targetIsEditable = isEditable(e.target);
+    const onKey = (e: KeyboardEvent) => {
+      const targetIsEditable = isEditable(e.target);
 
-    // bloquear refresh sólo con combinaciones de navegador
-    const k = e.key.toLowerCase();
-    if ((k === 'r' && (e.ctrlKey || e.metaKey)) || e.key === 'F5') {
-      e.preventDefault();
-      return;
-    }
+      // bloquear refresh
+      const k = e.key.toLowerCase();
+      if ((k === 'r' && (e.ctrlKey || e.metaKey)) || e.key === 'F5') {
+        e.preventDefault();
+        return;
+      }
 
-    // atajo "t" => sólo si NO estoy escribiendo en un campo
-    if (!targetIsEditable && k === 't' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  };
+      // atajo "t" => Top
+      if (!targetIsEditable && k === 't' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    };
 
-  window.addEventListener('keydown', onKey);
-  return () => window.removeEventListener('keydown', onKey);
-}, []);
-
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [reviewOpen, suggestions]);
 
   // Mostrar botón Top al hacer scroll
   useEffect(() => {
@@ -268,7 +270,7 @@ useEffect(() => {
           const id = `${i.id_interno}|${eIdx.item.id_externo}`;
           if (ignoredPairs.has(id) || seen.has(id)) continue;
           const score = cosineByTri(iTri, eIdx.tri);
-          if (score >= SIMILARITY_THRESHOLD) {
+          if (score >= threshold) {
             local.push({
               internal: i,
               external: eIdx.item,
@@ -292,7 +294,7 @@ useEffect(() => {
     setSuggestions(acc);
     setReviewOpen(true);
     setLoadingAuto(false);
-  }, [internals, extIndexed, ignoredPairs]);
+  }, [internals, extIndexed, ignoredPairs, threshold]);
 
   /* ---------- Aceptar / Eliminar sugerencias ---------- */
   const removeFromStateAfterLink = (i: InternalItem, e: ExternalItem) => {
@@ -329,6 +331,58 @@ useEffect(() => {
   const rejectSuggestion = (s: Suggestion) => {
     setIgnoredPairs(prev => new Set(prev).add(s.id));
     setSuggestions(prev => prev.filter(x => x.id !== s.id));
+  };
+
+  // NUEVO: Aceptar todas las visibles agrupando por producto Gampack
+  const acceptAllVisible = async () => {
+    if (suggestions.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const byInternal = new Map<number, { internal: InternalItem; extIds: number[] }>();
+      suggestions.forEach(s => {
+        const key = s.internal.id_interno;
+        if (!byInternal.has(key)) byInternal.set(key, { internal: s.internal, extIds: [] });
+        byInternal.get(key)!.extIds.push(s.external.id_externo);
+      });
+
+      for (const { internal, extIds } of byInternal.values()) {
+        const body = { id_lista_interna: internal.id_interno, ids_lista_precios: extIds, criterio: 'manual' };
+        const res = await fetch('http://localhost:4000/api/relacionar-manual', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({} as any));
+          throw new Error(error.message || 'No se pudo vincular en lote');
+        }
+        // Actualizar estado tras cada grupo vinculado
+        setExternals(prev => prev.filter(e => !extIds.includes(e.id_externo)));
+        setInternals(prev => prev.filter(i => i.id_interno !== internal.id_interno));
+        setSuggestions(prev => prev.filter(s => s.internal.id_interno !== internal.id_interno));
+      }
+
+      toast(`✔ Vinculadas ${suggestions.length} sugerencias`);
+      setReviewOpen(false);
+    } catch (err: any) {
+      alert(err?.message || 'Error al vincular en lote');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  // NUEVO: Rechazar todas las visibles
+  const rejectAllVisible = () => {
+    if (suggestions.length === 0) return;
+    const ids = suggestions.map(s => s.id);
+    setIgnoredPairs(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => next.add(id));
+      return next;
+    });
+    setSuggestions([]);
+    toast('🗑 Sugerencias descartadas');
+    setReviewOpen(false);
   };
 
   /* ---------- Filtrado/sort de tablas ---------- */
@@ -403,6 +457,13 @@ useEffect(() => {
       ? 'bg-blue-50 dark:bg-blue-950/40 ring-1 ring-blue-400/30 cursor-pointer'
       : 'hover:bg-gray-50 dark:hover:bg-white/10 cursor-pointer';
 
+  // Mini toast
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 2000);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0b0f1a] p-6">
       {/* CSS específico para mejorar opciones en modo oscuro */}
@@ -435,7 +496,8 @@ useEffect(() => {
                   Detectá coincidencias por <b>nombre</b>, revisá el motivo y confirmá o descartá cada relación.
                 </p>
 
-                <div className="mt-2 flex flex-wrap items-center gap-2">
+                {/* Controles extra */}
+                <div className="mt-3 flex flex-wrap items-center gap-3">
                   <span className="inline-flex items-center rounded-full border border-blue-200 dark:border-blue-400/30 px-2.5 py-1 text-xs text-blue-700 dark:text-blue-200 bg-blue-50 dark:bg-blue-900/20">
                     Gampack: <span className="ml-1 font-semibold">{internals.length}</span>
                   </span>
@@ -450,7 +512,17 @@ useEffect(() => {
                 </div>
               </div>
 
-              <div className="flex-shrink-0">
+              <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                <div className="text-xs text-gray-600 dark:text-gray-300">
+                  Umbral: <b>{threshold.toFixed(2)}</b>
+                </div>
+                <input
+                  type="range" min={0.3} max={0.9} step={0.01}
+                  value={threshold}
+                  onChange={e => setThreshold(parseFloat(e.target.value))}
+                  className="w-40 accent-blue-600"
+                  title="Ajustá el umbral de similitud"
+                />
                 <Button onClick={generateAutoMatches} disabled={loadingAuto}>
                   {loadingAuto ? 'Buscando coincidencias…' : 'Relacionar automáticamente'}
                 </Button>
@@ -465,25 +537,39 @@ useEffect(() => {
             <div className="flex items-start gap-3">
               <div className="text-2xl">🤖</div>
               <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xl font-bold text-blue-900 dark:text-blue-200">Resultados de auto-relación por nombre</h3>
-                  <div className="text-sm text-blue-900/80 dark:text-blue-100/80">
-                    {loadingAuto ? 'Calculando…' : `${suggestions.length} sugerencia(s)`}
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <h3 className="text-xl font-bold text-blue-900 dark:text-blue-200">Resultados de auto-relación por nombre</h3>
+                    <p className="text-sm text-blue-900/80 dark:text-blue-100/80 mt-1">
+                      Revisá cada coincidencia. <b>Aceptar</b> vincula como si fuera manual; <b>Descartar</b> ignora la sugerencia.
+                    </p>
+                  </div>
+
+                  {/* NUEVO: acciones masivas junto a Ocultar */}
+                  <div className="flex items-center gap-2 ml-auto">
+                    <Button onClick={() => setReviewOpen(false)} variant="secondary">Ocultar</Button>
                   </div>
                 </div>
-                <p className="text-sm text-blue-900/80 dark:text-blue-100/80 mt-1">
-                  Revisá cada coincidencia. <b>Dejar relación</b> vincula como si fuera manual; <b>Eliminar</b> descarta y deja los productos en sus tablas.
-                </p>
+
+                {/* Progreso sutil */}
+                {loadingAuto && (
+                  <div className="mt-3 h-1 w-full bg-blue-200/50 dark:bg-blue-950/50 rounded">
+                    <div className="h-1 w-1/3 animate-pulse bg-blue-600 rounded" />
+                  </div>
+                )}
 
                 <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[420px] overflow-auto pr-1">
                   {suggestions.length === 0 && !loadingAuto && (
                     <div className="col-span-full text-sm text-blue-900/80 dark:text-blue-100/80">
-                      No hay coincidencias por encima del umbral ({SIMILARITY_THRESHOLD}).
+                      No hay coincidencias por encima del umbral ({threshold.toFixed(2)}).
                     </div>
                   )}
                   {suggestions.map((s) => (
                     <div key={s.id} className="rounded-xl bg-white dark:bg-[#0e1526] border border-blue-200/50 dark:border-white/10 p-4 shadow">
-                      <div className="text-xs uppercase tracking-wide text-blue-700 dark:text-blue-300 mb-2">{s.reason}</div>
+                      <div className="text-xs uppercase tracking-wide text-blue-700 dark:text-blue-300 mb-2 flex items-center justify-between">
+                        <span>{s.reason}</span>
+                        <span className="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-[10px] font-semibold">{(s.score*100).toFixed(0)}%</span>
+                      </div>
                       <div className="space-y-2">
                         <div className="text-sm">
                           <div className="font-semibold text-gray-900 dark:text-white">Gampack</div>
@@ -500,15 +586,11 @@ useEffect(() => {
                         </div>
                       </div>
                       <div className="mt-3 flex items-center gap-2">
-                        <Button onClick={() => acceptSuggestion(s)}>Dejar relación</Button>
-                        <Button onClick={() => rejectSuggestion(s)} variant="secondary">Eliminar</Button>
+                        <Button onClick={() => acceptSuggestion(s)}>Aceptar</Button>
+                        <Button onClick={() => rejectSuggestion(s)} variant="secondary">Descartar</Button>
                       </div>
                     </div>
                   ))}
-                </div>
-
-                <div className="mt-3 flex justify-end">
-                  <Button onClick={() => setReviewOpen(false)} variant="secondary">Ocultar</Button>
                 </div>
               </div>
             </div>
@@ -547,6 +629,7 @@ useEffect(() => {
                     setSelectedExternals([]);
                     setSelectedInternal(null);
                     setSuggestions(prev => prev.filter(s => s.internal.id_interno !== selectedInternal.id_interno && !selectedExternals.some(se => se.id_externo === s.external.id_externo)));
+                    toast('✔ Vinculación manual realizada');
                   } else {
                     const error = await res.json().catch(() => ({}));
                     alert(`Error: ${error.message || 'No se pudo vincular'}`);
@@ -702,6 +785,13 @@ useEffect(() => {
         >
           ↑ Top
         </button>
+      )}
+
+      {/* Toast */}
+      {toastMsg && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-3 py-2 rounded-full bg-black/80 text-white text-sm shadow-lg">
+          {toastMsg}
+        </div>
       )}
     </div>
   );
