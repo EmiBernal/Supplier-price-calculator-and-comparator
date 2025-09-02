@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Navigation } from '../components/Navigation';
-import { Button } from '../components/Button';
-import { Input } from '../components/Input';
-import ImportarListaPrecios from '../components/ImportarListaPrecios';
-import { Screen } from '../types';
+import { Navigation } from '../../components/Navigation';
+import { Button } from '../../components/Button';
+import { Input } from '../../components/Input';
+import ImportarListaPrecios from '../../components/ImportarListaPrecios';
+import { Screen } from '../../types';
 
 interface ManualEntryScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -83,6 +83,124 @@ function ImportButton({ onClick, className = '' }: { onClick: () => void; classN
   );
 }
 
+// --- NUEVO: Card para subir familias/rubros ---
+const UploadFamiliesCard: React.FC<{ onDone?: () => void }> = ({ onDone }) => {
+  const [file, setFile] = React.useState<File | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<null | {
+    ok: boolean;
+    assigned: number;
+    missing_products: number;
+    missing_rubros: number;
+    note?: string;
+  }>(null);
+
+  const onPick = (f: File | null) => {
+    setError(null);
+    setResult(null);
+    setFile(f);
+  };
+
+  const handleUpload = async () => {
+    try {
+      setError(null);
+      setResult(null);
+
+      if (!file) {
+        setError('Elegí un archivo XLSX primero.');
+        return;
+      }
+      const maxSize = 25 * 1024 * 1024;
+      if (file.size > maxSize) {
+        setError('El archivo supera los 25 MB.');
+        return;
+      }
+      const valid = /\.(xlsx|xls)$/i.test(file.name);
+      if (!valid) {
+        setError('Debe ser un Excel (.xlsx o .xls).');
+        return;
+      }
+
+      setLoading(true);
+      const fd = new FormData();
+      fd.append('file', file);
+
+      const res = await fetch(`${BASE_URL}/api/imports/familias`, {
+        method: 'POST',
+        body: fd,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Error subiendo archivo');
+      }
+      setResult({
+        ok: !!data.ok,
+        assigned: Number(data.assigned ?? 0),
+        missing_products: Number(data.missing_products ?? 0),
+        missing_rubros: Number(data.missing_rubros ?? 0),
+        note: data.note,
+      });
+      if (onDone) onDone();
+    } catch (e: any) {
+      setError(e?.message || 'Error desconocido');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-white/10 p-4 bg-white dark:bg-white/5">
+      <h2 className="text-lg font-semibold mb-2 dark:text-white">Importar familias/rubros</h2>
+      <p className="text-sm text-gray-600 dark:text-white/70 mb-3">
+        Subí el Excel con columnas <strong>Código</strong>, <strong>Nombre</strong> y <strong>Rubro</strong>.
+      </p>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+          className="block w-full text-sm text-gray-700 dark:text-white/80 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-gray-100 dark:file:bg-white/10 dark:file:text-white hover:file:bg-gray-200 dark:hover:file:bg-white/20"
+        />
+        <button
+          type="button"
+          onClick={handleUpload}
+          disabled={loading || !file}
+          className="px-3 py-2 rounded-lg text-sm font-medium bg-gray-900 text-white disabled:opacity-60 dark:bg-white/15 dark:text-white"
+        >
+          {loading ? 'Subiendo…' : 'Subir'}
+        </button>
+      </div>
+
+      {error && (
+        <div className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</div>
+      )}
+
+      {result && (
+        <div className="mt-4 text-sm">
+          <div className="mb-1">
+            <span className="font-medium dark:text-white">Asignados:</span>{' '}
+            <span className="dark:text-white/90">{result.assigned}</span>
+          </div>
+          <div className="mb-1">
+            <span className="font-medium dark:text-white">Productos no encontrados:</span>{' '}
+            <span className="dark:text-white/90">{result.missing_products}</span>
+          </div>
+          <div className="mb-1">
+            <span className="font-medium dark:text-white">Rubros inexistentes:</span>{' '}
+            <span className="dark:text-white/90">{result.missing_rubros}</span>
+          </div>
+          {result.note && (
+            <div className="mt-1 text-gray-600 dark:text-white/70">{result.note}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate }) => {
   const [formData, setFormData] = useState<FormData>({
     company: '',
@@ -102,6 +220,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
+  const [showImportFamilies, setShowImportFamilies] = useState(false);
 
   // Modal Importar
   const [showImport, setShowImport] = useState(false);
@@ -339,6 +458,18 @@ const handleSuggestionClick = (prod: any) => {
             {/* Import en la barra de acciones (desktop/tablet) */}
             <div className="hidden sm:block">
               <ImportButton onClick={() => setShowImport(true)} />
+              <button
+  type="button"
+  onClick={() => setShowImportFamilies(true)}
+  className="ml-2 inline-flex items-center gap-2 rounded-2xl px-4 py-2 bg-gray-900 text-white dark:bg-white/15 dark:text-white transition hover:opacity-90"
+  title="Importar familias/rubros"
+>
+  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 5v14" />
+    <path d="M5 12h14" />
+  </svg>
+  <span className="font-medium">Importar familias</span>
+</button>
             </div>
           </div>
         </div>
@@ -509,7 +640,6 @@ const handleSuggestionClick = (prod: any) => {
                 </button>
               </div>
             </div>
-
             {/* contenido del modal */}
             <div className="p-4">
               <div className="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-transparent">
@@ -519,6 +649,59 @@ const handleSuggestionClick = (prod: any) => {
           </div>
         </div>
       )}
+      {showImportFamilies && (
+        <div
+          className="
+            fixed inset-0 z-50
+            bg-black/50 dark:bg-black/60
+            backdrop-blur-sm
+            flex items-center justify-center p-4
+          "
+          role="dialog" aria-modal="true"
+        >
+          <div
+            className="
+              relative w-full max-w-3xl
+              bg-white dark:bg-[#0f1524]
+              text-gray-900 dark:text-white
+              border border-gray-200 dark:border-white/10
+              rounded-2xl shadow-2xl
+              max-h-[90vh] overflow-y-auto
+            "
+          >
+            {/* header del modal */}
+            <div className="sticky top-0 z-10 px-5 py-4 border-b border-gray-200/70 dark:border-white/10 bg-white/90 dark:bg-[#0f1524]/90 backdrop-blur">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Importar familias / rubros</h3>
+                <button
+                  onClick={() => setShowImportFamilies(false)}
+                  className="
+                    inline-flex items-center justify-center rounded-xl p-2
+                    hover:bg-gray-100 dark:hover:bg-white/10
+                    focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400
+                    transition
+                  "
+                  aria-label="Cerrar"
+                  title="Cerrar"
+                >
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18" />
+                    <path d="m6 6 12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* contenido del modal */}
+            <div className="p-4">
+              <UploadFamiliesCard onDone={() => {/* opcional: refrescar algo */}} />
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
+
+export default ManualEntryScreen;

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useDeferredValue, useCallback } from 'react';
-import { Button } from '../components/Button';
-import { Navigation } from '../components/Navigation';
-import { Screen } from '../types';
+import { Button } from '../../components/Button';
+import { Navigation } from '../../components/Navigation';
+import { Screen } from '../../types';
 
 /* ---------- Similaridad por trigramas + coseno (solo nombres) ---------- */
 function sanitizeText(s: string) {
@@ -796,3 +796,5 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     </div>
   );
 };
+
+export default UnmatchedEquivalencesScreen;

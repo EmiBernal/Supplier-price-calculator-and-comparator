@@ -1,27 +1,30 @@
+// server/index.js
 const express = require('express');
 const cors = require('cors');
-const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const multerLib = require('multer');
 const multer = multerLib.default || multerLib;
 const XLSX = require('xlsx');
+const cookieParser = require('cookie-parser');
+const { tenantMiddleware } = require('./middleware/tenant');
 
 const app = express();
 
-app.use(cors());
+// ===== Middlewares base =====
+app.use(cors({
+  origin: 'http://localhost:5173', // ajustá al puerto de tu front
+  credentials: true
+}));
 app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser(process.env.COOKIE_SECRET || 'change-me')); // firma cookies
+app.use(tenantMiddleware); 
 
+// ===== Upload (para XLSX) =====
 const upload = multer({
-  limits: { fileSize: 25 * 1024 * 1024}
+  limits: { fileSize: 25 * 1024 * 1024 }
 });
 
-const dbPath = path.join(__dirname, 'db/database.db');
-const db = new sqlite3.Database(dbPath, err => {
-  if (err) console.error('Error al conectar con SQLite:', err.message);
-  else console.log('Conectado a la base de datos SQLite en', dbPath);
-});
-
-// === Helpers ===
+// === Helpers comunes ===
 function normalizeHeaders(raw) {
   const arr = Array.isArray(raw) ? raw : [];
   return Array.from({ length: arr.length }, (_, i) => {
@@ -42,9 +45,36 @@ function parseNumberAR(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-/* ======== Rutas ======== */
+function toYMD(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 
+// ===== Helpers DB promisificados por conexión =====
+const runDb = (db, sql, params = []) =>
+  new Promise((resolve, reject) => db.run(sql, params, function (err) {
+    if (err) reject(err); else resolve(this);
+  }));
+
+const getDbRow = (db, sql, params = []) =>
+  new Promise((resolve, reject) => db.get(sql, params, (err, row) => {
+    if (err) reject(err); else resolve(row);
+  }));
+
+// ============ Rutas ============
+
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok', tenant: req.ctx?.tenant || null });
+});
+
+// ---------- EQUIVALENCIAS ----------
 app.get('/api/equivalencias', (req, res) => {
+  const db = req.ctx.db;
   const search = req.query.search;
   const params = [];
 
@@ -95,12 +125,12 @@ app.get('/api/equivalencias', (req, res) => {
       supplier: row.proveedor,
       externalCode: row.cod_externo,
       externalName: row.nom_externo,
-      externalDate: row.fecha_externo, // fecha del producto externo
+      externalDate: row.fecha_externo,
       internalSupplier: 'Gampack',
       internalCode: row.cod_interno,
       internalName: row.nom_interno,
-      internalDate: row.fecha_interno, // fecha del producto interno
-      relationDate: row.relation_created_at, // <-- NUEVO: fecha de la relación
+      internalDate: row.fecha_interno,
+      relationDate: row.relation_created_at,
       matchingCriteria: row.criterio_relacion,
     }));
 
@@ -108,22 +138,9 @@ app.get('/api/equivalencias', (req, res) => {
   });
 });
 
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
-});
-
-// === EDITAR RELACIÓN + DATOS ASOCIADOS ===
-function toYMD(s) {
-  if (!s) return null;
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return null;
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
+// ---------- EDITAR RELACIÓN ----------
 app.put('/api/relacion/:id', (req, res) => {
+  const db = req.ctx.db;
   const relationId = Number(req.params.id);
   const { matchingCriteria, lista_precios, lista_interna } = req.body || {};
 
@@ -166,13 +183,11 @@ app.put('/api/relacion/:id', (req, res) => {
           db.run('ROLLBACK');
           return res.status(404).json({ success: false, message: 'Relación no encontrada' });
         }
-        // Coherencia: mantenemos el pareo fijo
         if (rel.id_lista_precios !== lp.id_externo || rel.id_lista_interna !== li.id_interno) {
           db.run('ROLLBACK');
           return res.status(400).json({ success: false, message: 'IDs no coinciden con la relación' });
         }
 
-        // UPDATE lista_precios
         db.run(
           `UPDATE lista_precios
               SET proveedor = COALESCE(?, proveedor),
@@ -187,7 +202,6 @@ app.put('/api/relacion/:id', (req, res) => {
               return res.status(500).json({ success: false, message: 'Error actualizando lista_precios' });
             }
 
-            // UPDATE lista_interna
             db.run(
               `UPDATE lista_interna
                   SET cod_interno = ?,
@@ -236,7 +250,16 @@ app.put('/api/relacion/:id', (req, res) => {
   });
 });
 
+// ---------- LOGOUT ----------
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie('tenant', { httpOnly: true, sameSite: 'lax', signed: true });
+  res.clearCookie('token', { httpOnly: true, sameSite: 'lax' }); // por compatibilidad
+  return res.json({ ok: true });
+});
+
+// ---------- PROVEEDORES (resumen) ----------
 app.get('/api/providers/summary', (req, res) => {
+  const db = req.ctx.db;
   const sql = `
     SELECT proveedor AS proveedor, COUNT(*) AS products
     FROM lista_precios
@@ -250,7 +273,9 @@ app.get('/api/providers/summary', (req, res) => {
   });
 });
 
+// ---------- LISTA PRECIOS (externos) ----------
 app.get('/api/lista_precios', (req, res) => {
+  const db = req.ctx.db;
   const search = req.query.search || '';
 
   const sql = `
@@ -271,7 +296,9 @@ app.get('/api/lista_precios', (req, res) => {
   });
 });
 
+// ---------- NO RELACIONADOS (externos) ----------
 app.get('/api/no-relacionados/proveedores', (req, res) => {
+  const db = req.ctx.db;
   const sql = `
     SELECT lp.*, anr.motivo 
     FROM articulos_no_relacionados anr
@@ -287,7 +314,9 @@ app.get('/api/no-relacionados/proveedores', (req, res) => {
   });
 });
 
+// ---------- NO RELACIONADOS (internos) ----------
 app.get('/api/no-relacionados/gampack', (req, res) => {
+  const db = req.ctx.db;
   const sql = `
     SELECT li.*, agnr.motivo 
     FROM articulos_gampack_no_relacionados agnr
@@ -303,7 +332,9 @@ app.get('/api/no-relacionados/gampack', (req, res) => {
   });
 });
 
+// ---------- CHECK PRODUCT ----------
 app.post('/api/check-product', (req, res) => {
+  const db = req.ctx.db;
   const { productCode, companyType } = req.body;
 
   if (!productCode || !companyType) {
@@ -337,7 +368,9 @@ app.post('/api/check-product', (req, res) => {
   });
 });
 
+// ---------- RELACIONES (lista) ----------
 app.get('/api/relaciones', (req, res) => {
+  const db = req.ctx.db;
   const sql = `
     SELECT r.*, 
            r.created_at AS relation_created_at,
@@ -357,7 +390,9 @@ app.get('/api/relaciones', (req, res) => {
   });
 });
 
+// ---------- RELACIONAR MANUAL ----------
 app.post('/api/relacionar-manual', (req, res) => {
+  const db = req.ctx.db;
   const { id_lista_interna, ids_lista_precios, criterio } = req.body;
 
   if (!id_lista_interna || !Array.isArray(ids_lista_precios) || ids_lista_precios.length === 0) {
@@ -398,51 +433,9 @@ app.post('/api/relacionar-manual', (req, res) => {
   });
 });
 
-function checkEquivalenceAndInsertNoRelacionado(productId, code, name, tipo, callback) {
-  let checkSQL = '';
-  let params = [];
-  let insertNoRelacionadoSQL = '';
-  let insertNoRelacionadoParams = [];
-
-  if (tipo === 'Proveedor') {
-    checkSQL = `SELECT * FROM lista_interna WHERE LOWER(cod_interno) = LOWER(?) OR LOWER(nom_interno) = LOWER(?) LIMIT 1`;
-    params = [code, name];
-    insertNoRelacionadoSQL = `INSERT INTO articulos_no_relacionados (id_lista_precios, motivo) VALUES (?, ?)`;
-    insertNoRelacionadoParams = [productId, 'No se encontró coincidencia por código ni nombre'];
-  } else if (tipo === 'Gampack') {
-    checkSQL = `SELECT * FROM lista_precios WHERE LOWER(cod_externo) = LOWER(?) OR LOWER(nom_externo) = LOWER(?) LIMIT 1`;
-    params = [code, name];
-    insertNoRelacionadoSQL = `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo) VALUES (?, ?)`;
-    insertNoRelacionadoParams = [productId, 'No se encontró coincidencia por código ni nombre'];
-  } else {
-    callback(new Error('Tipo inválido para equivalencia'));
-    return;
-  }
-
-  db.get(checkSQL, params, (err, row) => {
-    if (err) {
-      console.error('Error chequeando equivalencia:', err.message);
-      callback(err);
-      return;
-    }
-
-    if (!row) {
-      db.run(insertNoRelacionadoSQL, insertNoRelacionadoParams, function (err) {
-        if (err) {
-          console.error('Error insertando en no relacionados:', err.message);
-          callback(err);
-          return;
-        }
-        console.log('Producto agregado a no relacionados');
-        callback(null);
-      });
-    } else {
-      callback(null);
-    }
-  });
-}
-
+// ---------- Alta producto (manual) ----------
 app.post('/api/products', (req, res) => {
+  const db = req.ctx.db;
   const {
     productCode,
     productName,
@@ -616,7 +609,9 @@ app.post('/api/products', (req, res) => {
   }
 });
 
+// ---------- BORRAR RELACIÓN + productos asociados ----------
 app.delete('/api/relacion/:id', (req, res) => {
+  const db = req.ctx.db;
   const id = req.params.id;
   console.log('🟠 DELETE recibido para id:', id);
 
@@ -692,7 +687,9 @@ app.delete('/api/relacion/:id', (req, res) => {
   });
 });
 
+// ---------- COMPARACIONES DE PRECIOS ----------
 app.get('/api/price-comparisons', (req, res) => {
+  const db = req.ctx.db;
   const search = (req.query.search || '').toString().toLowerCase();
   const dateFrom = (req.query.dateFrom || '').toString(); // YYYY-MM-DD
   const dateTo = (req.query.dateTo || '').toString();     // YYYY-MM-DD
@@ -712,7 +709,6 @@ app.get('/api/price-comparisons', (req, res) => {
   const applyFamilia = (cols) =>
     hasFamilia ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
 
-  // helpers de rango según columna
   const buildDateRange = (col) => {
     if (hasFrom && hasTo) return `${col} BETWEEN ? AND ?`;
     if (hasFrom) return `${col} >= ?`;
@@ -720,17 +716,14 @@ app.get('/api/price-comparisons', (req, res) => {
     return '';
   };
 
-  // columnas de fecha según modo
   const liDateRange = dateMode === 'product' ? buildDateRange('li.fecha') : '';
   const lpDateRange = dateMode === 'product' ? buildDateRange('lp.fecha') : '';
   const relDateRange = dateMode === 'relation' ? buildDateRange("DATE(ra.created_at)") : '';
 
-  // ---------- SELECT: Pares relacionados ----------
   const wherePairs = [applySearch(['li.nom_interno', 'lp.nom_externo', 'lp.proveedor'])];
   const paramsPairs = search ? [like, like, like] : [];
 
   if (hasFamilia) {
-    // si no tenés columnas 'familia', podés quitar esto o ajustarlo
     wherePairs.push(applyFamilia(['li.familia', 'lp.familia']));
     paramsPairs.push(familiaLike, familiaLike);
   }
@@ -780,7 +773,6 @@ app.get('/api/price-comparisons', (req, res) => {
     WHERE ${wherePairs.join(' AND ')}
   `;
 
-  // ---------- SELECT: Internos sin pareja ----------
   const whereInternal = ['ra.id_lista_precios IS NULL', applySearch(['li.nom_interno'])];
   const paramsInternal = search ? [like] : [];
   if (hasFamilia) {
@@ -815,7 +807,6 @@ app.get('/api/price-comparisons', (req, res) => {
     WHERE ${whereInternal.join(' AND ')}
   `;
 
-  // ---------- SELECT: Proveedores sin pareja ----------
   const whereExternal = ['ra.id_lista_interna IS NULL', applySearch(['lp.nom_externo', 'lp.proveedor'])];
   const paramsExternal = search ? [like, like] : [];
   if (hasFamilia) {
@@ -850,7 +841,6 @@ app.get('/api/price-comparisons', (req, res) => {
     WHERE ${whereExternal.join(' AND ')}
   `;
 
-  // ---------- Construcción final ----------
   let sql, params;
   if (onlyRelated) {
     sql = `
@@ -860,8 +850,6 @@ app.get('/api/price-comparisons', (req, res) => {
     `;
     params = [...paramsPairs];
   } else {
-    // Nota: cuando dateMode = 'relation', los "sin pareja" no aplican (no hay relación),
-    // así que solo tendrán filtro por fecha si dateMode='product'.
     sql = `
       ${sqlPairs}
       UNION ALL
@@ -896,7 +884,7 @@ app.get('/api/price-comparisons', (req, res) => {
         externalFinalPrice: external,
         internalDate: row.internalDate || null,
         externalDate: row.externalDate || null,
-        relationDate: row.relationDate || null,  // <-- NUEVO, útil para UI
+        relationDate: row.relationDate || null,
         companyType: row.companyType === 'Gampack' ? 'supplier' : 'competitor',
         saleConditions: row.saleConditions || 'Desconocido',
         priceDifference,
@@ -907,7 +895,9 @@ app.get('/api/price-comparisons', (req, res) => {
   });
 });
 
+// ---------- RELACIONADOS POR CÓDIGO ----------
 app.get('/api/gampack/:codigo/relacionados', (req, res) => {
+  const db = req.ctx.db;
   const codInterno = req.params.codigo;
 
   const sql = `
@@ -944,7 +934,10 @@ app.get('/api/gampack/:codigo/relacionados', (req, res) => {
   });
 });
 
+// ---------- IMPORT XLSX (lista-precios / interna) ----------
 app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
+  const db = req.ctx.db;
+
   (async () => {
     try {
       if (!req.file) return res.status(400).json({ error: 'Falta archivo (campo "file")' });
@@ -962,17 +955,14 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         try { mapping = JSON.parse(req.body.mapping); } catch { mapping = {}; }
       }
 
-      // --- XLSX ---
       const wb = XLSX.read(req.file.buffer);
       const ws = wb.Sheets[wb.SheetNames[0]];
 
-      // Leemos hoja completa como matriz
       const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
       const headersRaw = (matrix[headerIndex0] || []).map(v => String(v ?? ''));
       const dataRows = matrix.slice(headerIndex0 + 1);
       console.log('Headers (fila seleccionada):', headersRaw);
 
-      // Matriz -> objetos (keys = encabezados crudos)
       const rows = dataRows.map(arr => {
         const obj = {};
         for (let i = 0; i < headersRaw.length; i++) {
@@ -982,7 +972,6 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         return obj;
       });
 
-      // --- Helpers comunes ---
       const normalizeLabel = (v) => String(v ?? '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
       const normLower = (v) => normalizeLabel(v).toLowerCase();
 
@@ -994,25 +983,17 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         return realKey ? row[realKey] : '';
       };
 
-      const parseNumberAR = (value) => {
+      const parseNumberARLocal = (value) => {
         if (value == null) return null;
         let s = String(value).trim();
-        // elimina miles ".", cambia coma decimal por ".", quita $ y letras
         s = s.replace(/\./g, '').replace(',', '.').replace(/[$\sA-Za-z]/g, '');
         const n = Number(s);
         return Number.isFinite(n) ? n : null;
       };
 
-      const run = (sql, params=[]) =>
-        new Promise((resolve, reject) => db.run(sql, params, function (err) {
-          if (err) reject(err); else resolve(this);
-        }));
-      const get = (sql, params=[]) =>
-        new Promise((resolve, reject) => db.get(sql, params, function (err, row) {
-          if (err) reject(err); else resolve(row);
-        }));
+      const run = (sql, params=[]) => runDb(db, sql, params);
+      const get = (sql, params=[]) => getDbRow(db, sql, params);
 
-      // Columnas mapeadas (precio y nombre obligatorios; código opcional)
       const colNom    = isGampack ? (mapping.nom_interno || mapping.nom_externo) : (mapping.nom_externo || mapping.nom_interno);
       const colCod    = isGampack ? (mapping.cod_interno || mapping.cod_externo) : (mapping.cod_externo || mapping.cod_interno);
       const colPrecio = mapping.precio_final;
@@ -1026,17 +1007,14 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
 
       const today = new Date().toISOString().slice(0, 10);
 
-      // Contadores
       let inserted = 0;
       let updated = 0;
       let updatedPriceChanged = 0;
       let skipped = 0;
 
-      // Normalización proveedor (externos)
-      const proveedorCanon = normalizeLabel(providerHint);  // se guarda así
-      const proveedorLower = normLower(providerHint);       // se compara así
+      const proveedorCanon = normalizeLabel(providerHint);
+      const proveedorLower = normLower(providerHint);
 
-      // --------- RESOLVER EXISTENTES (devuelve id + precio actual) ---------
       const getExistingInterno = async ({ codigo, nombre }) => {
         const nombreN = normalizeLabel(nombre);
         if (codigo) {
@@ -1083,14 +1061,12 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         return byName || null;
       };
 
-      // --------- UPSERTS ---------
       const upsertListaInterna = async ({ nombre, codigo, price, today }) => {
         const nombreN = normalizeLabel(nombre);
         const codigoN = codigo ? normalizeLabel(codigo) : null;
         const existing = await getExistingInterno({ codigo: codigoN, nombre: nombreN });
 
         if (existing?.id) {
-          // update
           await run(
             `UPDATE lista_interna
              SET nom_interno = ?, precio_final = ?, fecha = ?
@@ -1101,7 +1077,6 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
           if (existing.price !== price) updatedPriceChanged++;
           return existing.id;
         } else {
-          // insert
           const ins = await run(
             `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
              VALUES (?, ?, ?, ?)`,
@@ -1118,7 +1093,6 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         const existing = await getExistingExterno({ proveedorLower, codigo: codigoN, nombre: nombreN });
 
         if (existing?.id) {
-          // update
           await run(
             `UPDATE lista_precios
              SET nom_externo = ?, precio_final = ?, tipo_empresa = 'Proveedor', fecha = ?
@@ -1129,7 +1103,6 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
           if (existing.price !== price) updatedPriceChanged++;
           return existing.id;
         } else {
-          // insert
           const ins = await run(
             `INSERT INTO lista_precios (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
              VALUES (?, ?, ?, 'Proveedor', ?, ?)`,
@@ -1140,7 +1113,6 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         }
       };
 
-      // ---------- LOOP PRINCIPAL ----------
       await run('BEGIN TRANSACTION');
       try {
         for (const r of rows) {
@@ -1149,7 +1121,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
           const codigoRaw = colCod ? String(getCell(r, colCod) ?? '') : '';
           const codigo = normalizeLabel(codigoRaw) || null;
           const precioRaw = getCell(r, colPrecio);
-          const price = typeof precioRaw === 'number' ? precioRaw : parseNumberAR(precioRaw);
+          const price = typeof precioRaw === 'number' ? precioRaw : parseNumberARLocal(precioRaw);
 
           if (!nombreN || price == null || !Number.isFinite(price)) {
             skipped++;
@@ -1194,7 +1166,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
             updated_price_changed: updatedPriceChanged,
             skipped
           },
-          processed: inserted + updated, // 👈 agregado para compatibilidad
+          processed: inserted + updated,
           saved_to: isGampack ? 'articulos_gampack_no_relacionados' : 'articulos_no_relacionados',
           message
         });
@@ -1210,7 +1182,52 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
   })();
 });
 
+// ---------- LOGIN (setea cookie firmada con tenant) ----------
+app.post('/api/login', (req, res) => {
+  const db = req.ctx.db; // usa la DB por default (ventas) solo para leer users; si tenés tabla users separada, apuntá a donde corresponda
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Faltan credenciales' });
+  }
+
+  db.get(
+    `SELECT * FROM users WHERE username = ? AND password = ?`,
+    [username, password],
+    (err, row) => {
+      if (err) {
+        console.error('Error en login:', err.message);
+        return res.status(500).json({ error: 'Error en base de datos' });
+      }
+      if (!row) {
+        return res.status(401).json({ error: 'Credenciales inválidas' });
+      }
+
+      // Derivar tenant desde el rol
+      const role = (row.role || '').toLowerCase();
+      const tenant = role.includes('compra') ? 'compras' : 'ventas';
+
+      // Seteamos cookie firmada
+      res.cookie('tenant', tenant, {
+        httpOnly: true,
+        sameSite: 'lax',
+        signed: true,
+        // maxAge: 7 días
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      return res.json({
+        success: true,
+        username: row.username,
+        role: row.role,
+        tenant
+      });
+    }
+  );
+});
+
+// ---------- STATS ----------
 app.get('/api/stats', (req, res) => {
+  const db = req.ctx.db;
   const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
 
   const q = {
@@ -1261,6 +1278,72 @@ app.get('/api/stats', (req, res) => {
       res.status(500).json({ error: 'stats_failed' });
     }
   })();
+});
+
+// ---------- IMPORT FAMILIAS ----------
+const norm = (s) => String(s ?? '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+
+app.post('/api/imports/familias', upload.single('file'), async (req, res) => {
+  const db = req.ctx.db;
+  const run = (sql, params=[]) => runDb(db, sql, params);
+  const get = (sql, params=[]) => getDbRow(db, sql, params);
+
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Falta archivo (campo "file")' });
+
+    const wb = XLSX.read(req.file.buffer);
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+    let ok=0, missProd=0, missRubro=0;
+
+    await run('BEGIN');
+
+    for (const r of rows) {
+      const codigo = norm(r['Código'] ?? r['codigo'] ?? r['CODIGO'] ?? '');
+      const nombre = norm(r['Nombre'] ?? r['nombre'] ?? r['NOMBRE'] ?? '');
+      const rubro  = norm(r['Rubro']  ?? r['rubro']  ?? r['RUBRO']  ?? '');
+
+      if (!rubro) continue;
+
+      let idInterno = null;
+      if (codigo) {
+        const rr = await get(`SELECT id_interno FROM lista_interna WHERE TRIM(LOWER(cod_interno)) = TRIM(LOWER(?)) LIMIT 1`, [codigo]);
+        if (rr) idInterno = rr.id_interno;
+      }
+      if (!idInterno && nombre) {
+        const rr = await get(`SELECT id_interno FROM lista_interna WHERE TRIM(LOWER(nom_interno)) = TRIM(LOWER(?)) LIMIT 1`, [nombre]);
+        if (rr) idInterno = rr.id_interno;
+      }
+      if (!idInterno) { missProd++; continue; }
+
+      const rub = await get(`SELECT id FROM rubros WHERE LOWER(nombre)=LOWER(?)`, [rubro]);
+      const idRubro = rub?.id ?? null;
+      if (!idRubro) { missRubro++; continue; }
+
+      await run(
+        `INSERT INTO producto_rubro(id_interno, id_rubro)
+         VALUES(?,?)
+         ON CONFLICT(id_interno) DO UPDATE SET id_rubro=excluded.id_rubro`,
+        [idInterno, idRubro]
+      );
+      ok++;
+    }
+
+    await run('COMMIT');
+
+    res.json({
+      ok: true,
+      assigned: ok,
+      missing_products: missProd,
+      missing_rubros: missRubro,
+      note: missRubro ? 'Hay rubros en Excel que no existen en taxonomy.json/BD. Agregalos y volvé a correr.' : 'Todo OK'
+    });
+  } catch (e) {
+    await run('ROLLBACK').catch(()=>{});
+    console.error('Import familias error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 module.exports = app;

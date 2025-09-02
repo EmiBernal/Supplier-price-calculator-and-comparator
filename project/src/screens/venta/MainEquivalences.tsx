@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { EquivalencesScreen } from './EquivalencesScreen';
 import { UnmatchedEquivalencesScreen } from './UnmatchedEquivalencesScreen';
-import { Screen } from '../types';
-import { TitleHeader } from '../components/TitleHeader';
+import { Screen } from '../../types';
+import { TitleHeader } from '../../components/TitleHeader';
 
 interface MainEquivalencesProps {
   onNavigate: (screen: Screen) => void;
@@ -55,3 +55,6 @@ export const MainEquivalences: React.FC<MainEquivalencesProps> = ({ onNavigate }
     </div>
   );
 };
+
+export default MainEquivalences;
+

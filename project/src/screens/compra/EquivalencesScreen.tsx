@@ -1,0 +1,1 @@
+export { EquivalencesScreen as default } from "../venta/EquivalencesScreen";

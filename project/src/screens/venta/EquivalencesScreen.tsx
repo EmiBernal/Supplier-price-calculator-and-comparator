@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Input } from '../components/Input';
-import { Table, Column } from '../components/Table';
-import { ProductEquivalence } from '../tipos/database';
+import { Input } from '../../components/Input';
+import { Table, Column } from '../../components/Table';
+import { ProductEquivalence } from '../../tipos/database';
 import { Search, ArrowLeft, ArrowUp, Pencil, Save, X } from 'lucide-react';
-import { Screen } from '../types';
+import { Screen } from '../../types';
 
 interface EquivalencesScreenProps {
   onNavigate: (screen: Screen) => void;
