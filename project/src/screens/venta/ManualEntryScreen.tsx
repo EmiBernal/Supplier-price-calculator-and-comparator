@@ -4,6 +4,7 @@ import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import ImportarListaPrecios from '../../components/ImportarListaPrecios';
 import { Screen } from '../../types';
+import { apiFetch } from '../../lib/api';
 
 interface ManualEntryScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -126,7 +127,7 @@ const UploadFamiliesCard: React.FC<{ onDone?: () => void }> = ({ onDone }) => {
       const fd = new FormData();
       fd.append('file', file);
 
-      const res = await fetch(`${BASE_URL}/api/imports/familias`, {
+      const res = await apiFetch(`${BASE_URL}/api/imports/familias`, {
         method: 'POST',
         body: fd,
       });
@@ -240,7 +241,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
 
   const checkProductExists = async (): Promise<boolean> => {
     try {
-      const res = await fetch(`${BASE_URL}/api/check-product`, {
+      const res = await apiFetch(`${BASE_URL}/api/check-product`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -275,7 +276,7 @@ const handleLiveSearch = async (query: string) => {
   }
   setSearching(true);
   try {
-    const res = await fetch(
+    const res = await apiFetch(
       `${BASE_URL}/api/products/search/manual?by=${searchCriteria}&q=${encodeURIComponent(query)}`
     );
     if (!res.ok) throw new Error(await res.text());
@@ -307,7 +308,7 @@ const handleLiveSearch = async (query: string) => {
     const companyType = inferCompanyType(formData.company);
 
     try {
-      const response = await fetch(`${BASE_URL}/api/products`, {
+      const response = await apiFetch(`${BASE_URL}/api/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -367,7 +368,7 @@ const handleLiveSearch = async (query: string) => {
     const companyType = inferCompanyType(formData.company);
 
     try {
-      const response = await fetch(`${BASE_URL}/api/products`, {
+      const response = await apiFetch(`${BASE_URL}/api/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

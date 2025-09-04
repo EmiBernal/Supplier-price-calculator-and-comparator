@@ -15,6 +15,7 @@ import LoginScreen from "./screens/compra/LoginScreen";
 
 // ✅ Calculadora para COMPRA (alias a venta por ahora)
 import CalculadoraCompraScreen from "./screens/compra/CalculadoraCompraScreen";
+import { apiFetch } from "./lib/api";
 
 function getInitialTheme(): "light" | "dark" {
   try {
@@ -32,7 +33,14 @@ function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>("home");
   const [isInitialized, setIsInitialized] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(getInitialTheme);
-  const [role, setRole] = useState<"compra" | "venta" | null>(null);
+  const [role, setRole] = useState<"compra" | "venta" | null>(() => {
+    try {
+      const r = localStorage.getItem("role");
+      return r === "compra" || r === "venta" ? (r as "compra" | "venta") : null;
+    } catch {
+      return null;
+    }
+  });
 
   useLayoutEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -55,7 +63,7 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("http://localhost:4000/api/health");
+        const res = await apiFetch("/api/health");
         if (!res.ok) throw new Error();
       } catch {}
       setIsInitialized(true);

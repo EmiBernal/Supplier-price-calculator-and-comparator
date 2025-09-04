@@ -5,6 +5,7 @@ import { Table } from '../../components/Table';
 import { PriceComparison } from '../../tipos/database';
 import { Search, List, LayoutGrid, CalendarDays, XCircle } from 'lucide-react';
 import { Screen } from '../../types';
+import { apiFetch } from '../../lib/api';
 
 
 interface CompareScreenProps {
@@ -86,7 +87,7 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
       params.append('onlyRelated', '1');
 
       const url = `/api/price-comparisons?${params.toString()}`;
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       const data = await res.json();
       setComparisons(Array.isArray(data) ? data : []);
     } catch (err) {

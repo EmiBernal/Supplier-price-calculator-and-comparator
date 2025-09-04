@@ -4,6 +4,7 @@ import { Table, Column } from '../../components/Table';
 import { ProductEquivalence } from '../../tipos/database';
 import { Search, ArrowLeft, ArrowUp, Pencil, Save, X } from 'lucide-react';
 import { Screen } from '../../types';
+import { apiFetch } from '../../lib/api';
 
 interface EquivalencesScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -48,7 +49,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
   const fetchEquivalences = async (search: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:4000/api/equivalencias?search=${encodeURIComponent(search)}`);
+      const res = await apiFetch(`/api/equivalencias?search=${encodeURIComponent(search)}`);
       if (!res.ok) throw new Error('Error al obtener equivalencias');
       const data = await res.json();
       setEquivalences(Array.isArray(data) ? data : []);
@@ -141,7 +142,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
 
   const handleDelete = async (id: number) => {
     try {
-      const res = await fetch(`http://localhost:4000/api/relacion/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/relacion/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data?.success) {
         setEquivalences((prev) => prev.filter((eq) => (eq as any).id !== id));
@@ -214,7 +215,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
         },
       };
 
-      const res = await fetch(`http://localhost:4000/api/relacion/${relationId}`, {
+      const res = await apiFetch(`/api/relacion/${relationId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

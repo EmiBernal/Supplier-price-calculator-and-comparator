@@ -3,6 +3,7 @@ import { Screen } from '../../types';
 import {
   Upload, GitCompare, BarChart3, ArrowRight, Package, Factory, Link2, Search, ChevronDown, Sun, Moon
 } from 'lucide-react';
+import { apiFetch, currentRole } from '../../lib/api';
 
 interface HomeScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -31,7 +32,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, userRole, on
   const [providerQuery, setProviderQuery] = useState('');
 
   // === A) Header con el rol para multi-DB ===
-  const roleHeader = (userRole ?? localStorage.getItem('role') ?? '').toString();
+  const roleHeader = (userRole ?? currentRole() ?? '').toString();
 
   // === Tema (oscuro/claro) - mismo comportamiento que login ===
   const [isDark, setIsDark] = useState<boolean>(() => {
@@ -54,8 +55,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, userRole, on
     const fetchStats = async () => {
       try {
         setLoadingStats(true);
-        const res = await fetch('http://localhost:4000/api/stats', {
-          credentials: 'include',
+        const res = await apiFetch('/api/stats', {
           headers: { 'X-Role': roleHeader }
         });
         if (!res.ok) throw new Error('Stats error');
@@ -82,8 +82,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, userRole, on
     const fetchProvidersSmart = async () => {
       setLoadingProviders(true);
       try {
-        const r1 = await fetch('http://localhost:4000/api/providers/summary', {
-          credentials: 'include',
+        const r1 = await apiFetch('/api/providers/summary', {
           headers: { 'X-Role': roleHeader }
         });
         if (r1.ok) {
@@ -94,8 +93,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, userRole, on
         throw new Error('summary_not_available');
       } catch {
         try {
-          const r2 = await fetch('http://localhost:4000/api/lista_precios?search=', {
-            credentials: 'include',
+          const r2 = await apiFetch('/api/lista_precios?search=', {
             headers: { 'X-Role': roleHeader }
           });
           if (!r2.ok) throw new Error('fallback_error');
@@ -208,9 +206,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, userRole, on
                 type="button"
                 onClick={async () => {
                   try {
-                    await fetch('http://localhost:4000/api/auth/logout', {
+                    await apiFetch('/api/auth/logout', {
                       method: 'POST',
-                      credentials: 'include',
                       headers: { 'Content-Type': 'application/json' },
                     }).catch(() => {});
                   } finally {

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, Lock, Mail, Loader2, Moon, Sun, ShieldCheck } from 'lucide-react';
+import { apiFetch } from '../../lib/api';
 
 const BASE_URL = 'http://localhost:4000';
 
@@ -54,7 +55,7 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
     setError(null);
     setLoading(true);
     try {
-      const res = await fetch(`${BASE_URL}/api/login`, {
+      const res = await apiFetch(`${BASE_URL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -68,6 +69,7 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
         if (rememberUser) localStorage.setItem('lastUsername', username);
       } catch {}
 
+      try { localStorage.setItem('role', data.role); } catch {}
       onLoginSuccess(data.role);
     } catch (err: any) {
       setError(err?.message || 'No se pudo iniciar sesión');

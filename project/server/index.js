@@ -501,7 +501,7 @@ app.post('/api/products', (req, res) => {
             });
           }
 
-          return res.status(200).json({ success: true, updated: updates.length > 0, message: 'Producto actualizado' });
+          return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
         }
 
         const insertSQL = `
@@ -534,7 +534,7 @@ app.post('/api/products', (req, res) => {
             const motivo = gampackProd ? 'Usuario rechazó sugerencia de relación' : 'No se encontró coincidencia por código ni nombre';
             db.run(`INSERT OR IGNORE INTO articulos_no_relacionados (id_lista_precios, motivo) VALUES (?, ?)`, [newId, motivo], (err3) => {
               if (err3) return res.status(500).json({ error: 'Error base de datos' });
-              return res.status(201).json({ success: true, message: 'Producto creado' });
+              return res.status(201).json({ success: true, message: 'Producto creado - no relacionados' });
             });
           });
         });
@@ -563,7 +563,7 @@ app.post('/api/products', (req, res) => {
             });
           }
 
-          return res.status(200).json({ success: true, message: 'Producto actualizado' });
+          return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
         }
 
         const insertSQL = `
@@ -596,7 +596,7 @@ app.post('/api/products', (req, res) => {
             const motivo = proveedorProd ? 'Usuario rechazó sugerencia de relación' : 'No se encontró coincidencia por código ni nombre';
             db.run(`INSERT OR IGNORE INTO articulos_gampack_no_relacionados (id_lista_interna, motivo) VALUES (?, ?)`, [newId, motivo], (err3) => {
               if (err3) return res.status(500).json({ error: 'Error base de datos' });
-              return res.status(201).json({ success: true, message: 'Producto creado' });
+              return res.status(201).json({ success: true, message: 'Producto creado - no relacionados' });
             });
           });
         });
@@ -1204,7 +1204,7 @@ app.post('/api/login', (req, res) => {
 
       // Derivar tenant desde el rol
       const role = (row.role || '').toLowerCase();
-      const tenant = role.includes('compra') ? 'compras' : 'ventas';
+      const tenant = role === 'compra' ? 'compra' : 'venta';
 
       // Seteamos cookie firmada
       res.cookie('tenant', tenant, {

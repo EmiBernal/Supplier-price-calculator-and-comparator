@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useDeferredValue, useCallback } fr
 import { Button } from '../../components/Button';
 import { Navigation } from '../../components/Navigation';
 import { Screen } from '../../types';
+import { apiFetch } from '../../lib/api';
 
 /* ---------- Similaridad por trigramas + coseno (solo nombres) ---------- */
 function sanitizeText(s: string) {
@@ -153,12 +154,12 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const [showTop, setShowTop] = useState(false);
 
   useEffect(() => {
-    fetch('http://localhost:4000/api/no-relacionados/proveedores')
+    apiFetch('/api/no-relacionados/proveedores')
       .then(res => res.json())
       .then(data => setExternals(Array.isArray(data) ? data : []))
       .catch(() => setExternals([]));
 
-    fetch('http://localhost:4000/api/no-relacionados/gampack')
+    apiFetch('/api/no-relacionados/gampack')
       .then(res => res.json())
       .then(data => setInternals(Array.isArray(data) ? data : []))
       .catch(() => setInternals([]));
@@ -312,7 +313,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       criterio: 'manual',
     };
     try {
-      const res = await fetch('http://localhost:4000/api/relacionar-manual', {
+      const res = await apiFetch('/api/relacionar-manual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -347,7 +348,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
 
       for (const { internal, extIds } of byInternal.values()) {
         const body = { id_lista_interna: internal.id_interno, ids_lista_precios: extIds, criterio: 'manual' };
-        const res = await fetch('http://localhost:4000/api/relacionar-manual', {
+        const res = await apiFetch('/api/relacionar-manual', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -618,7 +619,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                   criterio: 'manual',
                 };
                 try {
-                  const res = await fetch('http://localhost:4000/api/relacionar-manual', {
+                  const res = await apiFetch('/api/relacionar-manual', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),

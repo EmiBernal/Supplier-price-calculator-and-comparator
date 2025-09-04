@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import Fuse from 'fuse.js';
+import { apiFetch } from '../lib/api';
 
 type Row = Record<string, any>;
 
@@ -147,7 +148,7 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/imports/lista-precios', { method: 'POST', body: fd });
+      const res = await apiFetch('/api/imports/lista-precios', { method: 'POST', body: fd });
 
       let data: ImportResult | null = null;
       const ct = res.headers.get('content-type') || '';

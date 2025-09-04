@@ -33,14 +33,10 @@ function getDbFor(tenant, cb) {
 }
 
 function tenantMiddleware(req, res, next) {
-  // prioridad: header → cookie firmada/normal → body/query → default 'venta'
-  const h = normalizeTenant(req.get('X-Role') || req.get('X-Tenant'));
-  const c = normalizeTenant(
-    (req.signedCookies && (req.signedCookies.tenant || req.signedCookies.role)) ||
-    (req.cookies && (req.cookies.tenant || req.cookies.role))
-  );
-  const b = normalizeTenant(req.body?.role || req.query?.role);
-  const tenant = h || c || b || 'venta';
+  // prioridad: header → cookie firmada → default 'venta'
+  const h = normalizeTenant(req.get('X-Role'));
+  const c = normalizeTenant(req.signedCookies?.tenant);
+  const tenant = h || c || 'venta';
 
   getDbFor(tenant, (err, db) => {
     if (err) return next(err);
