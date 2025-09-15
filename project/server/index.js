@@ -66,6 +66,199 @@ const getDbRow = (db, sql, params = []) =>
     if (err) reject(err); else resolve(row);
   }));
 
+function parseLimitParam(raw) {
+  const DEFAULT_LIMIT = 500;
+  const MIN_LIMIT = 50;
+  const MAX_LIMIT = 2000;
+  if (raw == null) return DEFAULT_LIMIT;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_LIMIT;
+  if (parsed < MIN_LIMIT) return MIN_LIMIT;
+  if (parsed > MAX_LIMIT) return MAX_LIMIT;
+  return parsed;
+}
+
+function parseOffsetParam(raw) {
+  if (raw == null) return 0;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+}
+
+function parseOnlyPending(raw) {
+  if (raw == null) return true;
+  return String(raw) === '1';
+}
+
+function createNoRelacionadosHandler(tipo) {
+  const isExternos = tipo === 'externos';
+
+  return (req, res) => {
+    if (req.ctx?.tenant === 'compra') {
+      return res.status(404).json({ error: 'no_disponible_en_compras' });
+    }
+
+    const db = req.ctx.db;
+    if (!db) {
+      return res.status(500).json({ error: 'db_not_available' });
+    }
+
+    const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const hasSearch = searchRaw.length > 0;
+    const searchTerm = hasSearch ? `%${searchRaw.toLowerCase()}%` : null;
+    const onlyPending = parseOnlyPending(req.query.onlyPending);
+    const limit = parseLimitParam(req.query.limit);
+    const offset = parseOffsetParam(req.query.offset);
+
+    const params = [];
+    const where = [];
+
+    if (isExternos) {
+      where.push('ra.id IS NULL');
+      if (onlyPending) {
+        where.push('anr.id_lista_precios IS NOT NULL');
+      }
+      if (hasSearch) {
+        where.push(`(
+          LOWER(lp.cod_externo) LIKE ? OR
+          LOWER(lp.nom_externo) LIKE ? OR
+          LOWER(lp.proveedor) LIKE ?
+        )`);
+        params.push(searchTerm, searchTerm, searchTerm);
+      }
+
+      const sql = `
+        SELECT DISTINCT
+          lp.id_externo AS id_externo,
+          lp.cod_externo AS codigo,
+          lp.nom_externo AS nombre,
+          lp.proveedor AS proveedor,
+          lp.precio_final AS precio_final,
+          lp.fecha AS fecha,
+          anr.motivo AS motivo,
+          CASE WHEN anr.id_lista_precios IS NULL THEN 0 ELSE 1 END AS es_pendiente
+        FROM lista_precios lp
+        LEFT JOIN relacion_articulos ra ON ra.id_lista_precios = lp.id_externo
+        LEFT JOIN articulos_no_relacionados anr ON anr.id_lista_precios = lp.id_externo
+        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY es_pendiente DESC,
+                 DATE(lp.fecha) DESC,
+                 lp.id_externo DESC,
+                 lp.nom_externo COLLATE NOCASE ASC
+        LIMIT ? OFFSET ?
+      `;
+
+      params.push(limit, offset);
+
+      return db.all(sql, params, (err, rows = []) => {
+        if (err) {
+          console.error('Error al obtener productos externos no relacionados:', err.message);
+          return res.status(500).json({ error: 'Error al obtener productos externos no relacionados' });
+        }
+
+        const data = rows.map(row => {
+          const codigo = row.codigo ?? null;
+          const nombre = row.nombre ?? null;
+          const proveedor = row.proveedor ?? null;
+          const precioFinal = row.precio_final ?? null;
+          const fecha = row.fecha ?? null;
+
+          const item = {
+            id_externo: row.id_externo,
+            codigo,
+            nombre,
+            proveedor,
+            precio_final: precioFinal,
+            fecha,
+            cod_externo: codigo,
+            nom_externo: nombre,
+            motivo: row.motivo ?? null,
+            pendiente: row.es_pendiente === 1,
+            id: row.id_externo,
+            code: codigo,
+            name: nombre,
+            provider: proveedor,
+            finalPrice: precioFinal,
+            date: fecha,
+          };
+
+          return item;
+        });
+
+        return res.json(data);
+      });
+    }
+
+    where.push('ra.id IS NULL');
+    if (onlyPending) {
+      where.push('agnr.id_lista_interna IS NOT NULL');
+    }
+    if (hasSearch) {
+      where.push(`(
+        LOWER(li.cod_interno) LIKE ? OR
+        LOWER(li.nom_interno) LIKE ?
+      )`);
+      params.push(searchTerm, searchTerm);
+    }
+
+    const sql = `
+      SELECT DISTINCT
+        li.id_interno AS id_interno,
+        li.cod_interno AS codigo,
+        li.nom_interno AS nombre,
+        li.precio_final AS precio_final,
+        li.fecha AS fecha,
+        agnr.motivo AS motivo,
+        CASE WHEN agnr.id_lista_interna IS NULL THEN 0 ELSE 1 END AS es_pendiente
+      FROM lista_interna li
+      LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
+      LEFT JOIN articulos_gampack_no_relacionados agnr ON agnr.id_lista_interna = li.id_interno
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY es_pendiente DESC,
+               DATE(li.fecha) DESC,
+               li.id_interno DESC,
+               li.nom_interno COLLATE NOCASE ASC
+      LIMIT ? OFFSET ?
+    `;
+
+    params.push(limit, offset);
+
+    return db.all(sql, params, (err, rows = []) => {
+      if (err) {
+        console.error('Error al obtener productos internos no relacionados:', err.message);
+        return res.status(500).json({ error: 'Error al obtener productos internos no relacionados' });
+      }
+
+      const data = rows.map(row => {
+        const codigo = row.codigo ?? null;
+        const nombre = row.nombre ?? null;
+        const precioFinal = row.precio_final ?? null;
+        const fecha = row.fecha ?? null;
+
+        return {
+          id_interno: row.id_interno,
+          codigo,
+          nombre,
+          precio_final: precioFinal,
+          fecha,
+          cod_interno: codigo,
+          nom_interno: nombre,
+          motivo: row.motivo ?? null,
+          pendiente: row.es_pendiente === 1,
+          id: row.id_interno,
+          code: codigo,
+          name: nombre,
+          provider: 'Gampack',
+          finalPrice: precioFinal,
+          date: fecha,
+        };
+      });
+
+      return res.json(data);
+    });
+  };
+}
+
 // ============ Rutas ============
 
 app.get('/api/health', (req, res) => {
@@ -296,41 +489,14 @@ app.get('/api/lista_precios', (req, res) => {
   });
 });
 
-// ---------- NO RELACIONADOS (externos) ----------
-app.get('/api/no-relacionados/proveedores', (req, res) => {
-  const db = req.ctx.db;
-  const sql = `
-    SELECT lp.*, anr.motivo 
-    FROM articulos_no_relacionados anr
-    JOIN lista_precios lp ON anr.id_lista_precios = lp.id_externo
-  `;
+// ---------- NO RELACIONADOS (externos / internos) ----------
+const handleNoRelacionadosExternos = createNoRelacionadosHandler('externos');
+const handleNoRelacionadosInternos = createNoRelacionadosHandler('internos');
 
-  db.all(sql, [], (err, rows) => {
-    if (err) {
-      console.error('Error al obtener productos externos no relacionados:', err.message);
-      return res.status(500).json({ error: 'Error al obtener productos externos no relacionados' });
-    }
-    res.json(rows);
-  });
-});
-
-// ---------- NO RELACIONADOS (internos) ----------
-app.get('/api/no-relacionados/gampack', (req, res) => {
-  const db = req.ctx.db;
-  const sql = `
-    SELECT li.*, agnr.motivo 
-    FROM articulos_gampack_no_relacionados agnr
-    JOIN lista_interna li ON agnr.id_lista_interna = li.id_interno
-  `;
-
-  db.all(sql, [], (err, rows) => {
-    if (err) {
-      console.error('Error al obtener productos internos no relacionados:', err.message);
-      return res.status(500).json({ error: 'Error al obtener productos internos no relacionados' });
-    }
-    res.json(rows);
-  });
-});
+app.get('/api/no-relacionados/externos', handleNoRelacionadosExternos);
+app.get('/api/no-relacionados/proveedores', handleNoRelacionadosExternos);
+app.get('/api/no-relacionados/internos', handleNoRelacionadosInternos);
+app.get('/api/no-relacionados/gampack', handleNoRelacionadosInternos);
 
 // ---------- CHECK PRODUCT ----------
 app.post('/api/check-product', (req, res) => {
