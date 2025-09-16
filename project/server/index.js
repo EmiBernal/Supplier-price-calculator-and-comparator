@@ -875,16 +875,17 @@ app.get('/api/price-comparisons', (req, res) => {
   const applyFamilia = (cols) =>
     hasFamilia ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
 
-  const buildDateRange = (col) => {
+  // Usa DATE(...) para que SQLite compare solo fecha (no hora)
+  const buildDateRange = (col /* ya con DATE(...) */) => {
     if (hasFrom && hasTo) return `${col} BETWEEN ? AND ?`;
     if (hasFrom) return `${col} >= ?`;
     if (hasTo) return `${col} <= ?`;
     return '';
   };
 
-  const liDateRange = dateMode === 'product' ? buildDateRange('li.fecha') : '';
-  const lpDateRange = dateMode === 'product' ? buildDateRange('lp.fecha') : '';
-  const relDateRange = dateMode === 'relation' ? buildDateRange("DATE(ra.created_at)") : '';
+  const liDateRange = dateMode === 'product' ? buildDateRange('DATE(li.fecha)') : '';
+  const lpDateRange = dateMode === 'product' ? buildDateRange('DATE(lp.fecha)') : '';
+  const relDateRange = dateMode === 'relation' ? buildDateRange('DATE(ra.created_at)') : '';
 
   const wherePairs = [applySearch(['li.nom_interno', 'lp.nom_externo', 'lp.proveedor'])];
   const paramsPairs = search ? [like, like, like] : [];
@@ -897,13 +898,13 @@ app.get('/api/price-comparisons', (req, res) => {
   if (dateMode === 'product' && (hasFrom || hasTo)) {
     const dateConds = [];
     if (liDateRange) {
-      dateConds.push(`(li.fecha IS NOT NULL AND ${liDateRange})`);
+      dateConds.push(`(${liDateRange})`);
       if (hasFrom && hasTo) paramsPairs.push(dateFrom, dateTo);
       else if (hasFrom) paramsPairs.push(dateFrom);
       else paramsPairs.push(dateTo);
     }
     if (lpDateRange) {
-      dateConds.push(`(lp.fecha IS NOT NULL AND ${lpDateRange})`);
+      dateConds.push(`(${lpDateRange})`);
       if (hasFrom && hasTo) paramsPairs.push(dateFrom, dateTo);
       else if (hasFrom) paramsPairs.push(dateFrom);
       else paramsPairs.push(dateTo);
@@ -931,14 +932,15 @@ app.get('/api/price-comparisons', (req, res) => {
       ra.criterio_relacion AS saleConditions,
       ra.created_at  AS relationDate,
       ${dateMode === 'relation'
-        ? `ra.created_at`
-        : `COALESCE(li.fecha, lp.fecha)`} AS sortDate
+        ? `DATE(ra.created_at)`
+        : `COALESCE(DATE(li.fecha), DATE(lp.fecha))`} AS sortDate
     FROM relacion_articulos ra
     JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
     JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
     WHERE ${wherePairs.join(' AND ')}
   `;
 
+  // Internos solo (no relacionados)
   const whereInternal = ['ra.id_lista_precios IS NULL', applySearch(['li.nom_interno'])];
   const paramsInternal = search ? [like] : [];
   if (hasFamilia) {
@@ -946,9 +948,9 @@ app.get('/api/price-comparisons', (req, res) => {
     paramsInternal.push(familiaLike);
   }
   if (dateMode === 'product') {
-    const dr = buildDateRange('li.fecha');
+    const dr = buildDateRange('DATE(li.fecha)');
     if (dr) {
-      whereInternal.push(`li.fecha IS NOT NULL AND ${dr}`);
+      whereInternal.push(dr);
       if (hasFrom && hasTo) paramsInternal.push(dateFrom, dateTo);
       else if (hasFrom) paramsInternal.push(dateFrom);
       else if (hasTo) paramsInternal.push(dateTo);
@@ -967,12 +969,13 @@ app.get('/api/price-comparisons', (req, res) => {
       'Gampack' AS companyType,
       NULL AS saleConditions,
       NULL AS relationDate,
-      li.fecha AS sortDate
+      DATE(li.fecha) AS sortDate
     FROM lista_interna li
     LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
     WHERE ${whereInternal.join(' AND ')}
   `;
 
+  // Externos solo (no relacionados)
   const whereExternal = ['ra.id_lista_interna IS NULL', applySearch(['lp.nom_externo', 'lp.proveedor'])];
   const paramsExternal = search ? [like, like] : [];
   if (hasFamilia) {
@@ -980,9 +983,9 @@ app.get('/api/price-comparisons', (req, res) => {
     paramsExternal.push(familiaLike);
   }
   if (dateMode === 'product') {
-    const dr = buildDateRange('lp.fecha');
+    const dr = buildDateRange('DATE(lp.fecha)');
     if (dr) {
-      whereExternal.push(`lp.fecha IS NOT NULL AND ${dr}`);
+      whereExternal.push(dr);
       if (hasFrom && hasTo) paramsExternal.push(dateFrom, dateTo);
       else if (hasFrom) paramsExternal.push(dateFrom);
       else if (hasTo) paramsExternal.push(dateTo);
@@ -1001,7 +1004,7 @@ app.get('/api/price-comparisons', (req, res) => {
       lp.tipo_empresa AS companyType,
       NULL AS saleConditions,
       NULL AS relationDate,
-      lp.fecha AS sortDate
+      DATE(lp.fecha) AS sortDate
     FROM lista_precios lp
     LEFT JOIN relacion_articulos ra ON ra.id_lista_precios = lp.id_externo
     WHERE ${whereExternal.join(' AND ')}
@@ -1011,7 +1014,7 @@ app.get('/api/price-comparisons', (req, res) => {
   if (onlyRelated) {
     sql = `
       ${sqlPairs}
-      ORDER BY datetime(sortDate) DESC
+      ORDER BY DATE(sortDate) DESC
       LIMIT 1000
     `;
     params = [...paramsPairs];
@@ -1022,7 +1025,7 @@ app.get('/api/price-comparisons', (req, res) => {
       ${sqlInternalOnly}
       UNION ALL
       ${sqlExternalOnly}
-      ORDER BY datetime(sortDate) DESC
+      ORDER BY DATE(sortDate) DESC
       LIMIT 1000
     `;
     params = [...paramsPairs, ...paramsInternal, ...paramsExternal];
