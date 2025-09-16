@@ -190,7 +190,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, userRole, on
                   "group relative inline-flex items-center justify-center overflow-hidden",
                   "rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-medium",
                   "border bg-gray-100 text-gray-800 border-gray-200",
-                  "dark:bg白/5 dark:text-white dark:border-white/10".replace('白','white'), // evita caracteres raros al pegar
+                  "dark:bg-white/5 dark:text-white dark:border-white/10", // ✅ corregido
                   // borde/halo animado
                   "before:absolute before:inset-0 before:-z-10 before:rounded-[10px]",
                   "before:bg-gradient-to-r before:from-indigo-500/0 before:via-indigo-500/30 before:to-pink-500/0",
