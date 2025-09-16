@@ -90,6 +90,104 @@ function parseOnlyPending(raw) {
   return String(raw) === '1';
 }
 
+function clampNumber(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function parsePositiveInt(raw, defaultValue, min, max) {
+  if (raw == null) return defaultValue;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return defaultValue;
+  return clampNumber(parsed, min, max);
+}
+
+function normalizeWhitespace(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function removeDiacritics(value) {
+  return value.normalize('NFD').replace(/\p{Diacritic}/gu, '');
+}
+
+function normalizeSearchText(value) {
+  if (!value) return '';
+  const text = removeDiacritics(String(value)).toLowerCase();
+  return normalizeWhitespace(text.replace(/[^a-z0-9\s]/g, ' '));
+}
+
+function normalizeForKey(value) {
+  if (!value) return '';
+  const text = removeDiacritics(String(value)).toLowerCase();
+  return normalizeWhitespace(text.replace(/[^a-z0-9]/g, ' '));
+}
+
+function normalizeCode(value) {
+  if (!value) return '';
+  const text = removeDiacritics(String(value)).toLowerCase();
+  return text.replace(/[^a-z0-9]/g, '');
+}
+
+function buildProductKey(name, code) {
+  const codeKey = normalizeCode(code);
+  const nameKey = normalizeForKey(name);
+  if (codeKey && nameKey) return `${codeKey}__${nameKey}`;
+  return codeKey || nameKey || null;
+}
+
+function pickRepresentativeValue(values = []) {
+  const tally = new Map();
+  for (const raw of values) {
+    const value = typeof raw === 'string' ? normalizeWhitespace(raw) : normalizeWhitespace(String(raw ?? ''));
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (!tally.has(key)) {
+      tally.set(key, { value, count: 1 });
+    } else {
+      const entry = tally.get(key);
+      entry.count += 1;
+      if (value.length > entry.value.length) entry.value = value;
+    }
+  }
+
+  let best = null;
+  for (const entry of tally.values()) {
+    if (!best) {
+      best = entry;
+      continue;
+    }
+    if (entry.count > best.count) {
+      best = entry;
+      continue;
+    }
+    if (entry.count === best.count) {
+      if (entry.value.length > best.value.length) {
+        best = entry;
+        continue;
+      }
+      if (entry.value.length === best.value.length && entry.value.localeCompare(best.value, 'es') < 0) {
+        best = entry;
+      }
+    }
+  }
+
+  return best ? best.value : null;
+}
+
+function parseTimestamp(value) {
+  if (value == null) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const str = String(value).trim();
+  if (!str) return null;
+  const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const [, y, m, d] = isoMatch.map(Number);
+    const ts = Date.UTC(y, m - 1, d);
+    return Number.isFinite(ts) ? ts : null;
+  }
+  const parsed = Date.parse(str);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function createNoRelacionadosHandler(tipo) {
   const isExternos = tipo === 'externos';
 
@@ -1058,6 +1156,281 @@ app.get('/api/price-comparisons', (req, res) => {
     });
 
     res.json(results);
+  });
+});
+
+app.get('/api/compra/compare', (req, res) => {
+  if (req.ctx?.tenant !== 'compra') {
+    return res.status(403).json({ error: 'solo_disponible_para_compras' });
+  }
+
+  const db = req.ctx?.db;
+  if (!db) {
+    return res.status(500).json({ error: 'db_not_available' });
+  }
+
+  const qRaw = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const minProviders = parsePositiveInt(req.query.min_providers, 2, 1, 50);
+  const sortRaw = typeof req.query.sort === 'string' ? req.query.sort.toLowerCase() : '';
+  const sort = sortRaw === 'name' ? 'name' : 'best_price';
+  const orderRaw = typeof req.query.order === 'string' ? req.query.order.toLowerCase() : '';
+  const order = orderRaw === 'desc' ? 'desc' : 'asc';
+  const page = parsePositiveInt(req.query.page, 1, 1, 100000);
+  const pageSize = parsePositiveInt(req.query.page_size, 25, 5, 200);
+
+  const filters = ['lp.precio_final IS NOT NULL'];
+  const params = [];
+
+  if (qRaw) {
+    const like = `%${qRaw.toLowerCase()}%`;
+    filters.push(`(LOWER(lp.nom_externo) LIKE ? OR LOWER(lp.cod_externo) LIKE ? OR LOWER(lp.proveedor) LIKE ?)`);
+    params.push(like, like, like);
+  }
+
+  const sql = `
+    SELECT
+      lp.id_externo AS id,
+      lp.nom_externo AS name,
+      lp.cod_externo AS code,
+      lp.proveedor AS provider,
+      lp.precio_final AS price,
+      lp.fecha AS date
+    FROM lista_precios lp
+    ${filters.length ? 'WHERE ' + filters.join(' AND ') : ''}
+  `;
+
+  db.all(sql, params, (err, rows = []) => {
+    if (err) {
+      console.error('Error al obtener comparador de compras:', err.message);
+      return res.status(500).json({ error: 'Error al obtener comparaciones' });
+    }
+
+    const searchTokens = normalizeSearchText(qRaw).split(' ').filter(Boolean);
+    const groupsMap = new Map();
+
+    for (const row of rows) {
+      const key = buildProductKey(row.name, row.code);
+      if (!key) continue;
+
+      const providerName = normalizeWhitespace(row.provider);
+      if (!providerName) continue;
+
+      const price = parseNumberAR(row.price);
+      if (price == null) continue;
+
+      const normalizedDate = toYMD(row.date) || null;
+      const timestamp = parseTimestamp(normalizedDate ?? row.date);
+      const cleanCode = normalizeWhitespace(row.code) || null;
+      const cleanName = normalizeWhitespace(row.name) || null;
+      const id = Number.parseInt(row.id, 10);
+      const numericId = Number.isFinite(id) ? id : null;
+
+      let group = groupsMap.get(key);
+      if (!group) {
+        group = {
+          key,
+          names: [],
+          codes: [],
+          providers: new Map(),
+        };
+        groupsMap.set(key, group);
+      }
+
+      if (cleanName) group.names.push(cleanName);
+      if (cleanCode) group.codes.push(cleanCode);
+
+      const providerKey = providerName.toLowerCase();
+      const current = group.providers.get(providerKey);
+      const providerEntry = {
+        id: numericId,
+        provider: providerName,
+        price,
+        date: normalizedDate,
+        code: cleanCode,
+        name: cleanName,
+        timestamp: timestamp ?? -Infinity,
+      };
+
+      if (!current) {
+        group.providers.set(providerKey, providerEntry);
+      } else {
+        const currentTs = current.timestamp ?? -Infinity;
+        const newTs = providerEntry.timestamp ?? -Infinity;
+        if (newTs > currentTs || (newTs === currentTs && (providerEntry.id ?? 0) > (current.id ?? 0))) {
+          group.providers.set(providerKey, providerEntry);
+        }
+      }
+    }
+
+    let groups = [];
+    for (const group of groupsMap.values()) {
+      const providerEntries = Array.from(group.providers.values());
+      if (providerEntries.length === 0) continue;
+
+      const providerCount = providerEntries.length;
+
+      const sortedByPrice = providerEntries.slice().sort((a, b) => {
+        const priceA = typeof a.price === 'number' ? a.price : Number.POSITIVE_INFINITY;
+        const priceB = typeof b.price === 'number' ? b.price : Number.POSITIVE_INFINITY;
+        if (priceA === priceB) {
+          const tsA = a.timestamp ?? -Infinity;
+          const tsB = b.timestamp ?? -Infinity;
+          if (tsA === tsB) {
+            return (b.id ?? 0) - (a.id ?? 0);
+          }
+          return tsB - tsA;
+        }
+        return priceA - priceB;
+      });
+
+      const bestEntry = sortedByPrice[0];
+      const worstEntry = sortedByPrice[sortedByPrice.length - 1];
+      const bestPrice = typeof bestEntry?.price === 'number' ? Number(bestEntry.price) : null;
+      const worstPrice = typeof worstEntry?.price === 'number' ? Number(worstEntry.price) : null;
+
+      let priceSpread = null;
+      let priceSpreadPercent = null;
+      if (typeof bestPrice === 'number' && typeof worstPrice === 'number') {
+        priceSpread = Number((worstPrice - bestPrice).toFixed(2));
+        if (bestPrice > 0) {
+          priceSpreadPercent = Number(((priceSpread / bestPrice) * 100).toFixed(2));
+        }
+      }
+
+      const representativeName = pickRepresentativeValue(group.names) || bestEntry?.name || null;
+      const representativeCode = pickRepresentativeValue(group.codes) || bestEntry?.code || null;
+
+      const uniqueNames = Array.from(new Set(group.names.map(n => normalizeWhitespace(n)).filter(Boolean)));
+      const uniqueCodes = Array.from(new Set(group.codes.map(c => normalizeWhitespace(c)).filter(Boolean)));
+
+      const lastUpdatedTs = providerEntries.reduce((max, item) => Math.max(max, item.timestamp ?? -Infinity), -Infinity);
+      const lastUpdated = Number.isFinite(lastUpdatedTs) && lastUpdatedTs > -Infinity
+        ? new Date(lastUpdatedTs).toISOString().slice(0, 10)
+        : null;
+
+      const searchFingerprint = normalizeSearchText([
+        group.key,
+        representativeName,
+        representativeCode,
+        ...uniqueNames,
+        ...uniqueCodes,
+        ...providerEntries.map(p => p.provider),
+      ].join(' '));
+
+      const providers = sortedByPrice.map(({ timestamp, ...rest }) => rest);
+
+      groups.push({
+        key: group.key,
+        name: representativeName,
+        code: representativeCode,
+        providerCount,
+        bestPrice,
+        bestProvider: bestEntry?.provider ?? null,
+        worstPrice,
+        worstProvider: worstEntry?.provider ?? null,
+        priceSpread,
+        priceSpreadPercent,
+        lastUpdated,
+        providers,
+        nameAlternatives: uniqueNames,
+        codes: uniqueCodes,
+        searchFingerprint,
+      });
+    }
+
+    groups = groups.filter(group => group.providerCount >= minProviders);
+
+    if (searchTokens.length) {
+      groups = groups.filter(group => searchTokens.every(token => group.searchFingerprint.includes(token)));
+    }
+
+    const totalGroups = groups.length;
+    const totalProviders = groups.reduce((acc, group) => acc + group.providerCount, 0);
+    const spreadGroups = groups.filter(group => typeof group.priceSpread === 'number');
+    const totalSpread = spreadGroups.reduce((acc, group) => acc + (group.priceSpread ?? 0), 0);
+    const averageSpread = spreadGroups.length ? Number((totalSpread / spreadGroups.length).toFixed(2)) : 0;
+    const averageSpreadPercent = spreadGroups.length
+      ? Number((spreadGroups.reduce((acc, group) => acc + (group.priceSpreadPercent ?? 0), 0) / spreadGroups.length).toFixed(2))
+      : 0;
+    const potentialSavings = Number(totalSpread.toFixed(2));
+    const bestOpportunity = spreadGroups.reduce((best, group) => {
+      if (!best || (group.priceSpread ?? 0) > (best.priceSpread ?? 0)) return group;
+      return best;
+    }, null);
+
+    const sortGroups = (a, b) => {
+      if (sort === 'name') {
+        const aName = a.name || '';
+        const bName = b.name || '';
+        const cmp = aName.localeCompare(bName, 'es', { sensitivity: 'base' });
+        if (cmp === 0) return a.key.localeCompare(b.key);
+        return cmp;
+      }
+      const aPrice = typeof a.bestPrice === 'number' ? a.bestPrice : Number.POSITIVE_INFINITY;
+      const bPrice = typeof b.bestPrice === 'number' ? b.bestPrice : Number.POSITIVE_INFINITY;
+      if (aPrice === bPrice) {
+        const aName = a.name || '';
+        const bName = b.name || '';
+        const cmpName = aName.localeCompare(bName, 'es', { sensitivity: 'base' });
+        if (cmpName === 0) return a.key.localeCompare(b.key);
+        return cmpName;
+      }
+      return aPrice - bPrice;
+    };
+
+    groups.sort((a, b) => {
+      const base = sortGroups(a, b);
+      return order === 'desc' ? -base : base;
+    });
+
+    const totalPages = totalGroups === 0 ? 0 : Math.ceil(totalGroups / pageSize);
+    const safePage = totalPages === 0 ? 1 : Math.min(Math.max(page, 1), totalPages);
+    const startIndex = (safePage - 1) * pageSize;
+    const paginatedItems = totalPages === 0 ? [] : groups.slice(startIndex, startIndex + pageSize);
+
+    const serializeGroup = (group) => ({
+      key: group.key,
+      name: group.name,
+      code: group.code,
+      providerCount: group.providerCount,
+      bestPrice: group.bestPrice,
+      bestProvider: group.bestProvider,
+      worstPrice: group.worstPrice,
+      worstProvider: group.worstProvider,
+      priceSpread: group.priceSpread,
+      priceSpreadPercent: group.priceSpreadPercent,
+      lastUpdated: group.lastUpdated,
+      nameAlternatives: group.nameAlternatives,
+      codes: group.codes,
+      providers: group.providers.map(({ timestamp, ...provider }) => provider),
+    });
+
+    const summary = {
+      totalGroups,
+      totalProviders,
+      potentialSavings,
+      averageSpread,
+      averageSpreadPercent,
+      bestOpportunity: bestOpportunity
+        ? {
+            key: bestOpportunity.key,
+            name: bestOpportunity.name,
+            priceSpread: bestOpportunity.priceSpread,
+            priceSpreadPercent: bestOpportunity.priceSpreadPercent,
+            bestProvider: bestOpportunity.bestProvider,
+            worstProvider: bestOpportunity.worstProvider,
+          }
+        : null,
+    };
+
+    return res.json({
+      page: totalGroups === 0 ? 1 : safePage,
+      pageSize,
+      totalGroups,
+      totalPages,
+      summary,
+      items: paginatedItems.map(serializeGroup),
+    });
   });
 });
 
