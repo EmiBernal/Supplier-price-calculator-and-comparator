@@ -1064,6 +1064,112 @@ app.get('/api/price-comparisons', (req, res) => {
   });
 });
 
+// ---------- BORRAR NO-RELACIONADOS (externos / internos) ----------
+// Helpers comunes
+function deleteNoRelatedFactory(tipo) {
+  const isExternos = tipo === 'externos';
+
+  const tableMain   = isExternos ? 'lista_precios'                    : 'lista_interna';
+  const idMainCol   = isExternos ? 'id_externo'                       : 'id_interno';
+  const tableNR     = isExternos ? 'articulos_no_relacionados'        : 'articulos_gampack_no_relacionados';
+  const idNRCol     = isExternos ? 'id_lista_precios'                 : 'id_lista_interna';
+  const relCol      = isExternos ? 'id_lista_precios'                 : 'id_lista_interna';
+
+  // Borra varios IDs (ya validados como números)
+  const deleteMany = (db, ids, res) => {
+    if (!ids.length) return res.json({ success: true, deleted: 0, skipped: 0 });
+
+    const placeholders = ids.map(() => '?').join(',');
+    db.all(
+      `SELECT ${relCol} AS id FROM relacion_articulos WHERE ${relCol} IN (${placeholders})`,
+      ids,
+      (err, relRows = []) => {
+        if (err) return res.status(500).json({ error: 'db_error_check_rel' });
+
+        const relatedSet = new Set(relRows.map(r => r.id));
+        const deletable = ids.filter(id => !relatedSet.has(id));
+        const skipped = ids.length - deletable.length;
+
+        if (deletable.length === 0) {
+          return res.json({ success: true, deleted: 0, skipped });
+        }
+
+        db.serialize(() => {
+          db.run('BEGIN');
+          db.run(`DELETE FROM ${tableNR} WHERE ${idNRCol} IN (${deletable.map(() => '?').join(',')})`, deletable);
+          db.run(
+            `DELETE FROM ${tableMain} WHERE ${idMainCol} IN (${deletable.map(() => '?').join(',')})`,
+            deletable,
+            function (err2) {
+              if (err2) {
+                db.run('ROLLBACK');
+                return res.status(500).json({ error: 'db_error_delete' });
+              }
+              const deleted = this.changes || 0;
+              db.run('COMMIT', (err3) => {
+                if (err3) return res.status(500).json({ error: 'db_commit_error' });
+                res.json({ success: true, deleted, skipped });
+              });
+            }
+          );
+        });
+      }
+    );
+  };
+
+  // DELETE uno
+  const delOne = (req, res) => {
+    const db = req.ctx.db;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+
+    db.get(
+      `SELECT 1 FROM relacion_articulos WHERE ${relCol} = ? LIMIT 1`,
+      [id],
+      (err, row) => {
+        if (err) return res.status(500).json({ error: 'db_error_check_rel' });
+        if (row) return res.status(409).json({ error: 'has_relation' });
+
+        db.serialize(() => {
+          db.run('BEGIN');
+          db.run(`DELETE FROM ${tableNR} WHERE ${idNRCol} = ?`, [id]);
+          db.run(`DELETE FROM ${tableMain} WHERE ${idMainCol} = ?`, [id], function (err2) {
+            if (err2) {
+              db.run('ROLLBACK');
+              return res.status(500).json({ error: 'db_error_delete' });
+            }
+            const deleted = this.changes || 0;
+            db.run('COMMIT', (err3) => {
+              if (err3) return res.status(500).json({ error: 'db_commit_error' });
+              res.json({ success: true, deleted, skipped: 0 });
+            });
+          });
+        });
+      }
+    );
+  };
+
+  // POST bulk
+  const delBulk = (req, res) => {
+    const db = req.ctx.db;
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(n => Number.isFinite(n) && n > 0) : [];
+    if (ids.length === 0) return res.status(400).json({ error: 'empty_ids' });
+    deleteMany(db, ids, res);
+  };
+
+  return { delOne, delBulk };
+}
+
+const delExternos = deleteNoRelatedFactory('externos');
+const delInternos = deleteNoRelatedFactory('internos');
+
+app.delete('/api/no-relacionados/externos/:id', delExternos.delOne);
+app.post('/api/no-relacionados/externos/delete', express.json(), delExternos.delBulk);
+
+app.delete('/api/no-relacionados/internos/:id', delInternos.delOne);
+app.post('/api/no-relacionados/internos/delete', express.json(), delInternos.delBulk);
+
+
 // ---------- RELACIONADOS POR CÓDIGO ----------
 app.get('/api/gampack/:codigo/relacionados', (req, res) => {
   const db = req.ctx.db;

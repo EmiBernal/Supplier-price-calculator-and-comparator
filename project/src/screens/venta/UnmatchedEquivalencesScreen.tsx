@@ -3,28 +3,23 @@ import { Button } from '../../components/Button';
 import { Navigation } from '../../components/Navigation';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
+import { Trash2 } from 'lucide-react';
 
 /* ---------- Similaridad por trigramas + coseno (solo nombres) ---------- */
 function sanitizeText(s: string) {
-  return `  ${s
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[^\p{L}\p{N} ]/gu, ' ')} `;
+  return `  ${s.toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N} ]/gu, ' ')} `;
 }
 function buildTrigramFreq(s: string) {
   const t: Record<string, number> = {};
-  for (let i = 0; i < s.length - 2; i++) {
-    const g = s.slice(i, i + 3);
-    t[g] = (t[g] || 0) + 1;
-  }
+  for (let i = 0; i < s.length - 2; i++) t[s.slice(i, i + 3)] = (t[s.slice(i, i + 3)] || 0) + 1;
   return t;
 }
-function cosineByTri(aFreq: Record<string, number>, bFreq: Record<string, number>) {
+function cosineByTri(a: Record<string, number>, b: Record<string, number>) {
   let dot = 0, nA = 0, nB = 0;
-  for (const k in aFreq) { nA += aFreq[k] * aFreq[k]; if (bFreq[k]) dot += aFreq[k] * bFreq[k]; }
-  for (const k in bFreq) { nB += bFreq[k] * bFreq[k]; }
-  const denom = Math.sqrt(nA) * Math.sqrt(nB);
-  return denom ? dot / denom : 0;
+  for (const k in a) { nA += a[k] * a[k]; if (b[k]) dot += a[k] * b[k]; }
+  for (const k in b) nB += b[k] * b[k];
+  const d = Math.sqrt(nA) * Math.sqrt(nB);
+  return d ? dot / d : 0;
 }
 function tokenizeName(s: string) {
   return sanitizeText(s).split(/\s+/).filter(w => w.length >= 3);
@@ -56,7 +51,7 @@ type Suggestion = {
   external: ExternalItem;
   reason: string;
   score: number;
-  id: string; // `${internalId}|${externalId}`
+  id: string;
 };
 
 const DEFAULT_SIMILARITY_THRESHOLD = 0.60;
@@ -69,64 +64,48 @@ const sortIcon = (dir?: SortDir) =>
 
 function classHeader(active: boolean) {
   return `px-6 py-3 text-left font-medium cursor-pointer select-none ${
-    active
-      ? 'text-blue-700 dark:text-blue-300'
-      : 'text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white'
+    active ? 'text-blue-700 dark:text-blue-300'
+           : 'text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white'
   }`;
 }
 const normalizeStr = (v: any) => String(v ?? '').toLowerCase().trim();
 const cmp = (a: any, b: any) => (a < b ? -1 : a > b ? 1 : 0);
 
 /* ---------- Input de búsqueda ---------- */
-const SearchInput: React.FC<{
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-}> = ({ value, onChange, placeholder }) => {
-  return (
-    <div className="relative rounded-xl border border-gray-300 dark:border-white/10 bg-white dark:bg-white/5
-                    focus-within:ring-2 focus-within:ring-blue-400/40 focus-within:border-blue-400/60 transition">
-      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400 dark:text-white/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
-      </div>
-      <input
-        autoComplete="off"
-        spellCheck={false}
-        className="w-full pl-9 pr-9 py-2 rounded-xl bg-transparent text-sm text-gray-900 dark:text-white
-                   placeholder-gray-400 dark:placeholder-white/60 focus:outline-none"
-        placeholder={placeholder}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.stopPropagation();
-            onChange('');
-          }
-        }}
-      />
-      {value && (
-        <button
-          type="button"
-          className="absolute inset-y-0 right-0 pr-3 text-gray-500 hover:text-gray-700 dark:text-white/60 dark:hover:text-white"
-          onClick={() => onChange('')}
-          title="Limpiar (Esc)"
-          tabIndex={-1}
-        >
-          ✕
-        </button>
-      )}
+const SearchInput: React.FC<{ value: string; onChange: (v: string) => void; placeholder: string; }> =
+({ value, onChange, placeholder }) => (
+  <div className="relative rounded-xl border border-gray-300 dark:border-white/10 bg-white dark:bg-white/5 focus-within:ring-2 focus-within:ring-blue-400/40 focus-within:border-blue-400/60 transition">
+    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400 dark:text-white/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
     </div>
-  );
-};
+    <input
+      autoComplete="off" spellCheck={false}
+      className="w-full pl-9 pr-9 py-2 rounded-xl bg-transparent text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-white/60 focus:outline-none"
+      placeholder={placeholder}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onChange(''); } }}
+    />
+    {value && (
+      <button type="button" className="absolute inset-y-0 right-0 pr-3 text-gray-500 hover:text-gray-700 dark:text-white/60 dark:hover:text-white" onClick={() => onChange('')} title="Limpiar (Esc)" tabIndex={-1}>✕</button>
+    )}
+  </div>
+);
 
 export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen) => void }> = ({ onNavigate }) => {
   const [externals, setExternals] = useState<ExternalItem[]>([]);
   const [internals, setInternals] = useState<InternalItem[]>([]);
   const [selectedExternals, setSelectedExternals] = useState<ExternalItem[]>([]);
   const [selectedInternal, setSelectedInternal] = useState<InternalItem | null>(null);
+
+  /* NUEVO: modo eliminar (sin checkbox) */
+  const [deleteModeExt, setDeleteModeExt] = useState(false);
+  const [deleteModeInt, setDeleteModeInt] = useState(false);
+  const [extDeleteIds, setExtDeleteIds] = useState<Set<number>>(new Set());
+  const [intDeleteIds, setIntDeleteIds] = useState<Set<number>>(new Set());
 
   // Panel de revisión
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -147,73 +126,40 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const [sortIntKey, setSortIntKey] = useState<SortKeyInternal>('fecha');
   const [sortIntDir, setSortIntDir] = useState<SortDir>('desc');
 
-  // UX mejorada: umbral ajustable
+  // umbral similitud
   const [threshold, setThreshold] = useState<number>(DEFAULT_SIMILARITY_THRESHOLD);
 
   // Top button
   const [showTop, setShowTop] = useState(false);
 
   useEffect(() => {
-    apiFetch('/api/no-relacionados/proveedores')
-      .then(res => res.json())
-      .then(data => setExternals(Array.isArray(data) ? data : []))
-      .catch(() => setExternals([]));
-
-    apiFetch('/api/no-relacionados/gampack')
-      .then(res => res.json())
-      .then(data => setInternals(Array.isArray(data) ? data : []))
-      .catch(() => setInternals([]));
+    apiFetch('/api/no-relacionados/proveedores').then(r => r.json()).then(d => setExternals(Array.isArray(d) ? d : [])).catch(() => setExternals([]));
+    apiFetch('/api/no-relacionados/gampack').then(r => r.json()).then(d => setInternals(Array.isArray(d) ? d : [])).catch(() => setInternals([]));
   }, []);
 
-  // Evitar refresco con Ctrl/Cmd+R y F5 + atajo 't' para Top
+  // accesos rápidos teclado
   useEffect(() => {
-    const isEditable = (el: EventTarget | null) => {
-      const n = (el as HTMLElement | null);
-      if (!n) return false;
-      const tag = (n.tagName || '').toLowerCase();
-      return (
-        (tag === 'input' || tag === 'textarea' || tag === 'select') ||
-        (n as HTMLElement).isContentEditable
-      );
-    };
-
     const onKey = (e: KeyboardEvent) => {
-      const targetIsEditable = isEditable(e.target);
-
-      // bloquear refresh
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+      const editable = tag === 'input' || tag === 'textarea' || tag === 'select' || (e.target as HTMLElement)?.isContentEditable;
       const k = e.key.toLowerCase();
-      if ((k === 'r' && (e.ctrlKey || e.metaKey)) || e.key === 'F5') {
-        e.preventDefault();
-        return;
-      }
-
-      // atajo "t" => Top
-      if (!targetIsEditable && k === 't' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
+      if ((k === 'r' && (e.ctrlKey || e.metaKey)) || e.key === 'F5') { e.preventDefault(); return; }
+      if (!editable && k === 't' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
     };
-
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [reviewOpen, suggestions]);
+  }, []);
 
-  // Mostrar botón Top al hacer scroll
+  // botón top al hacer scroll
   useEffect(() => {
     const onScroll = () => setShowTop(window.scrollY > 400);
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll(); window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  /* ---------- Índice eficiente por tokens + trigramas (externos) ---------- */
+  /* ---------- Índice para sugerencias ---------- */
   const extIndexed = useMemo(() => {
-    type ExtIdx = {
-      item: ExternalItem;
-      nameSan: string;
-      tri: Record<string, number>;
-      toks: string[];
-    };
+    type ExtIdx = { item: ExternalItem; nameSan: string; tri: Record<string, number>; toks: string[]; };
     const items: ExtIdx[] = [];
     const inv = new Map<string, number[]>();
     externals.forEach((e, idx) => {
@@ -221,24 +167,15 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       const tri = buildTrigramFreq(nameSan);
       const toks = Array.from(new Set(tokenizeName(e.nom_externo ?? '')));
       items.push({ item: e, nameSan, tri, toks });
-      toks.forEach(t => {
-        const arr = inv.get(t) || [];
-        arr.push(idx);
-        inv.set(t, arr);
-      });
+      toks.forEach(t => { const arr = inv.get(t) || []; arr.push(idx); inv.set(t, arr); });
     });
     return { items, inv };
   }, [externals]);
 
   /* ---------- Auto-relación por nombre ---------- */
   const generateAutoMatches = useCallback(async () => {
-    if (internals.length === 0 || extIndexed.items.length === 0) {
-      setSuggestions([]);
-      setReviewOpen(true);
-      return;
-    }
+    if (internals.length === 0 || extIndexed.items.length === 0) { setSuggestions([]); setReviewOpen(true); return; }
     setLoadingAuto(true);
-
     const acc: Suggestion[] = [];
     const seen = new Set<string>();
 
@@ -249,44 +186,24 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
         const iName = i.nom_interno ?? '';
         if (!iName.trim()) continue;
 
-        const iSan = sanitizeText(iName);
-        const iTri = buildTrigramFreq(iSan);
+        const iTri = buildTrigramFreq(sanitizeText(iName));
         const iToks = Array.from(new Set(tokenizeName(iName)));
         if (iToks.length === 0) continue;
 
         const candidateIdx = new Map<number, number>();
-        iToks.forEach(t => {
-          const arr = extIndexed.inv.get(t);
-          if (!arr) return;
-          arr.forEach(idx => candidateIdx.set(idx, (candidateIdx.get(idx) || 0) + 1));
-        });
+        iToks.forEach(t => { const arr = extIndexed.inv.get(t); if (arr) arr.forEach(idx => candidateIdx.set(idx, (candidateIdx.get(idx) || 0) + 1)); });
 
-        const ranked = [...candidateIdx.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 50)
-          .map(([idx]) => extIndexed.items[idx]);
+        const ranked = [...candidateIdx.entries()].sort((a, b) => b[1] - a[1]).slice(0, 50).map(([idx]) => extIndexed.items[idx]);
 
         let local: Suggestion[] = [];
         for (const eIdx of ranked) {
           const id = `${i.id_interno}|${eIdx.item.id_externo}`;
           if (ignoredPairs.has(id) || seen.has(id)) continue;
           const score = cosineByTri(iTri, eIdx.tri);
-          if (score >= threshold) {
-            local.push({
-              internal: i,
-              external: eIdx.item,
-              reason: `Nombre similar (${score.toFixed(2)})`,
-              score,
-              id
-            });
-          }
+          if (score >= threshold) local.push({ internal: i, external: eIdx.item, reason: `Nombre similar (${score.toFixed(2)})`, score, id });
         }
-
         local.sort((a, b) => b.score - a.score);
-        local.slice(0, MAX_CANDIDATES_PER_INTERNAL).forEach(s => {
-          seen.add(s.id);
-          acc.push(s);
-        });
+        local.slice(0, MAX_CANDIDATES_PER_INTERNAL).forEach(s => { seen.add(s.id); acc.push(s); });
       }
       await new Promise(r => setTimeout(r, 0));
     }
@@ -297,7 +214,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     setLoadingAuto(false);
   }, [internals, extIndexed, ignoredPairs, threshold]);
 
-  /* ---------- Aceptar / Eliminar sugerencias ---------- */
+  /* ---------- Aceptar / Rechazar sugerencias ---------- */
   const removeFromStateAfterLink = (i: InternalItem, e: ExternalItem) => {
     setExternals(prev => prev.filter(x => x.id_externo !== e.id_externo));
     setInternals(prev => prev.filter(x => x.id_interno !== i.id_interno));
@@ -307,26 +224,14 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   };
 
   const acceptSuggestion = async (s: Suggestion) => {
-    const body = {
-      id_lista_interna: s.internal.id_interno,
-      ids_lista_precios: [s.external.id_externo],
-      criterio: 'manual',
-    };
     try {
       const res = await apiFetch('/api/relacionar-manual', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_lista_interna: s.internal.id_interno, ids_lista_precios: [s.external.id_externo], criterio: 'manual' }),
       });
-      if (res.ok) {
-        removeFromStateAfterLink(s.internal, s.external);
-      } else {
-        const error = await res.json().catch(() => ({}));
-        alert(`Error: ${error.message || 'No se pudo vincular'}`);
-      }
-    } catch {
-      alert('Error al conectar con el servidor');
-    }
+      if (res.ok) removeFromStateAfterLink(s.internal, s.external);
+      else alert(`Error: ${(await res.json().catch(() => ({} as any)))?.message || 'No se pudo vincular'}`);
+    } catch { alert('Error al conectar con el servidor'); }
   };
 
   const rejectSuggestion = (s: Suggestion) => {
@@ -334,7 +239,6 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     setSuggestions(prev => prev.filter(x => x.id !== s.id));
   };
 
-  // NUEVO: Aceptar todas las visibles agrupando por producto Gampack
   const acceptAllVisible = async () => {
     if (suggestions.length === 0) return;
     setBulkBusy(true);
@@ -347,91 +251,51 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       });
 
       for (const { internal, extIds } of byInternal.values()) {
-        const body = { id_lista_interna: internal.id_interno, ids_lista_precios: extIds, criterio: 'manual' };
         const res = await apiFetch('/api/relacionar-manual', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id_lista_interna: internal.id_interno, ids_lista_precios: extIds, criterio: 'manual' }),
         });
-        if (!res.ok) {
-          const error = await res.json().catch(() => ({} as any));
-          throw new Error(error.message || 'No se pudo vincular en lote');
-        }
-        // Actualizar estado tras cada grupo vinculado
+        if (!res.ok) throw new Error('No se pudo vincular en lote');
         setExternals(prev => prev.filter(e => !extIds.includes(e.id_externo)));
         setInternals(prev => prev.filter(i => i.id_interno !== internal.id_interno));
         setSuggestions(prev => prev.filter(s => s.internal.id_interno !== internal.id_interno));
       }
-
       toast(`✔ Vinculadas ${suggestions.length} sugerencias`);
       setReviewOpen(false);
-    } catch (err: any) {
-      alert(err?.message || 'Error al vincular en lote');
-    } finally {
-      setBulkBusy(false);
-    }
+    } catch (e: any) { alert(e?.message || 'Error al vincular en lote'); }
+    finally { setBulkBusy(false); }
   };
 
-  // NUEVO: Rechazar todas las visibles
   const rejectAllVisible = () => {
     if (suggestions.length === 0) return;
     const ids = suggestions.map(s => s.id);
-    setIgnoredPairs(prev => {
-      const next = new Set(prev);
-      ids.forEach(id => next.add(id));
-      return next;
-    });
+    setIgnoredPairs(prev => { const n = new Set(prev); ids.forEach(id => n.add(id)); return n; });
     setSuggestions([]);
     toast('🗑 Sugerencias descartadas');
     setReviewOpen(false);
   };
 
-  /* ---------- Filtrado/sort de tablas ---------- */
+  /* ---------- Filtrado/sort ---------- */
   const filteredSortedExternals = useMemo(() => {
     const q = normalizeStr(dSearchExt);
-    const filtered = externals.filter((r) => {
-      if (!q) return true;
-      const code = normalizeStr(r.cod_externo);
-      const name = normalizeStr(r.nom_externo);
-      const prov = normalizeStr(r.proveedor);
-      return code.includes(q) || name.includes(q) || prov.includes(q);
-    });
+    const filtered = externals.filter(r => !q || normalizeStr(r.cod_externo).includes(q) || normalizeStr(r.nom_externo).includes(q) || normalizeStr(r.proveedor).includes(q));
     const sorted = [...filtered].sort((a, b) => {
-      let av: any = a[sortExtKey];
-      let bv: any = b[sortExtKey];
-      if (sortExtKey === 'fecha') {
-        av = av ? new Date(av as string).getTime() : 0;
-        bv = bv ? new Date(bv as string).getTime() : 0;
-      } else {
-        av = normalizeStr(av);
-        bv = normalizeStr(bv);
-      }
-      const r = cmp(av, bv);
-      return sortExtDir === 'asc' ? r : -r;
+      let av: any = a[sortExtKey], bv: any = b[sortExtKey];
+      if (sortExtKey === 'fecha') { av = av ? new Date(av as string).getTime() : 0; bv = bv ? new Date(bv as string).getTime() : 0; }
+      else { av = normalizeStr(av); bv = normalizeStr(bv); }
+      const r = cmp(av, bv); return sortExtDir === 'asc' ? r : -r;
     });
     return sorted;
   }, [externals, dSearchExt, sortExtKey, sortExtDir]);
 
   const filteredSortedInternals = useMemo(() => {
     const q = normalizeStr(dSearchInt);
-    const filtered = internals.filter((r) => {
-      if (!q) return true;
-      const code = normalizeStr(r.cod_interno);
-      const name = normalizeStr(r.nom_interno);
-      return code.includes(q) || name.includes(q);
-    });
+    const filtered = internals.filter(r => !q || normalizeStr(r.cod_interno).includes(q) || normalizeStr(r.nom_interno).includes(q));
     const sorted = [...filtered].sort((a, b) => {
-      let av: any = a[sortIntKey];
-      let bv: any = b[sortIntKey];
-      if (sortIntKey === 'fecha') {
-        av = av ? new Date(av as string).getTime() : 0;
-        bv = bv ? new Date(bv as string).getTime() : 0;
-      } else {
-        av = normalizeStr(av);
-        bv = normalizeStr(bv);
-      }
-      const r = cmp(av, bv);
-      return sortIntDir === 'asc' ? r : -r;
+      let av: any = a[sortIntKey], bv: any = b[sortIntKey];
+      if (sortIntKey === 'fecha') { av = av ? new Date(av as string).getTime() : 0; bv = bv ? new Date(bv as string).getTime() : 0; }
+      else { av = normalizeStr(av); bv = normalizeStr(bv); }
+      const r = cmp(av, bv); return sortIntDir === 'asc' ? r : -r;
     });
     return sorted;
   }, [internals, dSearchInt, sortIntKey, sortIntDir]);
@@ -445,36 +309,108 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     else { setSortIntKey(key); setSortIntDir(key === 'fecha' ? 'desc' : 'asc'); }
   };
 
+  /* ---------- Selecciones ---------- */
   const toggleExternalSelection = (item: ExternalItem) => {
-    setSelectedExternals(prev =>
-      prev.find(e => e.id_externo === item.id_externo)
-        ? prev.filter(e => e.id_externo !== item.id_externo)
-        : [...prev, item]
-    );
+    setSelectedExternals(prev => prev.find(e => e.id_externo === item.id_externo)
+      ? prev.filter(e => e.id_externo !== item.id_externo)
+      : [...prev, item]);
   };
 
-  const rowStyle = (selected: boolean) =>
-    selected
+  const onExternalRowClick = (item: ExternalItem) => {
+    if (deleteModeExt) {
+      setExtDeleteIds(prev => { const n = new Set(prev); n.has(item.id_externo) ? n.delete(item.id_externo) : n.add(item.id_externo); return n; });
+    } else {
+      toggleExternalSelection(item);
+    }
+  };
+  const onInternalRowClick = (item: InternalItem) => {
+    if (deleteModeInt) {
+      setIntDeleteIds(prev => { const n = new Set(prev); n.has(item.id_interno) ? n.delete(item.id_interno) : n.add(item.id_interno); return n; });
+    } else {
+      setSelectedInternal(item);
+    }
+  };
+
+  const rowStyle = (linkSelected: boolean, deleteSelected: boolean) => {
+    if (deleteSelected) return 'bg-red-50 dark:bg-red-900/20 ring-1 ring-red-400/30 cursor-pointer';
+    return linkSelected
       ? 'bg-blue-50 dark:bg-blue-950/40 ring-1 ring-blue-400/30 cursor-pointer'
       : 'hover:bg-gray-50 dark:hover:bg-white/10 cursor-pointer';
+  };
 
-  // Mini toast
+  /* ---------- Toast ---------- */
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const toast = (msg: string) => {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 2000);
+  const toast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 2000); };
+
+  /* ---------- Eliminar externos ---------- */
+  const deleteExternal = async (id: number) => {
+    if (!confirm('¿Eliminar el producto del proveedor? Esta acción no se puede deshacer.')) return;
+    try {
+      const r = await apiFetch(`/api/no-relacionados/externos/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({} as any)))?.error || 'No se pudo borrar');
+      setExternals(prev => prev.filter(x => x.id_externo !== id));
+      setSelectedExternals(prev => prev.filter(x => x.id_externo !== id));
+      setExtDeleteIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+      toast('🗑 Producto de proveedor eliminado');
+    } catch (e: any) { alert(e?.message || 'Error al borrar'); }
+  };
+
+  const deleteSelectedExternals = async () => {
+    if (extDeleteIds.size === 0) return;
+    if (!confirm(`¿Eliminar ${extDeleteIds.size} producto(s) de proveedores?`)) return;
+    const ids = Array.from(extDeleteIds);
+    try {
+      const res = await apiFetch('/api/no-relacionados/externos/delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids })
+      });
+      if (!res.ok) throw new Error('bulk_failed');
+    } catch {
+      for (const id of ids) await apiFetch(`/api/no-relacionados/externos/${id}`, { method: 'DELETE' }).catch(() => {});
+    } finally {
+      setExternals(prev => prev.filter(x => !extDeleteIds.has(x.id_externo)));
+      setSelectedExternals(prev => prev.filter(x => !extDeleteIds.has(x.id_externo)));
+      setExtDeleteIds(new Set());
+      setDeleteModeExt(false);
+      toast('🗑 Productos de proveedores eliminados');
+    }
+  };
+
+  /* ---------- Eliminar internos ---------- */
+  const deleteInternal = async (id: number) => {
+    if (!confirm('¿Eliminar el producto de Gampack? Esta acción no se puede deshacer.')) return;
+    try {
+      const r = await apiFetch(`/api/no-relacionados/internos/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({} as any)))?.error || 'No se pudo borrar');
+      setInternals(prev => prev.filter(x => x.id_interno !== id));
+      if (selectedInternal?.id_interno === id) setSelectedInternal(null);
+      setIntDeleteIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+      toast('🗑 Producto Gampack eliminado');
+    } catch (e: any) { alert(e?.message || 'Error al borrar'); }
+  };
+
+  const deleteSelectedInternals = async () => {
+    if (intDeleteIds.size === 0) return;
+    if (!confirm(`¿Eliminar ${intDeleteIds.size} producto(s) de Gampack?`)) return;
+    const ids = Array.from(intDeleteIds);
+    try {
+      const res = await apiFetch('/api/no-relacionados/internos/delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids })
+      });
+      if (!res.ok) throw new Error('bulk_failed');
+    } catch {
+      for (const id of ids) await apiFetch(`/api/no-relacionados/internos/${id}`, { method: 'DELETE' }).catch(() => {});
+    } finally {
+      setInternals(prev => prev.filter(x => !intDeleteIds.has(x.id_interno)));
+      if (selectedInternal && intDeleteIds.has(selectedInternal.id_interno)) setSelectedInternal(null);
+      setIntDeleteIds(new Set());
+      setDeleteModeInt(false);
+      toast('🗑 Productos Gampack eliminados');
+    }
   };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0b0f1a] p-6">
-      {/* CSS específico para mejorar opciones en modo oscuro */}
-      <style>{`
-        .dark select option, .dark datalist option {
-          color: #0f172a;           /* slate-900 */
-          background: #ffffff;
-        }
-      `}</style>
-
+      <style>{`.dark select option, .dark datalist option { color:#0f172a; background:#fff; }`}</style>
       <div className="max-w-7xl mx-auto">
         <Navigation onBack={() => onNavigate('home')} title="" />
 
@@ -482,57 +418,24 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
           <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-white/70 dark:bg-[#0e1526]/60 backdrop-blur shadow-sm px-5 py-4">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  Gampack · Vinculaciones
-                </div>
-
+                <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Gampack · Vinculaciones</div>
                 <h1 className="mt-1 text-2xl md:text-3xl font-extrabold leading-tight tracking-tight">
-                  <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-600 via-indigo-500 to-fuchsia-500 dark:from-blue-300 dark:via-indigo-300 dark:to-pink-300">
-                    Relacionar productos
-                  </span>
+                  <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-600 via-indigo-500 to-fuchsia-500 dark:from-blue-300 dark:via-indigo-300 dark:to-pink-300">Relacionar productos</span>
                   <span className="ml-2 text-gray-900 dark:text-gray-100">manualmente</span>
                 </h1>
-
-                <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                  Detectá coincidencias por <b>nombre</b>, revisá el motivo y confirmá o descartá cada relación.
-                </p>
-
-                {/* Controles extra */}
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <span className="inline-flex items-center rounded-full border border-blue-200 dark:border-blue-400/30 px-2.5 py-1 text-xs text-blue-700 dark:text-blue-200 bg-blue-50 dark:bg-blue-900/20">
-                    Gampack: <span className="ml-1 font-semibold">{internals.length}</span>
-                  </span>
-                  <span className="inline-flex items-center rounded-full border border-indigo-200 dark:border-indigo-400/30 px-2.5 py-1 text-xs text-indigo-700 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-900/20">
-                    Proveedores: <span className="ml-1 font-semibold">{externals.length}</span>
-                  </span>
-                  {suggestions.length > 0 && (
-                    <span className="inline-flex items-center rounded-full border border-emerald-200 dark:border-emerald-400/30 px-2.5 py-1 text-xs text-emerald-700 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-900/20">
-                      Sugerencias: <span className="ml-1 font-semibold">{suggestions.length}</span>
-                    </span>
-                  )}
-                </div>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">Detectá coincidencias por <b>nombre</b>, revisá el motivo y confirmá o descartá cada relación.</p>
               </div>
 
               <div className="flex-shrink-0 flex flex-col items-end gap-2">
-                <div className="text-xs text-gray-600 dark:text-gray-300">
-                  Umbral: <b>{threshold.toFixed(2)}</b>
-                </div>
-                <input
-                  type="range" min={0.3} max={0.9} step={0.01}
-                  value={threshold}
-                  onChange={e => setThreshold(parseFloat(e.target.value))}
-                  className="w-40 accent-blue-600"
-                  title="Ajustá el umbral de similitud"
-                />
-                <Button onClick={generateAutoMatches} disabled={loadingAuto}>
-                  {loadingAuto ? 'Buscando coincidencias…' : 'Relacionar automáticamente'}
-                </Button>
+                <div className="text-xs text-gray-600 dark:text-gray-300">Umbral: <b>{threshold.toFixed(2)}</b></div>
+                <input type="range" min={0.3} max={0.9} step={0.01} value={threshold} onChange={e => setThreshold(parseFloat(e.target.value))} className="w-40 accent-blue-600" />
+                <Button onClick={generateAutoMatches} disabled={loadingAuto}>{loadingAuto ? 'Buscando coincidencias…' : 'Relacionar automáticamente'}</Button>
               </div>
             </div>
           </div>
         </header>
 
-        {/* PANEL DE REVISIÓN */ }
+        {/* PANEL DE REVISIÓN */}
         {reviewOpen && (
           <div className="mt-4 mb-4 rounded-2xl border border-blue-300/40 dark:border-blue-300/20 bg-blue-50/70 dark:bg-blue-900/20 shadow-xl p-4">
             <div className="flex items-start gap-3">
@@ -541,48 +444,30 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div>
                     <h3 className="text-xl font-bold text-blue-900 dark:text-blue-200">Resultados de auto-relación por nombre</h3>
-                    <p className="text-sm text-blue-900/80 dark:text-blue-100/80 mt-1">
-                      Revisá cada coincidencia. <b>Aceptar</b> vincula como si fuera manual; <b>Descartar</b> ignora la sugerencia.
-                    </p>
+                    <p className="text-sm text-blue-900/80 dark:text-blue-100/80 mt-1">Revisá cada coincidencia. <b>Aceptar</b> vincula; <b>Descartar</b> ignora.</p>
                   </div>
-
-                  {/* NUEVO: acciones masivas junto a Ocultar */}
                   <div className="flex items-center gap-2 ml-auto">
+                    <Button onClick={acceptAllVisible} disabled={bulkBusy || suggestions.length === 0}>Aceptar todas</Button>
+                    <Button onClick={rejectAllVisible} variant="secondary" disabled={bulkBusy || suggestions.length === 0}>Descartar todas</Button>
                     <Button onClick={() => setReviewOpen(false)} variant="secondary">Ocultar</Button>
                   </div>
                 </div>
-
-                {/* Progreso sutil */}
-                {loadingAuto && (
-                  <div className="mt-3 h-1 w-full bg-blue-200/50 dark:bg-blue-950/50 rounded">
-                    <div className="h-1 w-1/3 animate-pulse bg-blue-600 rounded" />
-                  </div>
-                )}
-
+                {loadingAuto && <div className="mt-3 h-1 w-full bg-blue-200/50 dark:bg-blue-950/50 rounded"><div className="h-1 w-1/3 animate-pulse bg-blue-600 rounded" /></div>}
                 <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[420px] overflow-auto pr-1">
-                  {suggestions.length === 0 && !loadingAuto && (
-                    <div className="col-span-full text-sm text-blue-900/80 dark:text-blue-100/80">
-                      No hay coincidencias por encima del umbral ({threshold.toFixed(2)}).
-                    </div>
-                  )}
+                  {suggestions.length === 0 && !loadingAuto && <div className="col-span-full text-sm text-blue-900/80 dark:text-blue-100/80">No hay coincidencias por encima del umbral ({threshold.toFixed(2)}).</div>}
                   {suggestions.map((s) => (
                     <div key={s.id} className="rounded-xl bg-white dark:bg-[#0e1526] border border-blue-200/50 dark:border-white/10 p-4 shadow">
                       <div className="text-xs uppercase tracking-wide text-blue-700 dark:text-blue-300 mb-2 flex items-center justify-between">
-                        <span>{s.reason}</span>
-                        <span className="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-[10px] font-semibold">{(s.score*100).toFixed(0)}%</span>
+                        <span>{s.reason}</span><span className="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-[10px] font-semibold">{(s.score*100).toFixed(0)}%</span>
                       </div>
                       <div className="space-y-2">
                         <div className="text-sm">
                           <div className="font-semibold text-gray-900 dark:text-white">Gampack</div>
-                          <div className="text-gray-800 dark:text-gray-200">
-                            {s.internal.nom_interno} <span className="text-gray-500">({s.internal.cod_interno || 'sin código'})</span>
-                          </div>
+                          <div className="text-gray-800 dark:text-gray-200">{s.internal.nom_interno} <span className="text-gray-500">({s.internal.cod_interno || 'sin código'})</span></div>
                         </div>
                         <div className="text-sm">
                           <div className="font-semibold text-gray-900 dark:text-white">Proveedor</div>
-                          <div className="text-gray-800 dark:text-gray-200">
-                            {s.external.nom_externo} <span className="text-gray-500">({s.external.cod_externo || 'sin código'})</span>
-                          </div>
+                          <div className="text-gray-800 dark:text-gray-200">{s.external.nom_externo} <span className="text-gray-500">({s.external.cod_externo || 'sin código'})</span></div>
                           <div className="text-gray-500 text-xs">{s.external.proveedor || 'Proveedor desconocido'}</div>
                         </div>
                       </div>
@@ -598,46 +483,33 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
           </div>
         )}
 
-        {/* Barra fija para vincular manual desde tablas */}
+        {/* Barra fija vincular manual */}
         <div className="sticky top-0 z-20 bg-gray-50/95 dark:bg-[#0b0f1a]/95 backdrop-blur py-3 mb-4 flex items-center justify-between border-b border-gray-200 dark:border-white/10">
           <div className="text-sm text-gray-700 dark:text-gray-200">
-            {selectedInternal
-              ? `Seleccionado: ${selectedInternal.nom_interno} (${selectedInternal.cod_interno || 'Sin código'})`
-              : 'Ningún producto Gampack seleccionado'}
+            {selectedInternal ? `Seleccionado: ${selectedInternal.nom_interno} (${selectedInternal.cod_interno || 'Sin código'})` : 'Ningún producto Gampack seleccionado'}
             {selectedExternals.length > 0 && ` | ${selectedExternals.length} proveedor(es) seleccionado(s)`}
           </div>
           <div className="flex items-center gap-2">
             <Button
               onClick={async () => {
-                if (!selectedInternal || selectedExternals.length === 0) {
-                  alert('Seleccioná un producto Gampack y al menos un proveedor');
-                  return;
-                }
-                const body = {
-                  id_lista_interna: selectedInternal.id_interno,
-                  ids_lista_precios: selectedExternals.map(e => e.id_externo),
-                  criterio: 'manual',
-                };
+                if (!selectedInternal || selectedExternals.length === 0) { alert('Seleccioná un producto Gampack y al menos un proveedor'); return; }
                 try {
                   const res = await apiFetch('/api/relacionar-manual', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
+                    body: JSON.stringify({ id_lista_interna: selectedInternal.id_interno, ids_lista_precios: selectedExternals.map(e => e.id_externo), criterio: 'manual' }),
                   });
                   if (res.ok) {
                     setExternals(prev => prev.filter(e => !selectedExternals.some(se => se.id_externo === e.id_externo)));
                     setInternals(prev => prev.filter(i => i.id_interno !== selectedInternal.id_interno));
-                    setSelectedExternals([]);
-                    setSelectedInternal(null);
+                    setSelectedExternals([]); setSelectedInternal(null);
                     setSuggestions(prev => prev.filter(s => s.internal.id_interno !== selectedInternal.id_interno && !selectedExternals.some(se => se.id_externo === s.external.id_externo)));
                     toast('✔ Vinculación manual realizada');
                   } else {
                     const error = await res.json().catch(() => ({}));
                     alert(`Error: ${error.message || 'No se pudo vincular'}`);
                   }
-                } catch {
-                  alert('Error al conectar con el servidor');
-                }
+                } catch { alert('Error al conectar con el servidor'); }
               }}
               disabled={selectedExternals.length === 0 || !selectedInternal}
             >
@@ -652,10 +524,23 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
             {/* EXTERNOS */}
             <div>
               <div className="flex items-end justify-between gap-3 mb-3">
-                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
-                  Productos Proveedores no relacionados
-                </h2>
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Productos Proveedores no relacionados</h2>
+                <div className="flex items-center gap-2">
+                  <Button variant={deleteModeExt ? 'primary' : 'secondary'} onClick={() => { setDeleteModeExt(v => !v); if (deleteModeExt) setExtDeleteIds(new Set()); }}>
+                    {deleteModeExt ? 'Salir de modo eliminar' : 'Modo eliminar'}
+                  </Button>
+                  <Button onClick={deleteSelectedExternals} variant="secondary" disabled={extDeleteIds.size === 0}>
+                    <span className="inline-flex items-center gap-2"><Trash2 size={16} /> Eliminar seleccionados ({extDeleteIds.size})</span>
+                  </Button>
+                </div>
               </div>
+
+              {deleteModeExt && (
+                <div className="mb-2 text-xs rounded-md px-2 py-1 border border-red-300/40 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200 dark:border-red-500/20">
+                  Modo eliminar activo: hacé click en las filas para marcarlas en rojo y luego “Eliminar seleccionados”.
+                </div>
+              )}
+
               <div className="mb-3">
                 <SearchInput value={searchExt} onChange={setSearchExt} placeholder="Buscar por código, nombre o proveedor…" />
               </div>
@@ -676,31 +561,37 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                       <th className={classHeader(sortExtKey === 'fecha')} onClick={() => toggleSortExternal('fecha')}>
                         Fecha ingreso {sortExtKey === 'fecha' ? sortIcon(sortExtDir) : sortIcon()}
                       </th>
+                      <th className="px-3 py-3 text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-white/10 bg-white/80 dark:bg-transparent">
                     {filteredSortedExternals.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">
-                          {externals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredSortedExternals.map(item => (
+                      <tr><td colSpan={5} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">{externals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}</td></tr>
+                    ) : filteredSortedExternals.map(item => {
+                      const linkSel = selectedExternals.some(e => e.id_externo === item.id_externo);
+                      const delSel = extDeleteIds.has(item.id_externo);
+                      return (
                         <tr
                           key={item.id_externo}
-                          className={rowStyle(selectedExternals.some(e => e.id_externo === item.id_externo))}
-                          onClick={() => toggleExternalSelection(item)}
+                          className={rowStyle(linkSel, delSel)}
+                          onClick={() => onExternalRowClick(item)}
                         >
                           <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.nom_externo ?? ''}</td>
                           <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.cod_externo ?? ''}</td>
                           <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.proveedor ?? 'Sin proveedor'}</td>
-                          <td className="px-6 py-4 text-gray-700 dark:text-gray-300">
-                            {item.fecha ? new Date(item.fecha).toLocaleDateString() : ''}
+                          <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{item.fecha ? new Date(item.fecha).toLocaleDateString() : ''}</td>
+                          <td className="px-3 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              title="Eliminar"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border border-red-300/40 text-red-700 bg-red-50 hover:bg-red-100 dark:border-red-500/20 dark:text-red-200 dark:bg-red-500/10 dark:hover:bg-red-500/20"
+                              onClick={() => deleteExternal(item.id_externo)}
+                            >
+                              <Trash2 size={14} /> Eliminar
+                            </button>
                           </td>
                         </tr>
-                      ))
-                    )}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -710,10 +601,23 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
             {/* INTERNOS */}
             <div>
               <div className="flex items-end justify-between gap-3 mb-3">
-                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
-                  Productos Gampack no relacionados
-                </h2>
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Productos Gampack no relacionados</h2>
+                <div className="flex items-center gap-2">
+                  <Button variant={deleteModeInt ? 'primary' : 'secondary'} onClick={() => { setDeleteModeInt(v => !v); if (deleteModeInt) setIntDeleteIds(new Set()); }}>
+                    {deleteModeInt ? 'Salir de modo eliminar' : 'Modo eliminar'}
+                  </Button>
+                  <Button onClick={deleteSelectedInternals} variant="secondary" disabled={intDeleteIds.size === 0}>
+                    <span className="inline-flex items-center gap-2"><Trash2 size={16} /> Eliminar seleccionados ({intDeleteIds.size})</span>
+                  </Button>
+                </div>
               </div>
+
+              {deleteModeInt && (
+                <div className="mb-2 text-xs rounded-md px-2 py-1 border border-red-300/40 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200 dark:border-red-500/20">
+                  Modo eliminar activo: hacé click en las filas para marcarlas en rojo y luego “Eliminar seleccionados”.
+                </div>
+              )}
+
               <div className="mb-3">
                 <SearchInput value={searchInt} onChange={setSearchInt} placeholder="Buscar por código o nombre…" />
               </div>
@@ -731,30 +635,36 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                       <th className={classHeader(sortIntKey === 'fecha')} onClick={() => toggleSortInternal('fecha')}>
                         Fecha ingreso {sortIntKey === 'fecha' ? sortIcon(sortIntDir) : sortIcon()}
                       </th>
+                      <th className="px-3 py-3 text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-white/10 bg-white/80 dark:bg-transparent">
                     {filteredSortedInternals.length === 0 ? (
-                      <tr>
-                        <td colSpan={3} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">
-                          {internals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredSortedInternals.map(item => (
+                      <tr><td colSpan={4} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">{internals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}</td></tr>
+                    ) : filteredSortedInternals.map(item => {
+                      const linkSel = selectedInternal?.id_interno === item.id_interno;
+                      const delSel = intDeleteIds.has(item.id_interno);
+                      return (
                         <tr
                           key={item.id_interno}
-                          className={rowStyle(selectedInternal?.id_interno === item.id_interno)}
-                          onClick={() => setSelectedInternal(item)}
+                          className={rowStyle(linkSel, delSel)}
+                          onClick={() => onInternalRowClick(item)}
                         >
                           <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.cod_interno ?? ''}</td>
                           <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.nom_interno ?? ''}</td>
-                          <td className="px-6 py-4 text-gray-700 dark:text-gray-300">
-                            {item.fecha ? new Date(item.fecha).toLocaleDateString() : ''}
+                          <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{item.fecha ? new Date(item.fecha).toLocaleDateString() : ''}</td>
+                          <td className="px-3 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              title="Eliminar"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border border-red-300/40 text-red-700 bg-red-50 hover:bg-red-100 dark:border-red-500/20 dark:text-red-200 dark:bg-red-500/10 dark:hover:bg-red-500/20"
+                              onClick={() => deleteInternal(item.id_interno)}
+                            >
+                              <Trash2 size={14} /> Eliminar
+                            </button>
                           </td>
                         </tr>
-                      ))
-                    )}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -764,10 +674,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
 
           <div className="mt-6 text-center">
             <Button
-              onClick={() => {
-                const click = document.createElement('span');
-                click.click();
-              }}
+              onClick={() => { const click = document.createElement('span'); click.click(); }}
               disabled={selectedExternals.length === 0 || !selectedInternal}
             >
               Vincular manualmente
@@ -780,8 +687,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       {showTop && (
         <button
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          title="Volver arriba (atajo: T)"
-          aria-label="Volver arriba"
+          title="Volver arriba (atajo: T)" aria-label="Volver arriba"
           className="fixed bottom-6 right-6 inline-flex items-center gap-2 rounded-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white shadow-lg transition"
         >
           ↑ Top
