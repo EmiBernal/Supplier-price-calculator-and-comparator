@@ -342,19 +342,6 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 2000); };
 
-  /* ---------- Eliminar externos ---------- */
-  const deleteExternal = async (id: number) => {
-    if (!confirm('¿Eliminar el producto del proveedor? Esta acción no se puede deshacer.')) return;
-    try {
-      const r = await apiFetch(`/api/no-relacionados/externos/${id}`, { method: 'DELETE' });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({} as any)))?.error || 'No se pudo borrar');
-      setExternals(prev => prev.filter(x => x.id_externo !== id));
-      setSelectedExternals(prev => prev.filter(x => x.id_externo !== id));
-      setExtDeleteIds(prev => { const n = new Set(prev); n.delete(id); return n; });
-      toast('🗑 Producto de proveedor eliminado');
-    } catch (e: any) { alert(e?.message || 'Error al borrar'); }
-  };
-
   const deleteSelectedExternals = async () => {
     if (extDeleteIds.size === 0) return;
     if (!confirm(`¿Eliminar ${extDeleteIds.size} producto(s) de proveedores?`)) return;
@@ -375,19 +362,6 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     }
   };
 
-  /* ---------- Eliminar internos ---------- */
-  const deleteInternal = async (id: number) => {
-    if (!confirm('¿Eliminar el producto de Gampack? Esta acción no se puede deshacer.')) return;
-    try {
-      const r = await apiFetch(`/api/no-relacionados/internos/${id}`, { method: 'DELETE' });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({} as any)))?.error || 'No se pudo borrar');
-      setInternals(prev => prev.filter(x => x.id_interno !== id));
-      if (selectedInternal?.id_interno === id) setSelectedInternal(null);
-      setIntDeleteIds(prev => { const n = new Set(prev); n.delete(id); return n; });
-      toast('🗑 Producto Gampack eliminado');
-    } catch (e: any) { alert(e?.message || 'Error al borrar'); }
-  };
-
   const deleteSelectedInternals = async () => {
     if (intDeleteIds.size === 0) return;
     if (!confirm(`¿Eliminar ${intDeleteIds.size} producto(s) de Gampack?`)) return;
@@ -406,6 +380,28 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       setDeleteModeInt(false);
       toast('🗑 Productos Gampack eliminados');
     }
+  };
+
+  // ---------- Acción común: Vincular manualmente ----------
+  const handleManualLink = async () => {
+    if (!selectedInternal || selectedExternals.length === 0) { alert('Seleccioná un producto Gampack y al menos un proveedor'); return; }
+    try {
+      const res = await apiFetch('/api/relacionar-manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_lista_interna: selectedInternal.id_interno, ids_lista_precios: selectedExternals.map(e => e.id_externo), criterio: 'manual' }),
+      });
+      if (res.ok) {
+        setExternals(prev => prev.filter(e => !selectedExternals.some(se => se.id_externo === e.id_externo)));
+        setInternals(prev => prev.filter(i => i.id_interno !== selectedInternal.id_interno));
+        setSelectedExternals([]); setSelectedInternal(null);
+        setSuggestions(prev => prev.filter(s => s.internal.id_interno !== selectedInternal.id_interno && !selectedExternals.some(se => se.id_externo === s.external.id_externo)));
+        toast('✔ Vinculación manual realizada');
+      } else {
+        const error = await res.json().catch(() => ({}));
+        alert(`Error: ${error.message || 'No se pudo vincular'}`);
+      }
+    } catch { alert('Error al conectar con el servidor'); }
   };
 
   return (
@@ -490,29 +486,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
             {selectedExternals.length > 0 && ` | ${selectedExternals.length} proveedor(es) seleccionado(s)`}
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              onClick={async () => {
-                if (!selectedInternal || selectedExternals.length === 0) { alert('Seleccioná un producto Gampack y al menos un proveedor'); return; }
-                try {
-                  const res = await apiFetch('/api/relacionar-manual', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id_lista_interna: selectedInternal.id_interno, ids_lista_precios: selectedExternals.map(e => e.id_externo), criterio: 'manual' }),
-                  });
-                  if (res.ok) {
-                    setExternals(prev => prev.filter(e => !selectedExternals.some(se => se.id_externo === e.id_externo)));
-                    setInternals(prev => prev.filter(i => i.id_interno !== selectedInternal.id_interno));
-                    setSelectedExternals([]); setSelectedInternal(null);
-                    setSuggestions(prev => prev.filter(s => s.internal.id_interno !== selectedInternal.id_interno && !selectedExternals.some(se => se.id_externo === s.external.id_externo)));
-                    toast('✔ Vinculación manual realizada');
-                  } else {
-                    const error = await res.json().catch(() => ({}));
-                    alert(`Error: ${error.message || 'No se pudo vincular'}`);
-                  }
-                } catch { alert('Error al conectar con el servidor'); }
-              }}
-              disabled={selectedExternals.length === 0 || !selectedInternal}
-            >
+            <Button onClick={handleManualLink} disabled={selectedExternals.length === 0 || !selectedInternal}>
               Vincular manualmente
             </Button>
           </div>
@@ -552,21 +526,17 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                       <th className={classHeader(sortExtKey === 'nom_externo')} onClick={() => toggleSortExternal('nom_externo')}>
                         Nombre {sortExtKey === 'nom_externo' ? sortIcon(sortExtDir) : sortIcon()}
                       </th>
-                      <th className={classHeader(sortExtKey === 'cod_externo')} onClick={() => toggleSortExternal('cod_externo')}>
-                        Código {sortExtKey === 'cod_externo' ? sortIcon(sortExtDir) : sortIcon()}
-                      </th>
                       <th className={classHeader(sortExtKey === 'proveedor')} onClick={() => toggleSortExternal('proveedor')}>
                         Proveedor {sortExtKey === 'proveedor' ? sortIcon(sortExtDir) : sortIcon()}
                       </th>
                       <th className={classHeader(sortExtKey === 'fecha')} onClick={() => toggleSortExternal('fecha')}>
                         Fecha ingreso {sortExtKey === 'fecha' ? sortIcon(sortExtDir) : sortIcon()}
                       </th>
-                      <th className="px-3 py-3 text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-white/10 bg-white/80 dark:bg-transparent">
                     {filteredSortedExternals.length === 0 ? (
-                      <tr><td colSpan={5} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">{externals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}</td></tr>
+                      <tr><td colSpan={3} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">{externals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}</td></tr>
                     ) : filteredSortedExternals.map(item => {
                       const linkSel = selectedExternals.some(e => e.id_externo === item.id_externo);
                       const delSel = extDeleteIds.has(item.id_externo);
@@ -577,18 +547,8 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                           onClick={() => onExternalRowClick(item)}
                         >
                           <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.nom_externo ?? ''}</td>
-                          <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.cod_externo ?? ''}</td>
                           <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.proveedor ?? 'Sin proveedor'}</td>
                           <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{item.fecha ? new Date(item.fecha).toLocaleDateString() : ''}</td>
-                          <td className="px-3 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              title="Eliminar"
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border border-red-300/40 text-red-700 bg-red-50 hover:bg-red-100 dark:border-red-500/20 dark:text-red-200 dark:bg-red-500/10 dark:hover:bg-red-500/20"
-                              onClick={() => deleteExternal(item.id_externo)}
-                            >
-                              <Trash2 size={14} /> Eliminar
-                            </button>
-                          </td>
                         </tr>
                       );
                     })}
@@ -626,21 +586,21 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-white/10 text-sm">
                   <thead className="bg-gray-50 dark:bg-white/10 dark:text-white">
                     <tr>
-                      <th className={classHeader(sortIntKey === 'cod_interno')} onClick={() => toggleSortInternal('cod_interno')}>
-                        Código {sortIntKey === 'cod_interno' ? sortIcon(sortIntDir) : sortIcon()}
-                      </th>
                       <th className={classHeader(sortIntKey === 'nom_interno')} onClick={() => toggleSortInternal('nom_interno')}>
                         Nombre {sortIntKey === 'nom_interno' ? sortIcon(sortIntDir) : sortIcon()}
                       </th>
                       <th className={classHeader(sortIntKey === 'fecha')} onClick={() => toggleSortInternal('fecha')}>
                         Fecha ingreso {sortIntKey === 'fecha' ? sortIcon(sortIntDir) : sortIcon()}
                       </th>
-                      <th className="px-3 py-3 text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-white/10 bg-white/80 dark:bg-transparent">
                     {filteredSortedInternals.length === 0 ? (
-                      <tr><td colSpan={4} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">{internals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}</td></tr>
+                      <tr>
+                        <td colSpan={2} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">
+                          {internals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}
+                        </td>
+                      </tr>
                     ) : filteredSortedInternals.map(item => {
                       const linkSel = selectedInternal?.id_interno === item.id_interno;
                       const delSel = intDeleteIds.has(item.id_interno);
@@ -650,17 +610,13 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                           className={rowStyle(linkSel, delSel)}
                           onClick={() => onInternalRowClick(item)}
                         >
-                          <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.cod_interno ?? ''}</td>
-                          <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.nom_interno ?? ''}</td>
-                          <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{item.fecha ? new Date(item.fecha).toLocaleDateString() : ''}</td>
-                          <td className="px-3 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              title="Eliminar"
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border border-red-300/40 text-red-700 bg-red-50 hover:bg-red-100 dark:border-red-500/20 dark:text-red-200 dark:bg-red-500/10 dark:hover:bg-red-500/20"
-                              onClick={() => deleteInternal(item.id_interno)}
-                            >
-                              <Trash2 size={14} /> Eliminar
-                            </button>
+                          {/* NUEVO: columna Nombre */}
+                          <td className="px-6 py-4 text-gray-900 dark:text-gray-100">
+                            {item.nom_interno ?? ''}
+                          </td>
+                          {/* Fecha */}
+                          <td className="px-6 py-4 text-gray-700 dark:text-gray-300">
+                            {item.fecha ? new Date(item.fecha).toLocaleDateString() : ''}
                           </td>
                         </tr>
                       );
@@ -673,10 +629,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
           </div>
 
           <div className="mt-6 text-center">
-            <Button
-              onClick={() => { const click = document.createElement('span'); click.click(); }}
-              disabled={selectedExternals.length === 0 || !selectedInternal}
-            >
+            <Button onClick={handleManualLink} disabled={selectedExternals.length === 0 || !selectedInternal}>
               Vincular manualmente
             </Button>
           </div>

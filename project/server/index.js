@@ -1613,4 +1613,91 @@ app.post('/api/imports/familias', upload.single('file'), async (req, res) => {
   }
 });
 
+// ---------- NO RELACIONADOS: delete single/bulk (EXTERNOS) ----------
+app.delete('/api/no-relacionados/externos/:id', (req, res) => {
+  if (req.ctx?.tenant === 'compra') return res.status(404).json({ error: 'no_disponible_en_compras' });
+  const db = req.ctx.db;
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'id_invalido' });
+
+  db.serialize(() => {
+    db.run('BEGIN');
+    db.run(`DELETE FROM articulos_no_relacionados WHERE id_lista_precios = ?`, [id], (e1) => {
+      if (e1) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
+      db.run(`DELETE FROM lista_precios WHERE id_externo = ?`, [id], function (e2) {
+        if (e2) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
+        db.run('COMMIT', (e3) => {
+          if (e3) return res.status(500).json({ error: 'db_error' });
+          return res.json({ ok: true, deleted: this?.changes ?? 1 });
+        });
+      });
+    });
+  });
+});
+
+app.post('/api/no-relacionados/externos/delete', (req, res) => {
+  if (req.ctx?.tenant === 'compra') return res.status(404).json({ error: 'no_disponible_en_compras' });
+  const db = req.ctx.db;
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
+  if (ids.length === 0) return res.status(400).json({ error: 'ids_requeridos' });
+
+  const placeholders = ids.map(() => '?').join(',');
+  db.serialize(() => {
+    db.run('BEGIN');
+    db.run(`DELETE FROM articulos_no_relacionados WHERE id_lista_precios IN (${placeholders})`, ids, (e1) => {
+      if (e1) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
+      db.run(`DELETE FROM lista_precios WHERE id_externo IN (${placeholders})`, ids, function (e2) {
+        if (e2) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
+        db.run('COMMIT', (e3) => {
+          if (e3) return res.status(500).json({ error: 'db_error' });
+          res.json({ ok: true, deleted: this?.changes ?? 0 });
+        });
+      });
+    });
+  });
+});
+
+// ---------- NO RELACIONADOS: delete single/bulk (INTERNOS) ----------
+app.delete('/api/no-relacionados/internos/:id', (req, res) => {
+  const db = req.ctx.db;
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'id_invalido' });
+
+  db.serialize(() => {
+    db.run('BEGIN');
+    db.run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = ?`, [id], (e1) => {
+      if (e1) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
+      db.run(`DELETE FROM lista_interna WHERE id_interno = ?`, [id], function (e2) {
+        if (e2) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
+        db.run('COMMIT', (e3) => {
+          if (e3) return res.status(500).json({ error: 'db_error' });
+          return res.json({ ok: true, deleted: this?.changes ?? 1 });
+        });
+      });
+    });
+  });
+});
+
+app.post('/api/no-relacionados/internos/delete', (req, res) => {
+  const db = req.ctx.db;
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
+  if (ids.length === 0) return res.status(400).json({ error: 'ids_requeridos' });
+
+  const placeholders = ids.map(() => '?').join(',');
+  db.serialize(() => {
+    db.run('BEGIN');
+    db.run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna IN (${placeholders})`, ids, (e1) => {
+      if (e1) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
+      db.run(`DELETE FROM lista_interna WHERE id_interno IN (${placeholders})`, ids, function (e2) {
+        if (e2) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
+        db.run('COMMIT', (e3) => {
+          if (e3) return res.status(500).json({ error: 'db_error' });
+          res.json({ ok: true, deleted: this?.changes ?? 0 });
+        });
+      });
+    });
+  });
+});
+
+
 module.exports = app;
