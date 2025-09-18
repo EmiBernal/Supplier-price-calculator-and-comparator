@@ -973,16 +973,17 @@ app.get('/api/price-comparisons', (req, res) => {
   const applyFamilia = (cols) =>
     hasFamilia ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
 
-  const buildDateRange = (col) => {
+  // Usa DATE(...) para que SQLite compare solo fecha (no hora)
+  const buildDateRange = (col /* ya con DATE(...) */) => {
     if (hasFrom && hasTo) return `${col} BETWEEN ? AND ?`;
     if (hasFrom) return `${col} >= ?`;
     if (hasTo) return `${col} <= ?`;
     return '';
   };
 
-  const liDateRange = dateMode === 'product' ? buildDateRange('li.fecha') : '';
-  const lpDateRange = dateMode === 'product' ? buildDateRange('lp.fecha') : '';
-  const relDateRange = dateMode === 'relation' ? buildDateRange("DATE(ra.created_at)") : '';
+  const liDateRange = dateMode === 'product' ? buildDateRange('DATE(li.fecha)') : '';
+  const lpDateRange = dateMode === 'product' ? buildDateRange('DATE(lp.fecha)') : '';
+  const relDateRange = dateMode === 'relation' ? buildDateRange('DATE(ra.created_at)') : '';
 
   const wherePairs = [applySearch(['li.nom_interno', 'lp.nom_externo', 'lp.proveedor'])];
   const paramsPairs = search ? [like, like, like] : [];
@@ -995,13 +996,13 @@ app.get('/api/price-comparisons', (req, res) => {
   if (dateMode === 'product' && (hasFrom || hasTo)) {
     const dateConds = [];
     if (liDateRange) {
-      dateConds.push(`(li.fecha IS NOT NULL AND ${liDateRange})`);
+      dateConds.push(`(${liDateRange})`);
       if (hasFrom && hasTo) paramsPairs.push(dateFrom, dateTo);
       else if (hasFrom) paramsPairs.push(dateFrom);
       else paramsPairs.push(dateTo);
     }
     if (lpDateRange) {
-      dateConds.push(`(lp.fecha IS NOT NULL AND ${lpDateRange})`);
+      dateConds.push(`(${lpDateRange})`);
       if (hasFrom && hasTo) paramsPairs.push(dateFrom, dateTo);
       else if (hasFrom) paramsPairs.push(dateFrom);
       else paramsPairs.push(dateTo);
@@ -1029,14 +1030,15 @@ app.get('/api/price-comparisons', (req, res) => {
       ra.criterio_relacion AS saleConditions,
       ra.created_at  AS relationDate,
       ${dateMode === 'relation'
-        ? `ra.created_at`
-        : `COALESCE(li.fecha, lp.fecha)`} AS sortDate
+        ? `DATE(ra.created_at)`
+        : `COALESCE(DATE(li.fecha), DATE(lp.fecha))`} AS sortDate
     FROM relacion_articulos ra
     JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
     JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
     WHERE ${wherePairs.join(' AND ')}
   `;
 
+  // Internos solo (no relacionados)
   const whereInternal = ['ra.id_lista_precios IS NULL', applySearch(['li.nom_interno'])];
   const paramsInternal = search ? [like] : [];
   if (hasFamilia) {
@@ -1044,9 +1046,9 @@ app.get('/api/price-comparisons', (req, res) => {
     paramsInternal.push(familiaLike);
   }
   if (dateMode === 'product') {
-    const dr = buildDateRange('li.fecha');
+    const dr = buildDateRange('DATE(li.fecha)');
     if (dr) {
-      whereInternal.push(`li.fecha IS NOT NULL AND ${dr}`);
+      whereInternal.push(dr);
       if (hasFrom && hasTo) paramsInternal.push(dateFrom, dateTo);
       else if (hasFrom) paramsInternal.push(dateFrom);
       else if (hasTo) paramsInternal.push(dateTo);
@@ -1065,12 +1067,13 @@ app.get('/api/price-comparisons', (req, res) => {
       'Gampack' AS companyType,
       NULL AS saleConditions,
       NULL AS relationDate,
-      li.fecha AS sortDate
+      DATE(li.fecha) AS sortDate
     FROM lista_interna li
     LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
     WHERE ${whereInternal.join(' AND ')}
   `;
 
+  // Externos solo (no relacionados)
   const whereExternal = ['ra.id_lista_interna IS NULL', applySearch(['lp.nom_externo', 'lp.proveedor'])];
   const paramsExternal = search ? [like, like] : [];
   if (hasFamilia) {
@@ -1078,9 +1081,9 @@ app.get('/api/price-comparisons', (req, res) => {
     paramsExternal.push(familiaLike);
   }
   if (dateMode === 'product') {
-    const dr = buildDateRange('lp.fecha');
+    const dr = buildDateRange('DATE(lp.fecha)');
     if (dr) {
-      whereExternal.push(`lp.fecha IS NOT NULL AND ${dr}`);
+      whereExternal.push(dr);
       if (hasFrom && hasTo) paramsExternal.push(dateFrom, dateTo);
       else if (hasFrom) paramsExternal.push(dateFrom);
       else if (hasTo) paramsExternal.push(dateTo);
@@ -1099,7 +1102,7 @@ app.get('/api/price-comparisons', (req, res) => {
       lp.tipo_empresa AS companyType,
       NULL AS saleConditions,
       NULL AS relationDate,
-      lp.fecha AS sortDate
+      DATE(lp.fecha) AS sortDate
     FROM lista_precios lp
     LEFT JOIN relacion_articulos ra ON ra.id_lista_precios = lp.id_externo
     WHERE ${whereExternal.join(' AND ')}
@@ -1109,7 +1112,7 @@ app.get('/api/price-comparisons', (req, res) => {
   if (onlyRelated) {
     sql = `
       ${sqlPairs}
-      ORDER BY datetime(sortDate) DESC
+      ORDER BY DATE(sortDate) DESC
       LIMIT 1000
     `;
     params = [...paramsPairs];
@@ -1120,7 +1123,7 @@ app.get('/api/price-comparisons', (req, res) => {
       ${sqlInternalOnly}
       UNION ALL
       ${sqlExternalOnly}
-      ORDER BY datetime(sortDate) DESC
+      ORDER BY DATE(sortDate) DESC
       LIMIT 1000
     `;
     params = [...paramsPairs, ...paramsInternal, ...paramsExternal];
@@ -1156,281 +1159,6 @@ app.get('/api/price-comparisons', (req, res) => {
     });
 
     res.json(results);
-  });
-});
-
-app.get('/api/compra/compare', (req, res) => {
-  if (req.ctx?.tenant !== 'compra') {
-    return res.status(403).json({ error: 'solo_disponible_para_compras' });
-  }
-
-  const db = req.ctx?.db;
-  if (!db) {
-    return res.status(500).json({ error: 'db_not_available' });
-  }
-
-  const qRaw = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-  const minProviders = parsePositiveInt(req.query.min_providers, 2, 1, 50);
-  const sortRaw = typeof req.query.sort === 'string' ? req.query.sort.toLowerCase() : '';
-  const sort = sortRaw === 'name' ? 'name' : 'best_price';
-  const orderRaw = typeof req.query.order === 'string' ? req.query.order.toLowerCase() : '';
-  const order = orderRaw === 'desc' ? 'desc' : 'asc';
-  const page = parsePositiveInt(req.query.page, 1, 1, 100000);
-  const pageSize = parsePositiveInt(req.query.page_size, 25, 5, 200);
-
-  const filters = ['lp.precio_final IS NOT NULL'];
-  const params = [];
-
-  if (qRaw) {
-    const like = `%${qRaw.toLowerCase()}%`;
-    filters.push(`(LOWER(lp.nom_externo) LIKE ? OR LOWER(lp.cod_externo) LIKE ? OR LOWER(lp.proveedor) LIKE ?)`);
-    params.push(like, like, like);
-  }
-
-  const sql = `
-    SELECT
-      lp.id_externo AS id,
-      lp.nom_externo AS name,
-      lp.cod_externo AS code,
-      lp.proveedor AS provider,
-      lp.precio_final AS price,
-      lp.fecha AS date
-    FROM lista_precios lp
-    ${filters.length ? 'WHERE ' + filters.join(' AND ') : ''}
-  `;
-
-  db.all(sql, params, (err, rows = []) => {
-    if (err) {
-      console.error('Error al obtener comparador de compras:', err.message);
-      return res.status(500).json({ error: 'Error al obtener comparaciones' });
-    }
-
-    const searchTokens = normalizeSearchText(qRaw).split(' ').filter(Boolean);
-    const groupsMap = new Map();
-
-    for (const row of rows) {
-      const key = buildProductKey(row.name, row.code);
-      if (!key) continue;
-
-      const providerName = normalizeWhitespace(row.provider);
-      if (!providerName) continue;
-
-      const price = parseNumberAR(row.price);
-      if (price == null) continue;
-
-      const normalizedDate = toYMD(row.date) || null;
-      const timestamp = parseTimestamp(normalizedDate ?? row.date);
-      const cleanCode = normalizeWhitespace(row.code) || null;
-      const cleanName = normalizeWhitespace(row.name) || null;
-      const id = Number.parseInt(row.id, 10);
-      const numericId = Number.isFinite(id) ? id : null;
-
-      let group = groupsMap.get(key);
-      if (!group) {
-        group = {
-          key,
-          names: [],
-          codes: [],
-          providers: new Map(),
-        };
-        groupsMap.set(key, group);
-      }
-
-      if (cleanName) group.names.push(cleanName);
-      if (cleanCode) group.codes.push(cleanCode);
-
-      const providerKey = providerName.toLowerCase();
-      const current = group.providers.get(providerKey);
-      const providerEntry = {
-        id: numericId,
-        provider: providerName,
-        price,
-        date: normalizedDate,
-        code: cleanCode,
-        name: cleanName,
-        timestamp: timestamp ?? -Infinity,
-      };
-
-      if (!current) {
-        group.providers.set(providerKey, providerEntry);
-      } else {
-        const currentTs = current.timestamp ?? -Infinity;
-        const newTs = providerEntry.timestamp ?? -Infinity;
-        if (newTs > currentTs || (newTs === currentTs && (providerEntry.id ?? 0) > (current.id ?? 0))) {
-          group.providers.set(providerKey, providerEntry);
-        }
-      }
-    }
-
-    let groups = [];
-    for (const group of groupsMap.values()) {
-      const providerEntries = Array.from(group.providers.values());
-      if (providerEntries.length === 0) continue;
-
-      const providerCount = providerEntries.length;
-
-      const sortedByPrice = providerEntries.slice().sort((a, b) => {
-        const priceA = typeof a.price === 'number' ? a.price : Number.POSITIVE_INFINITY;
-        const priceB = typeof b.price === 'number' ? b.price : Number.POSITIVE_INFINITY;
-        if (priceA === priceB) {
-          const tsA = a.timestamp ?? -Infinity;
-          const tsB = b.timestamp ?? -Infinity;
-          if (tsA === tsB) {
-            return (b.id ?? 0) - (a.id ?? 0);
-          }
-          return tsB - tsA;
-        }
-        return priceA - priceB;
-      });
-
-      const bestEntry = sortedByPrice[0];
-      const worstEntry = sortedByPrice[sortedByPrice.length - 1];
-      const bestPrice = typeof bestEntry?.price === 'number' ? Number(bestEntry.price) : null;
-      const worstPrice = typeof worstEntry?.price === 'number' ? Number(worstEntry.price) : null;
-
-      let priceSpread = null;
-      let priceSpreadPercent = null;
-      if (typeof bestPrice === 'number' && typeof worstPrice === 'number') {
-        priceSpread = Number((worstPrice - bestPrice).toFixed(2));
-        if (bestPrice > 0) {
-          priceSpreadPercent = Number(((priceSpread / bestPrice) * 100).toFixed(2));
-        }
-      }
-
-      const representativeName = pickRepresentativeValue(group.names) || bestEntry?.name || null;
-      const representativeCode = pickRepresentativeValue(group.codes) || bestEntry?.code || null;
-
-      const uniqueNames = Array.from(new Set(group.names.map(n => normalizeWhitespace(n)).filter(Boolean)));
-      const uniqueCodes = Array.from(new Set(group.codes.map(c => normalizeWhitespace(c)).filter(Boolean)));
-
-      const lastUpdatedTs = providerEntries.reduce((max, item) => Math.max(max, item.timestamp ?? -Infinity), -Infinity);
-      const lastUpdated = Number.isFinite(lastUpdatedTs) && lastUpdatedTs > -Infinity
-        ? new Date(lastUpdatedTs).toISOString().slice(0, 10)
-        : null;
-
-      const searchFingerprint = normalizeSearchText([
-        group.key,
-        representativeName,
-        representativeCode,
-        ...uniqueNames,
-        ...uniqueCodes,
-        ...providerEntries.map(p => p.provider),
-      ].join(' '));
-
-      const providers = sortedByPrice.map(({ timestamp, ...rest }) => rest);
-
-      groups.push({
-        key: group.key,
-        name: representativeName,
-        code: representativeCode,
-        providerCount,
-        bestPrice,
-        bestProvider: bestEntry?.provider ?? null,
-        worstPrice,
-        worstProvider: worstEntry?.provider ?? null,
-        priceSpread,
-        priceSpreadPercent,
-        lastUpdated,
-        providers,
-        nameAlternatives: uniqueNames,
-        codes: uniqueCodes,
-        searchFingerprint,
-      });
-    }
-
-    groups = groups.filter(group => group.providerCount >= minProviders);
-
-    if (searchTokens.length) {
-      groups = groups.filter(group => searchTokens.every(token => group.searchFingerprint.includes(token)));
-    }
-
-    const totalGroups = groups.length;
-    const totalProviders = groups.reduce((acc, group) => acc + group.providerCount, 0);
-    const spreadGroups = groups.filter(group => typeof group.priceSpread === 'number');
-    const totalSpread = spreadGroups.reduce((acc, group) => acc + (group.priceSpread ?? 0), 0);
-    const averageSpread = spreadGroups.length ? Number((totalSpread / spreadGroups.length).toFixed(2)) : 0;
-    const averageSpreadPercent = spreadGroups.length
-      ? Number((spreadGroups.reduce((acc, group) => acc + (group.priceSpreadPercent ?? 0), 0) / spreadGroups.length).toFixed(2))
-      : 0;
-    const potentialSavings = Number(totalSpread.toFixed(2));
-    const bestOpportunity = spreadGroups.reduce((best, group) => {
-      if (!best || (group.priceSpread ?? 0) > (best.priceSpread ?? 0)) return group;
-      return best;
-    }, null);
-
-    const sortGroups = (a, b) => {
-      if (sort === 'name') {
-        const aName = a.name || '';
-        const bName = b.name || '';
-        const cmp = aName.localeCompare(bName, 'es', { sensitivity: 'base' });
-        if (cmp === 0) return a.key.localeCompare(b.key);
-        return cmp;
-      }
-      const aPrice = typeof a.bestPrice === 'number' ? a.bestPrice : Number.POSITIVE_INFINITY;
-      const bPrice = typeof b.bestPrice === 'number' ? b.bestPrice : Number.POSITIVE_INFINITY;
-      if (aPrice === bPrice) {
-        const aName = a.name || '';
-        const bName = b.name || '';
-        const cmpName = aName.localeCompare(bName, 'es', { sensitivity: 'base' });
-        if (cmpName === 0) return a.key.localeCompare(b.key);
-        return cmpName;
-      }
-      return aPrice - bPrice;
-    };
-
-    groups.sort((a, b) => {
-      const base = sortGroups(a, b);
-      return order === 'desc' ? -base : base;
-    });
-
-    const totalPages = totalGroups === 0 ? 0 : Math.ceil(totalGroups / pageSize);
-    const safePage = totalPages === 0 ? 1 : Math.min(Math.max(page, 1), totalPages);
-    const startIndex = (safePage - 1) * pageSize;
-    const paginatedItems = totalPages === 0 ? [] : groups.slice(startIndex, startIndex + pageSize);
-
-    const serializeGroup = (group) => ({
-      key: group.key,
-      name: group.name,
-      code: group.code,
-      providerCount: group.providerCount,
-      bestPrice: group.bestPrice,
-      bestProvider: group.bestProvider,
-      worstPrice: group.worstPrice,
-      worstProvider: group.worstProvider,
-      priceSpread: group.priceSpread,
-      priceSpreadPercent: group.priceSpreadPercent,
-      lastUpdated: group.lastUpdated,
-      nameAlternatives: group.nameAlternatives,
-      codes: group.codes,
-      providers: group.providers.map(({ timestamp, ...provider }) => provider),
-    });
-
-    const summary = {
-      totalGroups,
-      totalProviders,
-      potentialSavings,
-      averageSpread,
-      averageSpreadPercent,
-      bestOpportunity: bestOpportunity
-        ? {
-            key: bestOpportunity.key,
-            name: bestOpportunity.name,
-            priceSpread: bestOpportunity.priceSpread,
-            priceSpreadPercent: bestOpportunity.priceSpreadPercent,
-            bestProvider: bestOpportunity.bestProvider,
-            worstProvider: bestOpportunity.worstProvider,
-          }
-        : null,
-    };
-
-    return res.json({
-      page: totalGroups === 0 ? 1 : safePage,
-      pageSize,
-      totalGroups,
-      totalPages,
-      summary,
-      items: paginatedItems.map(serializeGroup),
-    });
   });
 });
 

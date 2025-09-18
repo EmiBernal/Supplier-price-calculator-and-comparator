@@ -7,7 +7,6 @@ import { Search, List, LayoutGrid, CalendarDays, XCircle } from 'lucide-react';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
 
-
 interface CompareScreenProps {
   onNavigate: (screen: Screen) => void;
 }
@@ -27,24 +26,46 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   const [famGenSel, setFamGenSel] = useState('');
   const [famEspSel, setFamEspSel] = useState('');
 
-  // Helpers fecha (evita off-by-one por timezone)
+  // ===== Helpers de fecha =====
+  // Convierte Date -> 'YYYY-MM-DD' usando la zona local (sin desfase)
   const toYMD = (d: Date) => {
-    const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-    return z.toISOString().slice(0, 10);
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
   };
+
+  // Setea un rango [from, to] (inclusive) con seguridad de zona horaria
+  const setRange = (from: Date, to: Date) => {
+    setDateFrom(toYMD(from));
+    setDateTo(toYMD(to));
+  };
+
+  // Atajos:
+  const setToday = () => {
+    const t = new Date();
+    setRange(t, t);
+  };
+  const setYesterday = () => {
+    const y = new Date();
+    y.setDate(y.getDate() - 1);
+    setRange(y, y);
+  };
+  const setBeforeYesterday = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 2);
+    setRange(d, d);
+  };
+  // Últimos N días (incluye hoy). Ej: N=7 -> hoy y los 6 anteriores
   const setLastNDays = (n: number) => {
     const end = new Date();
     const start = new Date();
     start.setDate(end.getDate() - (n - 1));
-    setDateFrom(toYMD(start));
-    setDateTo(toYMD(end));
+    setRange(start, end);
   };
   const setThisMonth = () => {
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    setDateFrom(toYMD(start));
-    setDateTo(toYMD(end));
+    setRange(start, end);
   };
 
   const dateRangeInvalid = useMemo(() => {
@@ -119,6 +140,43 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     return `${sign}$${abs}`;
   };
 
+  // Veredicto textual
+  function getVerdict(internal?: number | null, external?: number | null) {
+    if (internal == null || external == null) {
+      return {
+        tone: 'na' as const,
+        text: 'Sin suficientes datos para comparar.',
+        classes: 'text-gray-600 dark:text-white/70'
+      };
+    }
+    if (internal < external) {
+      const ahorro = external - internal;
+      const pct = (ahorro / external) * 100;
+      return {
+        tone: 'cheaper' as const,
+        text: `Gampack es más barato: ahorrás $${ahorro.toFixed(2)} (${pct.toFixed(2)}%) frente al proveedor.`,
+        classes:
+          'bg-green-50 text-green-800 border-green-300/40 dark:bg-green-500/10 dark:text-green-200 dark:border-green-500/20'
+      };
+    }
+    if (internal > external) {
+      const extra = internal - external;
+      const pct = (extra / external) * 100;
+      return {
+        tone: 'expensive' as const,
+        text: `Gampack es más caro: +$${extra.toFixed(2)} (+${pct.toFixed(2)}%) vs el proveedor.`,
+        classes:
+          'bg-red-50 text-red-800 border-red-300/40 dark:bg-red-500/10 dark:text-red-200 dark:border-red-500/20'
+      };
+    }
+    return {
+      tone: 'equal' as const,
+      text: 'Mismo precio que el proveedor.',
+      classes:
+        'bg-gray-50 text-gray-800 border-gray-300/40 dark:bg-white/5 dark:text-white dark:border-white/10'
+    };
+  }
+
   const clearFilters = () => {
     setSearchTerm('');
     setDateFrom('');
@@ -143,7 +201,7 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
                 placeholder="Buscar por nombre o código"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 dark:bg:white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
+                className="pl-10 dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
               />
               <Search className="absolute left-3 top-2.5 text-gray-400 dark:text-white/70 pointer-events-none" size={18} />
             </div>
@@ -155,7 +213,7 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
           </div>
 
           <div>
-            <label className="block text-xs text-gray-600 dark:text:white/80 mb-1">Hasta</label>
+            <label className="block text-xs text-gray-600 dark:text-white/80 mb-1">Hasta</label>
             <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20" />
           </div>
 
@@ -182,9 +240,9 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
         {/* Atajos de fecha */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <span className="inline-flex items-center text-xs text-gray-600 dark:text-white/80"><CalendarDays className="mr-1" size={14} /> Atajos:</span>
-          <button type="button" onClick={() => setLastNDays(1)} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-white/10 text-gray-700 dark:text-white bg-white dark:bg-white/10 hover:bg-gray-100 dark:hover:bg-white/20">Hoy</button>
-          <button type="button" onClick={() => setLastNDays(2)} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-white/10 text-gray-700 dark:text-white bg-white dark:bg-white/10 hover:bg-gray-100 dark:hover:bg-white/20">Ayer</button>
-          <button type="button" onClick={() => setLastNDays(3)} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-white/10 text-gray-700 dark:text-white bg-white dark:bg-white/10 hover:bg-gray-100 dark:hover:bg-white/20">Antes de ayer</button>
+          <button type="button" onClick={setToday} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-white/10 text-gray-700 dark:text-white bg-white dark:bg-white/10 hover:bg-gray-100 dark:hover:bg-white/20">Hoy</button>
+          <button type="button" onClick={setYesterday} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-white/10 text-gray-700 dark:text-white bg-white dark:bg-white/10 hover:bg-gray-100 dark:hover:bg-white/20">Ayer</button>
+          <button type="button" onClick={setBeforeYesterday} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-white/10 text-gray-700 dark:text-white bg-white dark:bg-white/10 hover:bg-gray-100 dark:hover:bg-white/20">Antes de ayer</button>
           <button type="button" onClick={() => setLastNDays(7)} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-white/10 text-gray-700 dark:text-white bg-white dark:bg-white/10 hover:bg-gray-100 dark:hover:bg-white/20">Últimos 7 días</button>
           <button type="button" onClick={() => setLastNDays(30)} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-white/10 text-gray-700 dark:text-white bg-white dark:bg-white/10 hover:bg-gray-100 dark:hover:bg-white/20">Últimos 30 días</button>
           <button type="button" onClick={setThisMonth} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-white/10 text-gray-700 dark:text-white bg-white dark:bg-white/10 hover:bg-gray-100 dark:hover:bg-white/20">Este mes</button>
@@ -255,6 +313,25 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
                   );
                 },
               },
+              {
+                key: 'conclusion',
+                label: 'Conclusión',
+                render: (_v: any, row: any) => {
+                  const internal = typeof row.internalFinalPrice === 'number' ? row.internalFinalPrice : null;
+                  const external = typeof row.externalFinalPrice === 'number' ? row.externalFinalPrice : null;
+                  const verdict = getVerdict(internal, external);
+                  return (
+                    <span
+                      className={[
+                        'inline-flex items-center px-2.5 py-1 rounded text-xs font-medium border',
+                        verdict.classes
+                      ].join(' ')}
+                    >
+                      {verdict.text}
+                    </span>
+                  );
+                }
+              }
             ]}
             data={comparisons}
           />
@@ -266,6 +343,7 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
               const external = typeof item.externalFinalPrice === 'number' ? item.externalFinalPrice : null;
               const pct = getDifferencePct(internal, external);
               const amt = getDifferenceAmt(internal, external);
+              const verdict = getVerdict(internal, external);
 
               return (
                 <div key={i} className="border rounded-xl p-4 shadow-sm bg-white dark:bg-white/5 border-gray-200 dark:border-white/10 hover:shadow-md transition duration-300">
@@ -307,6 +385,16 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
                       <p className="text-xs text-gray-500 dark:text-white/60 mt-1">Precio Externo</p>
                       <p className="text-lg font-bold text-blue-600">{external != null ? `$${external.toFixed(2)}` : '—'}</p>
                     </div>
+                  </div>
+
+                  {/* Veredicto textual */}
+                  <div
+                    className={[
+                      'mt-3 px-3 py-2 rounded-lg border text-sm font-medium',
+                      verdict.classes
+                    ].join(' ')}
+                  >
+                    {verdict.text}
                   </div>
                 </div>
               );
