@@ -1,21 +1,24 @@
 // src/App.tsx
 import { useEffect, useLayoutEffect, useState } from "react";
 import { Screen } from "./types";
-
-// ✅ imports como default (sin llaves)
-import HomeScreen from "./screens/compra/HomeScreen";
-import ManualEntryScreen from "./screens/compra/ManualEntryScreen";
-import CompareScreen from "./screens/compra/CompareScreen";
-import MainEquivalences from "./screens/compra/MainEquivalences";
-
 import { Sun, Moon } from "lucide-react";
-
-// ✅ Login exporta default
-import LoginScreen from "./screens/compra/LoginScreen";
-
-// ✅ Calculadora para COMPRA (alias a venta por ahora)
-import CalculadoraCompraScreen from "./screens/compra/CalculadoraCompraScreen";
 import { apiFetch } from "./lib/api";
+
+// ✅ Importar pantallas de COMPRA
+import HomeScreenCompra from "./screens/compra/HomeScreen";
+import ManualEntryScreenCompra from "./screens/compra/ManualEntryScreen";
+import CompareScreenCompra from "./screens/compra/CompareScreen";
+import MainEquivalencesCompra from "./screens/compra/MainEquivalences";
+import LoginScreenCompra from "./screens/compra/LoginScreen";
+import CalculadoraCompraScreen from "./screens/compra/CalculadoraCompraScreen";
+
+// ✅ Importar pantallas de VENTA
+import HomeScreenVenta from "./screens/venta/HomeScreen";
+import ManualEntryScreenVenta from "./screens/venta/ManualEntryScreen";
+import CompareScreenVenta from "./screens/venta/CompareScreen";
+import MainEquivalencesVenta from "./screens/venta/MainEquivalences";
+import LoginScreenVenta from "./screens/venta/LoginScreen";
+import CalculadoraVentaScreen from "./screens/venta/CalculadoraVentaScreen";
 
 function getInitialTheme(): "light" | "dark" {
   try {
@@ -86,17 +89,23 @@ function App() {
     );
   }
 
-  // 🔑 Si no hay sesión -> mostrar login
+  // 🔑 Si no hay sesión -> mostrar login de cada rol
   if (!role) {
-    return <LoginScreen onLoginSuccess={setRole} />;
+    // Podrías unificar con un selector inicial (ej: elegir Compra o Venta antes de login)
+    return (
+      <div>
+        {/* Default: login de compra, podés cambiarlo */}
+        <LoginScreenCompra onLoginSuccess={setRole} />
+      </div>
+    );
   }
 
-  // 🔑 Si es compra -> mostrar calculadora especial
+  // 🔑 Si es compra -> mostrar flujo de COMPRA
   if (role === "compra") {
     return <CalculadoraCompraScreen onLogout={() => setRole(null)} />;
   }
 
-  // 🔑 Si es venta -> flujo normal
+  // 🔑 Si es venta -> mostrar flujo de VENTA
   return (
     <div
       className={[
@@ -114,15 +123,17 @@ function App() {
         {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
       </button>
 
-      {currentScreen === "home" && <HomeScreen onNavigate={handleNavigate} />}
+      {currentScreen === "home" && (
+        <HomeScreenVenta onNavigate={handleNavigate} />
+      )}
       {currentScreen === "manual" && (
-        <ManualEntryScreen onNavigate={handleNavigate} />
+        <ManualEntryScreenVenta onNavigate={handleNavigate} />
       )}
       {currentScreen === "equivalences" && (
-        <MainEquivalences onNavigate={handleNavigate} />
+        <MainEquivalencesVenta onNavigate={handleNavigate} />
       )}
       {currentScreen === "compare" && (
-        <CompareScreen onNavigate={handleNavigate} />
+        <CompareScreenVenta onNavigate={handleNavigate} />
       )}
     </div>
   );
