@@ -12,7 +12,7 @@ interface ManualEntryScreenProps {
 
 interface FormData {
   company: string;
-  productCode: string;
+  productCode: string; // lo dejamos en el estado por compatibilidad, pero sin input
   productName: string;
   finalPrice: number | '';
   date: string;
@@ -205,7 +205,7 @@ const UploadFamiliesCard: React.FC<{ onDone?: () => void }> = ({ onDone }) => {
 export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate }) => {
   const [formData, setFormData] = useState<FormData>({
     company: '',
-    productCode: '',
+    productCode: '', // sin input, queda vacío a menos que lo completes por código
     productName: '',
     finalPrice: '',
     date: new Date().toISOString().split('T')[0],
@@ -269,29 +269,28 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     }
   };
 
-const handleLiveSearch = async (query: string) => {
-  if (!query.trim()) {
-    setSearchResults([]);
-    return;
-  }
-  setSearching(true);
-  try {
-    const res = await apiFetch(
-      `${BASE_URL}/api/products/search/manual?by=${searchCriteria}&q=${encodeURIComponent(query)}`
-    );
-    if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
+  const handleLiveSearch = async (query: string) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    try {
+      const res = await apiFetch(
+        `${BASE_URL}/api/products/search/manual?by=${searchCriteria}&q=${encodeURIComponent(query)}`
+      );
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
 
-    // 🔧 Normalizamos resultados (incluye los venidos de Excel)
-    const normalized = (data.products || []).map(normalizeProduct);
-    setSearchResults(normalized);
-  } catch (error) {
-    console.error('Error al buscar productos:', error);
-  } finally {
-    setSearching(false);
-  }
-};
-
+      // 🔧 Normalizamos resultados (incluye los venidos de Excel)
+      const normalized = (data.products || []).map(normalizeProduct);
+      setSearchResults(normalized);
+    } catch (error) {
+      console.error('Error al buscar productos:', error);
+    } finally {
+      setSearching(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -412,20 +411,19 @@ const handleLiveSearch = async (query: string) => {
     handleSubmitWithLink(accept);
   };
 
-const handleSuggestionClick = (prod: any) => {
-  const np = normalizeProduct(prod);
-  setFormData({
-    company: np.company,
-    productCode: np.productCode,
-    productName: np.productName,
-    finalPrice: np.finalPrice ?? '',
-    date: new Date().toISOString().split('T')[0],
-  });
-  setSearchQuery('');
-  setSearchResults([]);
-  setWantsToUpdate(true);
-};
-
+  const handleSuggestionClick = (prod: any) => {
+    const np = normalizeProduct(prod);
+    setFormData({
+      company: np.company,
+      productCode: np.productCode,
+      productName: np.productName,
+      finalPrice: np.finalPrice ?? '',
+      date: new Date().toISOString().split('T')[0],
+    });
+    setSearchQuery('');
+    setSearchResults([]);
+    setWantsToUpdate(true);
+  };
 
   const handleInputChange = (field: keyof FormData, value: string | number) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -460,17 +458,17 @@ const handleSuggestionClick = (prod: any) => {
             <div className="hidden sm:block">
               <ImportButton onClick={() => setShowImport(true)} />
               <button
-  type="button"
-  onClick={() => setShowImportFamilies(true)}
-  className="ml-2 inline-flex items-center gap-2 rounded-2xl px-4 py-2 bg-gray-900 text-white dark:bg-white/15 dark:text-white transition hover:opacity-90"
-  title="Importar familias/rubros"
->
-  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M12 5v14" />
-    <path d="M5 12h14" />
-  </svg>
-  <span className="font-medium">Importar familias</span>
-</button>
+                type="button"
+                onClick={() => setShowImportFamilies(true)}
+                className="ml-2 inline-flex items-center gap-2 rounded-2xl px-4 py-2 bg-gray-900 text-white dark:bg-white/15 dark:text-white transition hover:opacity-90"
+                title="Importar familias/rubros"
+              >
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+                <span className="font-medium">Importar familias</span>
+              </button>
             </div>
           </div>
         </div>
@@ -479,6 +477,7 @@ const handleSuggestionClick = (prod: any) => {
         <div className="bg-white dark:bg-white/5 rounded-2xl shadow-sm border border-gray-200 dark:border-white/10 p-6 sm:p-8">
           {/* Formulario */}
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Grid ajustado SIN huecos */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Empresa */}
               <div className="flex flex-col gap-2">
@@ -495,14 +494,14 @@ const handleSuggestionClick = (prod: any) => {
                 </p>
               </div>
 
-              {/* Código producto */}
+              {/* Fecha (sube a la primera fila para ocupar el lugar del código) */}
               <Input
-                label="Código producto"
-                value={formData.productCode}
-                onChange={(e) => handleInputChange('productCode', e.target.value)}
-                error={errors.productCode}
-                placeholder="Ingresá el código del producto"
-                className="dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
+                label="Fecha"
+                type="date"
+                value={formData.date}
+                onChange={(e) => handleInputChange('date', e.target.value)}
+                error={errors.date}
+                className="dark:bg-white/10 dark:text-white dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
               />
 
               {/* Nombre producto (2 columnas) */}
@@ -527,8 +526,8 @@ const handleSuggestionClick = (prod: any) => {
                 )}
               </div>
 
-              {/* Precio Final */}
-              <div className="relative">
+              {/* Precio Final (a ancho completo para evitar huecos) */}
+              <div className="relative md:col-span-2">
                 <Input
                   label="Precio Final"
                   type="number"
@@ -541,16 +540,6 @@ const handleSuggestionClick = (prod: any) => {
                 />
                 <div className="absolute left-3 top-8 text-gray-500 dark:text-white/70">$</div>
               </div>
-
-              {/* Fecha */}
-              <Input
-                label="Fecha"
-                type="date"
-                value={formData.date}
-                onChange={(e) => handleInputChange('date', e.target.value)}
-                error={errors.date}
-                className="dark:bg-white/10 dark:text-white dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20"
-              />
             </div>
 
             {/* Errores y mensajes */}
@@ -598,7 +587,7 @@ const handleSuggestionClick = (prod: any) => {
         </div>
       </div>
 
-      {/* MODAL Importar Excel: dark/light, blur, card moderna */}
+      {/* MODAL Importar Excel */}
       {showImport && (
         <div
           className="
@@ -627,7 +616,7 @@ const handleSuggestionClick = (prod: any) => {
                   onClick={() => setShowImport(false)}
                   className="
                     inline-flex items-center justify-center rounded-xl p-2
-                    hover:bg-gray-100 dark:hover:bg-white/10
+                    hover:bg-gray-100 dark:hover:bg:white/10
                     focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400
                     transition
                   "
@@ -650,6 +639,7 @@ const handleSuggestionClick = (prod: any) => {
           </div>
         </div>
       )}
+
       {showImportFamilies && (
         <div
           className="
