@@ -959,7 +959,11 @@ app.get('/api/price-comparisons', (req, res) => {
   const dateTo = (req.query.dateTo || '').toString();     // YYYY-MM-DD
   const familia = (req.query.familia || '').toString().toLowerCase();
   const onlyRelated = String(req.query.onlyRelated || '0') === '1';
-  const dateMode = (req.query.dateMode || 'product').toString(); // 'product' | 'relation'
+
+  // ⬇️ CAMBIO CLAVE: por defecto usamos fecha de RELACIÓN,
+  // y si onlyRelated=1, forzamos sí o sí fecha de RELACIÓN.
+  let dateMode = (req.query.dateMode || 'relation').toString(); // 'product' | 'relation'
+  if (onlyRelated) dateMode = 'relation';
 
   const hasFrom = !!dateFrom;
   const hasTo = !!dateTo;
