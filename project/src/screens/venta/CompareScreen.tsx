@@ -2,10 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Navigation } from '../../components/Navigation';
 import { Input } from '../../components/Input';
 import { Table } from '../../components/Table';
+import { Select } from '../../components/Select';
 import { PriceComparison } from '../../tipos/database';
 import { Search, List, LayoutGrid, CalendarDays, XCircle } from 'lucide-react';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
+import { TAXONOMY } from '../../lib/taxonomy';
 
 interface CompareScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -20,9 +22,6 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   // Filtros
   const [dateFrom, setDateFrom] = useState(''); // YYYY-MM-DD
   const [dateTo, setDateTo] = useState('');     // YYYY-MM-DD
-  const [familia, setFamilia] = useState('');   // texto libre (compatibilidad)
-
-  // NUEVO: selects guiados
   const [famGenSel, setFamGenSel] = useState('');
   const [famEspSel, setFamEspSel] = useState('');
 
@@ -84,13 +83,13 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
       loadComparisons(searchTerm);
     }, 300);
     return () => clearTimeout(delay);
-  }, [searchTerm, dateFrom, dateTo, familia, famGenSel, famEspSel, dateRangeInvalid]);
+  }, [searchTerm, dateFrom, dateTo, famGenSel, famEspSel, dateRangeInvalid]);
 
   // Construye el valor que mandamos como `familia` al backend
   const buildFamiliaQuery = () => {
     if (famGenSel && famEspSel) return `${famGenSel} > ${famEspSel}`; // p.ej. "Desechables > Vasos"
     if (famGenSel) return famGenSel;                                   // p.ej. "Desechables"
-    return familia;                                                    // texto libre existente
+    return '';
   };
 
   const loadComparisons = async (search = '') => {
@@ -181,10 +180,28 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     setSearchTerm('');
     setDateFrom('');
     setDateTo('');
-    setFamilia('');
     setFamGenSel('');
     setFamEspSel('');
   };
+
+  const familyOptions = useMemo(() => [
+    { value: '', label: 'Todas las familias' },
+    ...TAXONOMY.map((family) => ({ value: family.value, label: family.label })),
+  ], []);
+
+  const subfamilyOptions = useMemo(() => {
+    if (!famGenSel) return [{ value: '', label: 'Todas las subfamilias' }];
+    const family = TAXONOMY.find((item) => item.value === famGenSel);
+    if (!family) return [{ value: '', label: 'Todas las subfamilias' }];
+    return [
+      { value: '', label: 'Todas las subfamilias' },
+      ...family.subfamilies.map((sub) => ({ value: sub.value, label: sub.label })),
+    ];
+  }, [famGenSel]);
+
+  useEffect(() => {
+    setFamEspSel('');
+  }, [famGenSel]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0b0f1a] p-6">
@@ -192,7 +209,7 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
         <Navigation onBack={() => onNavigate('home')} title="Comparar Gampacks" />
 
         {/* Filtros */}
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-2">
+        <div className="grid grid-cols-1 md:grid-cols-7 gap-4 mb-2">
           <div className="md:col-span-2">
             <label className="block text-xs text-gray-600 dark:text-white/80 mb-1">Buscar</label>
             <div className="relative">
@@ -217,10 +234,25 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
             <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20" />
           </div>
 
-          {/* Input libre (compatibilidad) */}
           <div>
-            <label className="block text-xs text-gray-600 dark:text-white/80 mb-1">Familia (texto libre)</label>
-            <Input placeholder="Ej: bolsas, films..." value={familia} onChange={(e) => setFamilia(e.target.value)} className="dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20" />
+            <label className="block text-xs text-gray-600 dark:text-white/80 mb-1">Familia</label>
+            <Select
+              value={famGenSel}
+              onChange={(e) => setFamGenSel(e.target.value)}
+              options={familyOptions}
+              className="dark:bg-white/10 dark:text-white dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20 text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-600 dark:text-white/80 mb-1">Subfamilia</label>
+            <Select
+              value={famEspSel}
+              onChange={(e) => setFamEspSel(e.target.value)}
+              options={subfamilyOptions}
+              disabled={!famGenSel}
+              className={`dark:bg-white/10 dark:text-white dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20 text-sm ${!famGenSel ? 'opacity-60' : ''}`}
+            />
           </div>
 
           <div className="flex items-end">

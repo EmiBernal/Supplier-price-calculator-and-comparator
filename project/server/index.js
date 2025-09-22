@@ -655,46 +655,83 @@ app.get('/api/relaciones', (req, res) => {
 });
 
 // ---------- RELACIONAR MANUAL ----------
-app.post('/api/relacionar-manual', (req, res) => {
+app.post('/api/relacionar-manual', async (req, res) => {
   const db = req.ctx.db;
-  const { id_lista_interna, ids_lista_precios, criterio } = req.body;
+  const { id_lista_interna, ids_lista_precios, criterio, familia, subfamilia } = req.body || {};
 
   if (!id_lista_interna || !Array.isArray(ids_lista_precios) || ids_lista_precios.length === 0) {
     return res.status(400).json({ error: 'Datos incompletos o inválidos' });
   }
 
   const placeholders = ids_lista_precios.map(() => '(?, ?, ?)').join(', ');
-  const params = ids_lista_precios.flatMap(id => [id, id_lista_interna, criterio]);
+  const criterioValor = criterio ?? 'manual';
+  const params = ids_lista_precios.flatMap((id) => [id, id_lista_interna, criterioValor]);
 
-  const sql = `
+  const insertSql = `
     INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
     VALUES ${placeholders}
   `;
 
-  db.run(sql, params, function (err) {
-    if (err) {
-      console.error('Error al vincular productos:', err.message);
-      return res.status(500).json({ error: 'Error al vincular productos' });
-    }
+  try {
+    await runDb(db, insertSql, params);
+  } catch (err) {
+    console.error('Error al vincular productos:', err.message);
+    return res.status(500).json({ error: 'Error al vincular productos' });
+  }
 
-    const deleteExternosSql = `
-      DELETE FROM articulos_no_relacionados WHERE id_lista_precios IN (${ids_lista_precios.map(() => '?').join(',')})
-    `;
-    db.run(deleteExternosSql, ids_lista_precios, (delErr) => {
-      if (delErr) {
-        console.error('Error eliminando artículos no relacionados (externos):', delErr.message);
-      }
-    });
-
-    const deleteInternoSql = `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = ?`;
-    db.run(deleteInternoSql, [id_lista_interna], (delErr) => {
-      if (delErr) {
-        console.error('Error eliminando artículo no relacionado (interno):', delErr.message);
-      }
-    });
-
-    res.status(200).json({ success: true });
+  const deleteExternosSql = `
+    DELETE FROM articulos_no_relacionados WHERE id_lista_precios IN (${ids_lista_precios.map(() => '?').join(',')})
+  `;
+  runDb(db, deleteExternosSql, ids_lista_precios).catch((delErr) => {
+    console.error('Error eliminando artículos no relacionados (externos):', delErr.message);
   });
+
+  const deleteInternoSql = `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = ?`;
+  runDb(db, deleteInternoSql, [id_lista_interna]).catch((delErr) => {
+    console.error('Error eliminando artículo no relacionado (interno):', delErr.message);
+  });
+
+  const normalizedFamily = normalizeWhitespace(familia || '');
+  const normalizedSubfamily = normalizeWhitespace(subfamilia || '');
+
+  if (normalizedFamily) {
+    const applyUpdate = async (sql, values) => {
+      try {
+        await runDb(db, sql, values);
+      } catch (error) {
+        if (error?.message && /no such column/i.test(error.message)) {
+          console.warn('Columna de familia/subfamilia no encontrada, omitiendo actualización.');
+          return;
+        }
+        throw error;
+      }
+    };
+
+    const subfamilyValue = normalizedSubfamily || null;
+
+    const updateInternaSql = `
+      UPDATE lista_interna
+         SET familia = ?,
+             subfamilia = COALESCE(?, subfamilia)
+       WHERE id_interno = ?
+    `;
+
+    const updateExternosSql = `
+      UPDATE lista_precios
+         SET familia = ?,
+             subfamilia = COALESCE(?, subfamilia)
+       WHERE id_externo IN (${ids_lista_precios.map(() => '?').join(',')})
+    `;
+
+    try {
+      await applyUpdate(updateInternaSql, [normalizedFamily, subfamilyValue, id_lista_interna]);
+      await applyUpdate(updateExternosSql, [normalizedFamily, subfamilyValue, ...ids_lista_precios]);
+    } catch (err) {
+      console.error('Error actualizando familia/subfamilia:', err.message);
+    }
+  }
+
+  return res.status(200).json({ success: true });
 });
 
 // ---------- Alta producto (manual) ----------

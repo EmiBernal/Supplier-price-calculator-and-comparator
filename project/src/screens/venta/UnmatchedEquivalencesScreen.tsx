@@ -4,6 +4,7 @@ import { Navigation } from '../../components/Navigation';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
 import { Trash2 } from 'lucide-react';
+import { inferFamilyByName } from '../../lib/taxonomy';
 
 /* ---------- Similaridad por trigramas + coseno (solo nombres) ---------- */
 function sanitizeText(s: string) {
@@ -70,6 +71,42 @@ function classHeader(active: boolean) {
 }
 const normalizeStr = (v: any) => String(v ?? '').toLowerCase().trim();
 const cmp = (a: any, b: any) => (a < b ? -1 : a > b ? 1 : 0);
+
+type InferredFamily = ReturnType<typeof inferFamilyByName>;
+
+const pickFamilyForLink = (internal?: InternalItem | null, externals: ExternalItem[] = []): InferredFamily => {
+  const internalName = internal?.nom_interno?.trim();
+  if (internalName) {
+    const inferred = inferFamilyByName(internalName);
+    if (inferred) return inferred;
+  }
+
+  for (const ext of externals) {
+    const externalName = ext.nom_externo?.trim();
+    if (!externalName) continue;
+    const inferred = inferFamilyByName(externalName);
+    if (inferred) return inferred;
+  }
+
+  return null;
+};
+
+const buildLinkPayload = (internal: InternalItem, externals: ExternalItem[], criterio: string) => {
+  const uniqueIds = Array.from(new Set(externals.map((item) => item.id_externo)));
+  const payload: Record<string, any> = {
+    id_lista_interna: internal.id_interno,
+    ids_lista_precios: uniqueIds,
+    criterio,
+  };
+
+  const inferred = pickFamilyForLink(internal, externals);
+  if (inferred) {
+    payload.familia = inferred.family;
+    if (inferred.subfamily) payload.subfamilia = inferred.subfamily;
+  }
+
+  return payload;
+};
 
 /* ---------- Input de búsqueda ---------- */
 const SearchInput: React.FC<{ value: string; onChange: (v: string) => void; placeholder: string; }> =
@@ -226,8 +263,9 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const acceptSuggestion = async (s: Suggestion) => {
     try {
       const res = await apiFetch('/api/relacionar-manual', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_lista_interna: s.internal.id_interno, ids_lista_precios: [s.external.id_externo], criterio: 'manual' }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildLinkPayload(s.internal, [s.external], 'manual')),
       });
       if (res.ok) removeFromStateAfterLink(s.internal, s.external);
       else alert(`Error: ${(await res.json().catch(() => ({} as any)))?.message || 'No se pudo vincular'}`);
@@ -243,19 +281,24 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     if (suggestions.length === 0) return;
     setBulkBusy(true);
     try {
-      const byInternal = new Map<number, { internal: InternalItem; extIds: number[] }>();
-      suggestions.forEach(s => {
+      const byInternal = new Map<number, { internal: InternalItem; externals: ExternalItem[] }>();
+      suggestions.forEach((s) => {
         const key = s.internal.id_interno;
-        if (!byInternal.has(key)) byInternal.set(key, { internal: s.internal, extIds: [] });
-        byInternal.get(key)!.extIds.push(s.external.id_externo);
+        if (!byInternal.has(key)) byInternal.set(key, { internal: s.internal, externals: [] });
+        const entry = byInternal.get(key)!;
+        if (!entry.externals.find((ext) => ext.id_externo === s.external.id_externo)) {
+          entry.externals.push(s.external);
+        }
       });
 
-      for (const { internal, extIds } of byInternal.values()) {
+      for (const { internal, externals } of byInternal.values()) {
         const res = await apiFetch('/api/relacionar-manual', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id_lista_interna: internal.id_interno, ids_lista_precios: extIds, criterio: 'manual' }),
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildLinkPayload(internal, externals, 'manual')),
         });
         if (!res.ok) throw new Error('No se pudo vincular en lote');
+        const extIds = externals.map((ext) => ext.id_externo);
         setExternals(prev => prev.filter(e => !extIds.includes(e.id_externo)));
         setInternals(prev => prev.filter(i => i.id_interno !== internal.id_interno));
         setSuggestions(prev => prev.filter(s => s.internal.id_interno !== internal.id_interno));
@@ -494,10 +537,11 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
               onClick={async () => {
                 if (!selectedInternal || selectedExternals.length === 0) { alert('Seleccioná un producto Gampack y al menos un proveedor'); return; }
                 try {
+                  const payload = buildLinkPayload(selectedInternal, selectedExternals, 'manual');
                   const res = await apiFetch('/api/relacionar-manual', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id_lista_interna: selectedInternal.id_interno, ids_lista_precios: selectedExternals.map(e => e.id_externo), criterio: 'manual' }),
+                    body: JSON.stringify(payload),
                   });
                   if (res.ok) {
                     setExternals(prev => prev.filter(e => !selectedExternals.some(se => se.id_externo === e.id_externo)));
