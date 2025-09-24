@@ -13,7 +13,8 @@ const app = express();
 // ===== Middlewares base =====
 const allowedOrigins = [
   'http://localhost:5173',
-  'https://calculadoradepreciosgampack.vercel.app'
+  'https://supplier-price-calculator-and-comparator.vercel.app',
+  'supplier-price-calculator-and-compa.vercel.app'
 ];
 
 app.use(cors({
@@ -21,7 +22,7 @@ app.use(cors({
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.log('❌ Bloqueado por CORS:', origin); 
+      console.log('❌ CORS bloqueado:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
