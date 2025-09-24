@@ -11,10 +11,23 @@ const { tenantMiddleware } = require('./middleware/tenant');
 const app = express();
 
 // ===== Middlewares base =====
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://calculadoradepreciosgampack.vercel.app'
+];
+
 app.use(cors({
-  origin: 'http://localhost:5173', // ajustá al puerto de tu front
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.log('❌ Bloqueado por CORS:', origin); 
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
+
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser(process.env.COOKIE_SECRET || 'change-me')); // firma cookies
 app.use(tenantMiddleware); 
