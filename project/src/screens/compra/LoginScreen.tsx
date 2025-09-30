@@ -2,8 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, Lock, Mail, Loader2, Moon, Sun, ShieldCheck } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 
-const BASE_URL = 'http://localhost:4000';
-
 interface Props {
   onLoginSuccess: (role: 'compra' | 'venta') => void;
 }
@@ -55,7 +53,7 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
     setError(null);
     setLoading(true);
     try {
-      const res = await apiFetch(`${BASE_URL}/api/login`, {
+      const res = await apiFetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),

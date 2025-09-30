@@ -18,8 +18,6 @@ interface FormData {
   date: string;
 }
 
-const BASE_URL = 'http://localhost:4000';
-
 // 🔧 NUEVO: normaliza cualquier forma de producto (manual o Excel)
 function normalizeProduct(p: any) {
   const company =
@@ -127,7 +125,7 @@ const UploadFamiliesCard: React.FC<{ onDone?: () => void }> = ({ onDone }) => {
       const fd = new FormData();
       fd.append('file', file);
 
-      const res = await apiFetch(`${BASE_URL}/api/imports/familias`, {
+      const res = await apiFetch('/api/imports/familias', {
         method: 'POST',
         body: fd,
       });
@@ -241,7 +239,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
 
   const checkProductExists = async (): Promise<boolean> => {
     try {
-      const res = await apiFetch(`${BASE_URL}/api/check-product`, {
+      const res = await apiFetch('/api/check-product', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -277,7 +275,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     setSearching(true);
     try {
       const res = await apiFetch(
-        `${BASE_URL}/api/products/search/manual?by=${searchCriteria}&q=${encodeURIComponent(query)}`
+        `/api/products/search/manual?by=${searchCriteria}&q=${encodeURIComponent(query)}`
       );
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
@@ -307,7 +305,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     const companyType = inferCompanyType(formData.company);
 
     try {
-      const response = await apiFetch(`${BASE_URL}/api/products`, {
+      const response = await apiFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -367,7 +365,7 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     const companyType = inferCompanyType(formData.company);
 
     try {
-      const response = await apiFetch(`${BASE_URL}/api/products`, {
+      const response = await apiFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

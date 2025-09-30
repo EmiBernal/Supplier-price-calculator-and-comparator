@@ -11,10 +11,15 @@ const { tenantMiddleware } = require('./middleware/tenant');
 const app = express();
 
 // ===== Middlewares base =====
+const envOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const allowedOrigins = [
-  'http://localhost:5173',
+  ...envOrigins,
   'https://supplier-price-calculator-and-comparator.vercel.app',
-  'supplier-price-calculator-and-compa.vercel.app'
+  'https://supplier-price-calculator-and-compa.vercel.app'
 ];
 
 app.use(cors({
