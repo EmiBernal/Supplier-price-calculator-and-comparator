@@ -542,8 +542,8 @@ app.put('/api/relacion/:id', async (req, res) => {
 
 // ---------- LOGOUT ----------
 app.post('/api/auth/logout', (req, res) => {
-  res.clearCookie('tenant', { httpOnly: true, sameSite: 'lax', signed: true });
-  res.clearCookie('token', { httpOnly: true, sameSite: 'lax' }); // por compatibilidad
+  res.clearCookie('tenant', { httpOnly: true, sameSite: 'none', secure: true, signed: true });
+  res.clearCookie('token', { httpOnly: true, sameSite: 'none', secure: true });
   return res.json({ ok: true });
 });
 
@@ -709,7 +709,7 @@ app.post('/api/products', (req, res) => {
     linkAsEquivalent = null,
   } = req.body;
 
-  if (!productCode || !productName || finalPrice == null || !companyType || !date) {
+  if (!productName || finalPrice == null || !companyType || !date) {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
   }
 
@@ -1476,12 +1476,11 @@ app.post('/api/login', (req, res) => {
       const role = (row.role || '').toLowerCase();
       const tenant = role === 'compra' ? 'compra' : 'venta';
 
-      // Seteamos cookie firmada
       res.cookie('tenant', tenant, {
         httpOnly: true,
-        sameSite: 'lax',
+        sameSite: 'none',   // <- permite cross-site
+        secure: true,       // <- obligatorio con SameSite=none
         signed: true,
-        // maxAge: 7 días
         maxAge: 7 * 24 * 60 * 60 * 1000
       });
 
