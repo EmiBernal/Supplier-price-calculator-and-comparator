@@ -1,9 +1,6 @@
 // server/middleware/tenant.js
-const path = require('path');
-const fs = require('fs');
-const sqlite3 = require('sqlite3').verbose();
-
-const DB_CACHE = new Map();
+const pool = require('../db');
+const { prepareSql } = require('../utils/sql');
 
 function normalizeTenant(v) {
   const s = String(v || '').toLowerCase().trim();
@@ -12,39 +9,133 @@ function normalizeTenant(v) {
   return null;
 }
 
-function getDbFor(tenant, cb) {
-  const safe = tenant === 'compra' ? 'compra' : 'venta';
-  if (DB_CACHE.has(safe)) return cb(null, DB_CACHE.get(safe));
+const SCHEMA_BY_TENANT = {
+  compra: 'compra',
+  venta: 'venta'
+};
 
-  const dbDir = path.join(__dirname, '..', 'data'); // → server/data
-  fs.mkdirSync(dbDir, { recursive: true });
-  const filename = safe === 'venta' ? 'db_ventas.sqlite' : 'db_compras.sqlite';
-  const dbPath = path.join(dbDir, filename);
-
-  const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) return cb(err);
-    db.run('PRAGMA foreign_keys=ON');
-    db.run('PRAGMA busy_timeout=5000');
-    db.run('PRAGMA journal_mode=WAL', () => {
-      DB_CACHE.set(safe, db);
-      cb(null, db);
-    });
-  });
-}
-
-function tenantMiddleware(req, res, next) {
-  // prioridad: header → cookie firmada → default 'venta'
+async function tenantMiddleware(req, res, next) {
   const h = normalizeTenant(req.get('X-Role'));
   const c = normalizeTenant(req.signedCookies?.tenant);
   const tenant = h || c || 'venta';
+  const schema = SCHEMA_BY_TENANT[tenant] || 'venta';
+  const searchPath = schema === 'compra' ? 'compra' : 'venta';
 
-  getDbFor(tenant, (err, db) => {
-    if (err) return next(err);
+  let client;
+  let adapter;
+  let released = false;
+
+  const release = () => {
+    if (released) return;
+    released = true;
+    if (adapter) {
+      adapter.release();
+    } else if (client) {
+      client.release();
+    }
+  };
+
+  try {
+    client = await pool.connect();
+    await client.query(`SET search_path TO ${searchPath}, public`);
+
     req.ctx = req.ctx || {};
     req.ctx.tenant = tenant;
-    req.ctx.db = db;
+    req.ctx.schema = searchPath;
+    adapter = createDbAdapter(client);
+    req.ctx.db = adapter;
+
+    res.on('finish', release);
+    res.on('close', release);
+    res.on('error', release);
+
     next();
-  });
+  } catch (err) {
+    release();
+    next(err);
+  }
 }
 
-module.exports = { tenantMiddleware, normalizeTenant, getDbFor };
+module.exports = { tenantMiddleware, normalizeTenant };
+function createDbAdapter(client) {
+  const query = (sql, params = []) => client.query(prepareSql(sql), params);
+
+  const normalizeArgs = (params, callback) => {
+    if (typeof params === 'function') {
+      return { values: [], callback: params };
+    }
+    return {
+      values: Array.isArray(params) ? params : [],
+      callback: typeof callback === 'function' ? callback : null
+    };
+  };
+
+  const buildContext = (result) => {
+    const firstRow = result?.rows?.[0] || {};
+    const idCandidate = firstRow.id ?? firstRow.id_externo ?? firstRow.id_interno ?? firstRow.id_relacion ?? null;
+    return {
+      lastID: idCandidate,
+      changes: result?.rowCount ?? 0
+    };
+  };
+
+  const run = (sql, params, callback) => {
+    const { values, callback: cb } = normalizeArgs(params, callback);
+    const text = String(sql || '').trim();
+    const isInsert = /^insert/i.test(text);
+    const promise = query(sql, values).then(async (result) => {
+      let context = buildContext(result);
+      if (isInsert && context.lastID == null && (result?.rowCount ?? 0) > 0) {
+        const lastVal = await client.query('SELECT LASTVAL() AS id');
+        context = {
+          ...context,
+          lastID: lastVal.rows[0]?.id ?? null
+        };
+      }
+      if (cb) cb.call(context, null);
+      return context;
+    }).catch((err) => {
+      if (cb) cb(err);
+      throw err;
+    });
+    return promise;
+  };
+
+  const get = (sql, params, callback) => {
+    const { values, callback: cb } = normalizeArgs(params, callback);
+    const promise = query(sql, values).then((result) => {
+      const row = result.rows[0] || null;
+      if (cb) cb(null, row);
+      return row;
+    }).catch((err) => {
+      if (cb) cb(err);
+      throw err;
+    });
+    return promise;
+  };
+
+  const all = (sql, params, callback) => {
+    const { values, callback: cb } = normalizeArgs(params, callback);
+    const promise = query(sql, values).then((result) => {
+      const rows = result.rows;
+      if (cb) cb(null, rows);
+      return rows;
+    }).catch((err) => {
+      if (cb) cb(err);
+      throw err;
+    });
+    return promise;
+  };
+
+  const release = () => client.release();
+
+  return {
+    query,
+    run,
+    get,
+    all,
+    serialize: (fn) => { if (typeof fn === 'function') fn(); },
+    release
+  };
+}
+

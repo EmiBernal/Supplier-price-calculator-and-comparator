@@ -7,6 +7,7 @@ const multer = multerLib.default || multerLib;
 const XLSX = require('xlsx');
 const cookieParser = require('cookie-parser');
 const { tenantMiddleware } = require('./middleware/tenant');
+const { prepareSql } = require('./utils/sql');
 
 const app = express();
 
@@ -74,16 +75,21 @@ function toYMD(s) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-// ===== Helpers DB promisificados por conexión =====
-const runDb = (db, sql, params = []) =>
-  new Promise((resolve, reject) => db.run(sql, params, function (err) {
-    if (err) reject(err); else resolve(this);
-  }));
+// ===== Helpers DB (PostgreSQL) =====
+async function runDb(db, sql, params = []) {
+  const text = prepareSql(sql);
+  return db.query(text, params);
+}
 
-const getDbRow = (db, sql, params = []) =>
-  new Promise((resolve, reject) => db.get(sql, params, (err, row) => {
-    if (err) reject(err); else resolve(row);
-  }));
+async function getDbRow(db, sql, params = []) {
+  const result = await runDb(db, sql, params);
+  return result.rows[0] || null;
+}
+
+async function getDbRows(db, sql, params = []) {
+  const result = await runDb(db, sql, params);
+  return result.rows;
+}
 
 function parseLimitParam(raw) {
   const DEFAULT_LIMIT = 500;
@@ -210,7 +216,7 @@ function parseTimestamp(value) {
 function createNoRelacionadosHandler(tipo) {
   const isExternos = tipo === 'externos';
 
-  return (req, res) => {
+  return async (req, res) => {
     if (req.ctx?.tenant === 'compra') {
       return res.status(404).json({ error: 'no_disponible_en_compras' });
     }
@@ -220,31 +226,32 @@ function createNoRelacionadosHandler(tipo) {
       return res.status(500).json({ error: 'db_not_available' });
     }
 
-    const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
-    const hasSearch = searchRaw.length > 0;
-    const searchTerm = hasSearch ? `%${searchRaw.toLowerCase()}%` : null;
-    const onlyPending = parseOnlyPending(req.query.onlyPending);
-    const limit = parseLimitParam(req.query.limit);
-    const offset = parseOffsetParam(req.query.offset);
+    try {
+      const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+      const hasSearch = searchRaw.length > 0;
+      const searchTerm = hasSearch ? `%${searchRaw.toLowerCase()}%` : null;
+      const onlyPending = parseOnlyPending(req.query.onlyPending);
+      const limit = parseLimitParam(req.query.limit);
+      const offset = parseOffsetParam(req.query.offset);
 
-    const params = [];
-    const where = [];
+      const params = [];
+      const where = [];
 
-    if (isExternos) {
-      where.push('ra.id IS NULL');
-      if (onlyPending) {
-        where.push('anr.id_lista_precios IS NOT NULL');
-      }
-      if (hasSearch) {
-        where.push(`(
+      if (isExternos) {
+        where.push('ra.id IS NULL');
+        if (onlyPending) {
+          where.push('anr.id_lista_precios IS NOT NULL');
+        }
+        if (hasSearch) {
+          where.push(`(
           LOWER(lp.cod_externo) LIKE ? OR
           LOWER(lp.nom_externo) LIKE ? OR
           LOWER(lp.proveedor) LIKE ?
         )`);
-        params.push(searchTerm, searchTerm, searchTerm);
-      }
+          params.push(searchTerm, searchTerm, searchTerm);
+        }
 
-      const sql = `
+        const sql = `
         SELECT DISTINCT
           lp.id_externo AS id_externo,
           lp.cod_externo AS codigo,
@@ -261,26 +268,21 @@ function createNoRelacionadosHandler(tipo) {
         ORDER BY es_pendiente DESC,
                  DATE(lp.fecha) DESC,
                  lp.id_externo DESC,
-                 lp.nom_externo COLLATE NOCASE ASC
+                 LOWER(lp.nom_externo) ASC
         LIMIT ? OFFSET ?
       `;
 
-      params.push(limit, offset);
+        params.push(limit, offset);
 
-      return db.all(sql, params, (err, rows = []) => {
-        if (err) {
-          console.error('Error al obtener productos externos no relacionados:', err.message);
-          return res.status(500).json({ error: 'Error al obtener productos externos no relacionados' });
-        }
-
-        const data = rows.map(row => {
+        const rows = await getDbRows(db, sql, params);
+        const data = rows.map((row) => {
           const codigo = row.codigo ?? null;
           const nombre = row.nombre ?? null;
           const proveedor = row.proveedor ?? null;
           const precioFinal = row.precio_final ?? null;
           const fecha = row.fecha ?? null;
 
-          const item = {
+          return {
             id_externo: row.id_externo,
             codigo,
             nombre,
@@ -296,29 +298,26 @@ function createNoRelacionadosHandler(tipo) {
             name: nombre,
             provider: proveedor,
             finalPrice: precioFinal,
-            date: fecha,
+            date: fecha
           };
-
-          return item;
         });
 
         return res.json(data);
-      });
-    }
+      }
 
-    where.push('ra.id IS NULL');
-    if (onlyPending) {
-      where.push('agnr.id_lista_interna IS NOT NULL');
-    }
-    if (hasSearch) {
-      where.push(`(
+      where.push('ra.id IS NULL');
+      if (onlyPending) {
+        where.push('agnr.id_lista_interna IS NOT NULL');
+      }
+      if (hasSearch) {
+        where.push(`(
         LOWER(li.cod_interno) LIKE ? OR
         LOWER(li.nom_interno) LIKE ?
       )`);
-      params.push(searchTerm, searchTerm);
-    }
+        params.push(searchTerm, searchTerm);
+      }
 
-    const sql = `
+      const sql = `
       SELECT DISTINCT
         li.id_interno AS id_interno,
         li.cod_interno AS codigo,
@@ -334,19 +333,14 @@ function createNoRelacionadosHandler(tipo) {
       ORDER BY es_pendiente DESC,
                DATE(li.fecha) DESC,
                li.id_interno DESC,
-               li.nom_interno COLLATE NOCASE ASC
+               LOWER(li.nom_interno) ASC
       LIMIT ? OFFSET ?
     `;
 
-    params.push(limit, offset);
+      params.push(limit, offset);
 
-    return db.all(sql, params, (err, rows = []) => {
-      if (err) {
-        console.error('Error al obtener productos internos no relacionados:', err.message);
-        return res.status(500).json({ error: 'Error al obtener productos internos no relacionados' });
-      }
-
-      const data = rows.map(row => {
+      const rows = await getDbRows(db, sql, params);
+      const data = rows.map((row) => {
         const codigo = row.codigo ?? null;
         const nombre = row.nombre ?? null;
         const precioFinal = row.precio_final ?? null;
@@ -367,12 +361,15 @@ function createNoRelacionadosHandler(tipo) {
           name: nombre,
           provider: 'Gampack',
           finalPrice: precioFinal,
-          date: fecha,
+          date: fecha
         };
       });
 
       return res.json(data);
-    });
+    } catch (err) {
+      console.error('Error al obtener productos no relacionados:', err);
+      return res.status(500).json({ error: 'db_error' });
+    }
   };
 }
 
@@ -383,13 +380,18 @@ app.get('/api/health', (req, res) => {
 });
 
 // ---------- EQUIVALENCIAS ----------
-app.get('/api/equivalencias', (req, res) => {
+app.get('/api/equivalencias', async (req, res) => {
   const db = req.ctx.db;
-  const search = req.query.search;
-  const params = [];
+  if (!db) {
+    return res.status(500).json({ error: 'db_not_available' });
+  }
 
-  let sql = `
-    SELECT 
+  try {
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const params = [];
+
+    let sql = `
+    SELECT
       ra.id,
       ra.id_lista_precios,
       ra.id_lista_interna,
@@ -398,37 +400,32 @@ app.get('/api/equivalencias', (req, res) => {
       lp.cod_externo,
       lp.nom_externo,
       lp.proveedor,
-      lp.fecha as fecha_externo,
+      lp.fecha AS fecha_externo,
       li.cod_interno,
       li.nom_interno,
-      li.fecha as fecha_interno
+      li.fecha AS fecha_interno
     FROM relacion_articulos ra
     LEFT JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
     LEFT JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
   `;
 
-  if (search && typeof search === 'string' && search.trim() !== '') {
-    const searchTerm = `%${search.trim()}%`;
-    sql += `
+    if (search) {
+      const searchTerm = `%${search}%`;
+      sql += `
       WHERE
-        lp.cod_externo LIKE ? OR
-        lp.nom_externo LIKE ? OR
-        lp.proveedor LIKE ? OR
-        li.cod_interno LIKE ? OR
-        li.nom_interno LIKE ?
+        lp.cod_externo ILIKE ? OR
+        lp.nom_externo ILIKE ? OR
+        lp.proveedor ILIKE ? OR
+        li.cod_interno ILIKE ? OR
+        li.nom_interno ILIKE ?
     `;
-    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
-  }
-
-  sql += ' ORDER BY datetime(relation_created_at) DESC, datetime(lp.fecha) DESC';
-
-  db.all(sql, params, (err, rows) => {
-    if (err) {
-      console.error('Error al obtener equivalencias:', err.message);
-      return res.status(500).json({ error: 'Error al obtener equivalencias' });
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
     }
 
-    const result = rows.map(row => ({
+    sql += ' ORDER BY ra.created_at DESC, lp.fecha DESC NULLS LAST';
+
+    const rows = await getDbRows(db, sql, params);
+    const result = rows.map((row) => ({
       id: row.id,
       id_lista_precios: row.id_lista_precios,
       id_lista_interna: row.id_lista_interna,
@@ -441,20 +438,27 @@ app.get('/api/equivalencias', (req, res) => {
       internalName: row.nom_interno,
       internalDate: row.fecha_interno,
       relationDate: row.relation_created_at,
-      matchingCriteria: row.criterio_relacion,
+      matchingCriteria: row.criterio_relacion
     }));
 
-    res.json(result);
-  });
+    return res.json(result);
+  } catch (err) {
+    console.error('Error al obtener equivalencias:', err);
+    return res.status(500).json({ error: 'Error al obtener equivalencias' });
+  }
 });
 
 // ---------- EDITAR RELACIÓN ----------
-app.put('/api/relacion/:id', (req, res) => {
+app.put('/api/relacion/:id', async (req, res) => {
   const db = req.ctx.db;
+  if (!db) {
+    return res.status(500).json({ success: false, message: 'db_not_available' });
+  }
+
   const relationId = Number(req.params.id);
   const { matchingCriteria, lista_precios, lista_interna } = req.body || {};
 
-  if (!relationId) {
+  if (!Number.isFinite(relationId)) {
     return res.status(400).json({ success: false, message: 'id de relación inválido' });
   }
   if (!lista_precios?.id_externo || !lista_interna?.id_interno) {
@@ -476,88 +480,64 @@ app.put('/api/relacion/:id', (req, res) => {
   };
   const criterio = matchingCriteria ?? null;
 
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
-
-    db.get(
+  await runDb(db, 'BEGIN');
+  try {
+    const rel = await getDbRow(
+      db,
       `SELECT id, id_lista_precios, id_lista_interna
          FROM relacion_articulos
         WHERE id = ?`,
-      [relationId],
-      (err, rel) => {
-        if (err) {
-          db.run('ROLLBACK');
-          return res.status(500).json({ success: false, message: 'Error leyendo relación' });
-        }
-        if (!rel) {
-          db.run('ROLLBACK');
-          return res.status(404).json({ success: false, message: 'Relación no encontrada' });
-        }
-        if (rel.id_lista_precios !== lp.id_externo || rel.id_lista_interna !== li.id_interno) {
-          db.run('ROLLBACK');
-          return res.status(400).json({ success: false, message: 'IDs no coinciden con la relación' });
-        }
-
-        db.run(
-          `UPDATE lista_precios
-              SET proveedor = COALESCE(?, proveedor),
-                  cod_externo = ?,
-                  nom_externo = COALESCE(?, nom_externo),
-                  fecha = COALESCE(?, fecha)
-            WHERE id_externo = ?`,
-          [lp.proveedor, lp.cod_externo, lp.nom_externo, lp.fecha, lp.id_externo],
-          function (err2) {
-            if (err2) {
-              db.run('ROLLBACK');
-              return res.status(500).json({ success: false, message: 'Error actualizando lista_precios' });
-            }
-
-            db.run(
-              `UPDATE lista_interna
-                  SET cod_interno = ?,
-                      nom_interno = COALESCE(?, nom_interno),
-                      fecha = COALESCE(?, fecha)
-                WHERE id_interno = ?`,
-              [li.cod_interno, li.nom_interno, li.fecha, li.id_interno],
-              function (err3) {
-                if (err3) {
-                  db.run('ROLLBACK');
-                  return res.status(500).json({ success: false, message: 'Error actualizando lista_interna' });
-                }
-
-                const updateCriterio = (next) => {
-                  if (criterio === null || criterio === undefined) return next();
-                  db.run(
-                    `UPDATE relacion_articulos
-                        SET criterio_relacion = ?
-                      WHERE id = ?`,
-                    [criterio, relationId],
-                    function (err4) {
-                      if (err4) {
-                        db.run('ROLLBACK');
-                        return res.status(500).json({ success: false, message: 'Error actualizando criterio de relación' });
-                      }
-                      next();
-                    }
-                  );
-                };
-
-                updateCriterio(() => {
-                  db.run('COMMIT', (err5) => {
-                    if (err5) {
-                      db.run('ROLLBACK');
-                      return res.status(500).json({ success: false, message: 'Error al confirmar cambios' });
-                    }
-                    return res.json({ success: true });
-                  });
-                });
-              }
-            );
-          }
-        );
-      }
+      [relationId]
     );
-  });
+
+    if (!rel) {
+      await runDb(db, 'ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Relación no encontrada' });
+    }
+
+    if (rel.id_lista_precios !== lp.id_externo || rel.id_lista_interna !== li.id_interno) {
+      await runDb(db, 'ROLLBACK');
+      return res.status(400).json({ success: false, message: 'IDs no coinciden con la relación' });
+    }
+
+    await runDb(
+      db,
+      `UPDATE lista_precios
+          SET proveedor = COALESCE(?, proveedor),
+              cod_externo = ?,
+              nom_externo = COALESCE(?, nom_externo),
+              fecha = COALESCE(?, fecha)
+        WHERE id_externo = ?`,
+      [lp.proveedor, lp.cod_externo, lp.nom_externo, lp.fecha, lp.id_externo]
+    );
+
+    await runDb(
+      db,
+      `UPDATE lista_interna
+          SET cod_interno = ?,
+              nom_interno = COALESCE(?, nom_interno),
+              fecha = COALESCE(?, fecha)
+        WHERE id_interno = ?`,
+      [li.cod_interno, li.nom_interno, li.fecha, li.id_interno]
+    );
+
+    if (criterio !== null && criterio !== undefined) {
+      await runDb(
+        db,
+        `UPDATE relacion_articulos
+            SET criterio_relacion = ?
+          WHERE id = ?`,
+        [criterio, relationId]
+      );
+    }
+
+    await runDb(db, 'COMMIT');
+    return res.json({ success: true });
+  } catch (err) {
+    await runDb(db, 'ROLLBACK').catch(() => {});
+    console.error('Error actualizando relación:', err);
+    return res.status(500).json({ success: false, message: 'Error actualizando relación' });
+  }
 });
 
 // ---------- LOGOUT ----------
@@ -662,7 +642,7 @@ app.get('/api/relaciones', (req, res) => {
     FROM relacion_articulos r
     LEFT JOIN lista_precios lp ON r.id_lista_precios = lp.id_externo
     LEFT JOIN lista_interna li ON r.id_lista_interna = li.id_interno
-    ORDER BY datetime(r.created_at) DESC
+    ORDER BY r.created_at DESC
   `;
   db.all(sql, [], (err, rows) => {
     if (err) {
@@ -996,7 +976,7 @@ app.get('/api/price-comparisons', (req, res) => {
   const applyFamilia = (cols) =>
     hasFamilia ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
 
-  // Usa DATE(...) para que SQLite compare solo fecha (no hora)
+  // Usa DATE(...) para comparar solo fecha (sin hora)
   const buildDateRange = (col /* ya con DATE(...) */) => {
     if (hasFrom && hasTo) return `${col} BETWEEN ? AND ?`;
     if (hasFrom) return `${col} >= ?`;
