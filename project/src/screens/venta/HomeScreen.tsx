@@ -204,7 +204,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, userRole, on
                 <span className="flex items-center gap-1.5 transition-all duration-200 group-hover:opacity-0 group-hover:-translate-y-1">
                   <span className="opacity-80">Bienvenido ·</span>
                   <span className="font-semibold">
-                    {userRole === 'compra' ? 'Compras' : userRole === 'venta' ? 'Ventas' : 'Usuario'}
+                    {userRole === 'compra' ? 'Compras' : userRole === 'venta' ? 'Ventas' : 'Ventas'}
                   </span>
                 </span>
 
