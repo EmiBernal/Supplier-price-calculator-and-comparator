@@ -1114,8 +1114,8 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
 
       const wb = XLSX.read(req.file.buffer);
       const ws = wb.Sheets[wb.SheetNames[0]];
-
       const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+
       const headersRaw = (matrix[headerIndex0] || []).map(v => String(v ?? ''));
       const dataRows = matrix.slice(headerIndex0 + 1);
 
