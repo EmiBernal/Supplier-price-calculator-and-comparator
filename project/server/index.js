@@ -427,6 +427,113 @@ app.get('/api/lista_precios', async (req, res) => {
 });
 
 // ---------- NO RELACIONADOS (externos / internos) ----------
+function createNoRelacionadosHandler(tipo) {
+  const isExternos = tipo === 'externos';
+
+  return async (req, res) => {
+    if (req.ctx?.tenant === 'compra') {
+      return res.status(404).json({ error: 'no_disponible_en_compras' });
+    }
+
+    const db = req.ctx.db;
+    if (!db) {
+      return res.status(500).json({ error: 'db_not_available' });
+    }
+
+    try {
+      const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+      const hasSearch = searchRaw.length > 0;
+      const searchTerm = hasSearch ? `%${searchRaw.toLowerCase()}%` : null;
+      const onlyPending = String(req.query.onlyPending || '1') === '1';
+      const limit = parseLimitParam(req.query.limit);
+      const offset = parseOffsetParam(req.query.offset);
+
+      const params = [];
+      const where = [];
+
+      if (isExternos) {
+        where.push('ra.id IS NULL');
+        if (onlyPending) {
+          where.push('anr.id_lista_precios IS NOT NULL');
+        }
+        if (hasSearch) {
+          where.push(`(
+            LOWER(lp.cod_externo) LIKE $1 OR
+            LOWER(lp.nom_externo) LIKE $2 OR
+            LOWER(lp.proveedor) LIKE $3
+          )`);
+          params.push(searchTerm, searchTerm, searchTerm);
+        }
+
+        const sql = `
+          SELECT DISTINCT
+            lp.id_externo AS id_externo,
+            lp.cod_externo AS codigo,
+            lp.nom_externo AS nombre,
+            lp.proveedor AS proveedor,
+            lp.precio_final AS precio_final,
+            lp.fecha AS fecha,
+            anr.motivo AS motivo,
+            CASE WHEN anr.id_lista_precios IS NULL THEN 0 ELSE 1 END AS es_pendiente
+          FROM lista_precios lp
+          LEFT JOIN relacion_articulos ra ON ra.id_lista_precios = lp.id_externo
+          LEFT JOIN articulos_no_relacionados anr ON anr.id_lista_precios = lp.id_externo
+          ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+          ORDER BY es_pendiente DESC,
+                   DATE(lp.fecha) DESC,
+                   lp.id_externo DESC,
+                   LOWER(lp.nom_externo) ASC
+          LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+        `;
+        params.push(limit, offset);
+
+        const rows = await getDbRows(db, sql, params);
+        return res.json(rows);
+      }
+
+      // internos
+      where.push('ra.id IS NULL');
+      if (onlyPending) {
+        where.push('agnr.id_lista_interna IS NOT NULL');
+      }
+      if (hasSearch) {
+        where.push(`(
+          LOWER(li.cod_interno) LIKE $1 OR
+          LOWER(li.nom_interno) LIKE $2
+        )`);
+        params.push(searchTerm, searchTerm);
+      }
+
+      const sql = `
+        SELECT DISTINCT
+          li.id_interno AS id_interno,
+          li.cod_interno AS codigo,
+          li.nom_interno AS nombre,
+          li.precio_final AS precio_final,
+          li.fecha AS fecha,
+          agnr.motivo AS motivo,
+          CASE WHEN agnr.id_lista_interna IS NULL THEN 0 ELSE 1 END AS es_pendiente
+        FROM lista_interna li
+        LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
+        LEFT JOIN articulos_gampack_no_relacionados agnr ON agnr.id_lista_interna = li.id_interno
+        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY es_pendiente DESC,
+                 DATE(li.fecha) DESC,
+                 li.id_interno DESC,
+                 LOWER(li.nom_interno) ASC
+        LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+      `;
+      params.push(limit, offset);
+
+      const rows = await getDbRows(db, sql, params);
+      return res.json(rows);
+    } catch (err) {
+      console.error('Error al obtener productos no relacionados:', err);
+      return res.status(500).json({ error: 'db_error' });
+    }
+  };
+}
+
 const handleNoRelacionadosExternos = createNoRelacionadosHandler('externos');
 const handleNoRelacionadosInternos = createNoRelacionadosHandler('internos');
 
