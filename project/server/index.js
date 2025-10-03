@@ -213,166 +213,6 @@ function parseTimestamp(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function createNoRelacionadosHandler(tipo) {
-  const isExternos = tipo === 'externos';
-
-  return async (req, res) => {
-    if (req.ctx?.tenant === 'compra') {
-      return res.status(404).json({ error: 'no_disponible_en_compras' });
-    }
-
-    const db = req.ctx.db;
-    if (!db) {
-      return res.status(500).json({ error: 'db_not_available' });
-    }
-
-    try {
-      const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
-      const hasSearch = searchRaw.length > 0;
-      const searchTerm = hasSearch ? `%${searchRaw.toLowerCase()}%` : null;
-      const onlyPending = parseOnlyPending(req.query.onlyPending);
-      const limit = parseLimitParam(req.query.limit);
-      const offset = parseOffsetParam(req.query.offset);
-
-      const params = [];
-      const where = [];
-
-      if (isExternos) {
-        where.push('ra.id IS NULL');
-        if (onlyPending) {
-          where.push('anr.id_lista_precios IS NOT NULL');
-        }
-        if (hasSearch) {
-          where.push(`(
-          LOWER(lp.cod_externo) LIKE ? OR
-          LOWER(lp.nom_externo) LIKE ? OR
-          LOWER(lp.proveedor) LIKE ?
-        )`);
-          params.push(searchTerm, searchTerm, searchTerm);
-        }
-
-        const sql = `
-        SELECT DISTINCT
-          lp.id_externo AS id_externo,
-          lp.cod_externo AS codigo,
-          lp.nom_externo AS nombre,
-          lp.proveedor AS proveedor,
-          lp.precio_final AS precio_final,
-          lp.fecha AS fecha,
-          anr.motivo AS motivo,
-          CASE WHEN anr.id_lista_precios IS NULL THEN 0 ELSE 1 END AS es_pendiente
-        FROM lista_precios lp
-        LEFT JOIN relacion_articulos ra ON ra.id_lista_precios = lp.id_externo
-        LEFT JOIN articulos_no_relacionados anr ON anr.id_lista_precios = lp.id_externo
-        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-        ORDER BY es_pendiente DESC,
-                 DATE(lp.fecha) DESC,
-                 lp.id_externo DESC,
-                 LOWER(lp.nom_externo) ASC
-        LIMIT ? OFFSET ?
-      `;
-
-        params.push(limit, offset);
-
-        const rows = await getDbRows(db, sql, params);
-        const data = rows.map((row) => {
-          const codigo = row.codigo ?? null;
-          const nombre = row.nombre ?? null;
-          const proveedor = row.proveedor ?? null;
-          const precioFinal = row.precio_final ?? null;
-          const fecha = row.fecha ?? null;
-
-          return {
-            id_externo: row.id_externo,
-            codigo,
-            nombre,
-            proveedor,
-            precio_final: precioFinal,
-            fecha,
-            cod_externo: codigo,
-            nom_externo: nombre,
-            motivo: row.motivo ?? null,
-            pendiente: row.es_pendiente === 1,
-            id: row.id_externo,
-            code: codigo,
-            name: nombre,
-            provider: proveedor,
-            finalPrice: precioFinal,
-            date: fecha
-          };
-        });
-
-        return res.json(data);
-      }
-
-      where.push('ra.id IS NULL');
-      if (onlyPending) {
-        where.push('agnr.id_lista_interna IS NOT NULL');
-      }
-      if (hasSearch) {
-        where.push(`(
-        LOWER(li.cod_interno) LIKE ? OR
-        LOWER(li.nom_interno) LIKE ?
-      )`);
-        params.push(searchTerm, searchTerm);
-      }
-
-      const sql = `
-      SELECT DISTINCT
-        li.id_interno AS id_interno,
-        li.cod_interno AS codigo,
-        li.nom_interno AS nombre,
-        li.precio_final AS precio_final,
-        li.fecha AS fecha,
-        agnr.motivo AS motivo,
-        CASE WHEN agnr.id_lista_interna IS NULL THEN 0 ELSE 1 END AS es_pendiente
-      FROM lista_interna li
-      LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
-      LEFT JOIN articulos_gampack_no_relacionados agnr ON agnr.id_lista_interna = li.id_interno
-      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-      ORDER BY es_pendiente DESC,
-               DATE(li.fecha) DESC,
-               li.id_interno DESC,
-               LOWER(li.nom_interno) ASC
-      LIMIT ? OFFSET ?
-    `;
-
-      params.push(limit, offset);
-
-      const rows = await getDbRows(db, sql, params);
-      const data = rows.map((row) => {
-        const codigo = row.codigo ?? null;
-        const nombre = row.nombre ?? null;
-        const precioFinal = row.precio_final ?? null;
-        const fecha = row.fecha ?? null;
-
-        return {
-          id_interno: row.id_interno,
-          codigo,
-          nombre,
-          precio_final: precioFinal,
-          fecha,
-          cod_interno: codigo,
-          nom_interno: nombre,
-          motivo: row.motivo ?? null,
-          pendiente: row.es_pendiente === 1,
-          id: row.id_interno,
-          code: codigo,
-          name: nombre,
-          provider: 'Gampack',
-          finalPrice: precioFinal,
-          date: fecha
-        };
-      });
-
-      return res.json(data);
-    } catch (err) {
-      console.error('Error al obtener productos no relacionados:', err);
-      return res.status(500).json({ error: 'db_error' });
-    }
-  };
-}
-
 // ============ Rutas ============
 
 app.get('/api/health', (req, res) => {
@@ -413,11 +253,11 @@ app.get('/api/equivalencias', async (req, res) => {
       const searchTerm = `%${search}%`;
       sql += `
       WHERE
-        lp.cod_externo ILIKE ? OR
-        lp.nom_externo ILIKE ? OR
-        lp.proveedor ILIKE ? OR
-        li.cod_interno ILIKE ? OR
-        li.nom_interno ILIKE ?
+        lp.cod_externo ILIKE $1 OR
+        lp.nom_externo ILIKE $2 OR
+        lp.proveedor ILIKE $3 OR
+        li.cod_interno ILIKE $4 OR
+        li.nom_interno ILIKE $5
     `;
       params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
     }
@@ -447,7 +287,6 @@ app.get('/api/equivalencias', async (req, res) => {
     return res.status(500).json({ error: 'Error al obtener equivalencias' });
   }
 });
-
 // ---------- EDITAR RELACIÓN ----------
 app.put('/api/relacion/:id', async (req, res) => {
   const db = req.ctx.db;
@@ -486,7 +325,7 @@ app.put('/api/relacion/:id', async (req, res) => {
       db,
       `SELECT id, id_lista_precios, id_lista_interna
          FROM relacion_articulos
-        WHERE id = ?`,
+        WHERE id = $1`,
       [relationId]
     );
 
@@ -503,21 +342,21 @@ app.put('/api/relacion/:id', async (req, res) => {
     await runDb(
       db,
       `UPDATE lista_precios
-          SET proveedor = COALESCE(?, proveedor),
-              cod_externo = ?,
-              nom_externo = COALESCE(?, nom_externo),
-              fecha = COALESCE(?, fecha)
-        WHERE id_externo = ?`,
+          SET proveedor = COALESCE($1, proveedor),
+              cod_externo = $2,
+              nom_externo = COALESCE($3, nom_externo),
+              fecha = COALESCE($4, fecha)
+        WHERE id_externo = $5`,
       [lp.proveedor, lp.cod_externo, lp.nom_externo, lp.fecha, lp.id_externo]
     );
 
     await runDb(
       db,
       `UPDATE lista_interna
-          SET cod_interno = ?,
-              nom_interno = COALESCE(?, nom_interno),
-              fecha = COALESCE(?, fecha)
-        WHERE id_interno = ?`,
+          SET cod_interno = $1,
+              nom_interno = COALESCE($2, nom_interno),
+              fecha = COALESCE($3, fecha)
+        WHERE id_interno = $4`,
       [li.cod_interno, li.nom_interno, li.fecha, li.id_interno]
     );
 
@@ -525,8 +364,8 @@ app.put('/api/relacion/:id', async (req, res) => {
       await runDb(
         db,
         `UPDATE relacion_articulos
-            SET criterio_relacion = ?
-          WHERE id = ?`,
+            SET criterio_relacion = $1
+          WHERE id = $2`,
         [criterio, relationId]
       );
     }
@@ -553,7 +392,7 @@ app.get('/api/providers/summary', async (req, res) => {
     const db = req.ctx.db;
     const rows = await getDbRows(
       db,
-      `SELECT proveedor AS proveedor, COUNT(*) AS products
+      `SELECT proveedor AS proveedor, COUNT(*)::int AS products
        FROM lista_precios
        WHERE proveedor IS NOT NULL AND TRIM(proveedor) <> ''
        GROUP BY proveedor
@@ -576,7 +415,7 @@ app.get('/api/lista_precios', async (req, res) => {
     const rows = await getDbRows(
       db,
       `SELECT * FROM lista_precios
-       WHERE cod_externo ILIKE ? OR nom_externo ILIKE ?
+       WHERE cod_externo ILIKE $1 OR nom_externo ILIKE $2
        ORDER BY fecha DESC`,
       [`%${search}%`, `%${search}%`]
     );
@@ -597,7 +436,7 @@ app.get('/api/no-relacionados/internos', handleNoRelacionadosInternos);
 app.get('/api/no-relacionados/gampack', handleNoRelacionadosInternos);
 
 // ---------- CHECK PRODUCT ----------
-app.post('/api/check-product', (req, res) => {
+app.post('/api/check-product', async (req, res) => {
   const db = req.ctx.db;
   const { productCode, companyType } = req.body;
 
@@ -609,27 +448,26 @@ app.post('/api/check-product', (req, res) => {
   let params = [];
 
   if (companyType === 'Proveedor') {
-    sql = `SELECT * FROM lista_precios WHERE cod_externo = ?`;
+    sql = `SELECT * FROM lista_precios WHERE cod_externo = $1`;
     params = [productCode];
   } else if (companyType === 'Gampack') {
-    sql = `SELECT * FROM lista_interna WHERE cod_interno = ?`;
+    sql = `SELECT * FROM lista_interna WHERE cod_interno = $1`;
     params = [productCode];
   } else {
     return res.status(400).json({ error: 'Tipo de empresa no válido' });
   }
 
-  db.get(sql, params, (err, row) => {
-    if (err) {
-      console.error('Error al chequear producto:', err.message);
-      return res.status(500).json({ error: 'Error en base de datos' });
-    }
-
+  try {
+    const row = await getDbRow(db, sql, params);
     if (row) {
       return res.status(200).json({ found: true, product: row });
     } else {
       return res.status(200).json({ found: false });
     }
-  });
+  } catch (err) {
+    console.error('Error al chequear producto:', err.message);
+    return res.status(500).json({ error: 'Error en base de datos' });
+  }
 });
 
 // ---------- RELACIONES (lista) ----------
@@ -638,7 +476,7 @@ app.get('/api/relaciones', async (req, res) => {
     const db = req.ctx.db;
     const rows = await getDbRows(
       db,
-      `SELECT r., 
+      `SELECT r.*,
               r.created_at AS relation_created_at,
               lp.cod_externo, lp.nom_externo, 
               li.cod_interno, li.nom_interno
@@ -656,7 +494,7 @@ app.get('/api/relaciones', async (req, res) => {
 });
 
 // ---------- RELACIONAR MANUAL ----------
-app.post('/api/relacionar-manual', (req, res) => {
+app.post('/api/relacionar-manual', async (req, res) => {
   const db = req.ctx.db;
   const { id_lista_interna, ids_lista_precios, criterio } = req.body;
 
@@ -664,42 +502,43 @@ app.post('/api/relacionar-manual', (req, res) => {
     return res.status(400).json({ error: 'Datos incompletos o inválidos' });
   }
 
-  const placeholders = ids_lista_precios.map(() => '(?, ?, ?)').join(', ');
-  const params = ids_lista_precios.flatMap(id => [id, id_lista_interna, criterio]);
+  try {
+    await runDb(db, 'BEGIN');
+    for (const id of ids_lista_precios) {
+      await runDb(
+        db,
+        `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
+         VALUES ($1, $2, $3)
+         ON CONFLICT DO NOTHING`,
+        [id, id_lista_interna, criterio]
+      );
 
-  const sql = `
-    INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
-    VALUES ${placeholders}
-  `;
-
-  db.run(sql, params, function (err) {
-    if (err) {
-      console.error('Error al vincular productos:', err.message);
-      return res.status(500).json({ error: 'Error al vincular productos' });
+      await runDb(
+        db,
+        `DELETE FROM articulos_no_relacionados WHERE id_lista_precios = $1`,
+        [id]
+      );
     }
 
-    const deleteExternosSql = `
-      DELETE FROM articulos_no_relacionados WHERE id_lista_precios IN (${ids_lista_precios.map(() => '?').join(',')})
-    `;
-    db.run(deleteExternosSql, ids_lista_precios, (delErr) => {
-      if (delErr) {
-        console.error('Error eliminando artículos no relacionados (externos):', delErr.message);
-      }
-    });
+    await runDb(
+      db,
+      `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`,
+      [id_lista_interna]
+    );
 
-    const deleteInternoSql = `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = ?`;
-    db.run(deleteInternoSql, [id_lista_interna], (delErr) => {
-      if (delErr) {
-        console.error('Error eliminando artículo no relacionado (interno):', delErr.message);
-      }
-    });
-
+    await runDb(db, 'COMMIT');
     res.status(200).json({ success: true });
-  });
+  } catch (err) {
+    await runDb(db, 'ROLLBACK').catch(() => {});
+    console.error('Error al vincular productos:', err);
+    return res.status(500).json({ error: 'Error al vincular productos' });
+  }
 });
 
 // ---------- Alta producto (manual) ----------
-app.post('/api/products', (req, res) => {
+
+// ---------- Alta producto (manual) ----------
+app.post('/api/products', async (req, res) => {
   const db = req.ctx.db;
   const {
     productCode,
@@ -711,264 +550,192 @@ app.post('/api/products', (req, res) => {
     linkAsEquivalent = null,
   } = req.body;
 
-  console.log('ctx =>', { tenant: req.ctx?.tenant, schema: req.ctx?.schema });
-
   if (!productName || finalPrice == null || !companyType || !date) {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
   }
 
-  const createRelationAndClean = (idListaPrecios, idListaInterna) => {
-    return new Promise((resolve, reject) => {
-      const checkSQL = `SELECT 1 FROM relacion_articulos WHERE id_lista_precios = ? AND id_lista_interna = ?`;
-      db.get(checkSQL, [idListaPrecios, idListaInterna], (err, row) => {
-        if (err) return reject(err);
-        if (row) return resolve();
+  async function createRelationAndClean(idListaPrecios, idListaInterna) {
+    const exists = await getDbRow(
+      db,
+      `SELECT 1 FROM relacion_articulos WHERE id_lista_precios = $1 AND id_lista_interna = $2`,
+      [idListaPrecios, idListaInterna]
+    );
+    if (exists) return;
 
-        const insertRelSQL = `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion) VALUES (?, ?, 'automatic')`;
-        db.run(insertRelSQL, [idListaPrecios, idListaInterna], function (err2) {
-          if (err2) return reject(err2);
+    await runDb(
+      db,
+      `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
+       VALUES ($1, $2, 'automatic')`,
+      [idListaPrecios, idListaInterna]
+    );
 
-          db.run(`DELETE FROM articulos_no_relacionados WHERE id_lista_precios = ?`, [idListaPrecios]);
-          db.run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = ?`, [idListaInterna]);
-          resolve();
-        });
-      });
-    });
-  };
+    await runDb(db, `DELETE FROM articulos_no_relacionados WHERE id_lista_precios = $1`, [idListaPrecios]);
+    await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [idListaInterna]);
+  }
 
-  if (companyType === 'Proveedor') {
-    const selectExactSQL = `
-      SELECT * FROM lista_precios 
-      WHERE LOWER(cod_externo) = LOWER(?) AND LOWER(nom_externo) = LOWER(?) 
-        AND proveedor = ? AND tipo_empresa = ?
-    `;
-    db.get(selectExactSQL, [productCode, productName, company, companyType], async (err, exactProduct) => {
-      if (err) return res.status(500).json({ error: 'Error base de datos' });
+  try {
+    if (companyType === 'Proveedor') {
+      const exact = await getDbRow(
+        db,
+        `SELECT * FROM lista_precios
+         WHERE LOWER(cod_externo) = LOWER($1)
+           AND LOWER(nom_externo) = LOWER($2)
+           AND proveedor = $3
+           AND tipo_empresa = $4`,
+        [productCode, productName, company, companyType]
+      );
 
-      try {
-        if (exactProduct) {
-          const updates = [];
-          const params = [];
-
-          if (exactProduct.precio_final !== finalPrice) {
-            updates.push('precio_final = ?');
-            params.push(finalPrice);
-          }
-
-          if (updates.length > 0) {
-            params.push(productCode, productName, company, companyType);
-            const updateSQL = `
-              UPDATE lista_precios 
-              SET ${updates.join(', ')} 
-              WHERE LOWER(cod_externo) = LOWER(?) AND LOWER(nom_externo) = LOWER(?) 
-                AND proveedor = ? AND tipo_empresa = ?
-            `;
-            await new Promise((resolve, reject) => {
-              db.run(updateSQL, params, (e) => (e ? reject(e) : resolve()));
-            });
-          }
-
-          return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
+      if (exact) {
+        if (exact.precio_final !== finalPrice) {
+          await runDb(
+            db,
+            `UPDATE lista_precios
+             SET precio_final = $1
+             WHERE LOWER(cod_externo) = LOWER($2)
+               AND LOWER(nom_externo) = LOWER($3)
+               AND proveedor = $4
+               AND tipo_empresa = $5`,
+            [finalPrice, productCode, productName, company, companyType]
+          );
         }
-
-        const insertSQL = `
-          INSERT INTO lista_precios 
-          (cod_externo, nom_externo, precio_final, tipo_empresa, fecha, proveedor) 
-          VALUES (?, ?, ?, ?, ?, ?)
-          RETURNING id_externo
-        `;
-        db.get(insertSQL, [productCode, productName, finalPrice, companyType, date, company], function (e, row) {
-          if (e) return res.status(500).json({ error: 'Error base de datos' });
-
-          const newId = row?.id_externo;
-
-          const selectGampackSQL = `
-            SELECT * FROM lista_interna 
-            WHERE LOWER(cod_interno) = LOWER(?) OR LOWER(nom_interno) = LOWER(?) 
-            LIMIT 1
-          `;
-          db.get(selectGampackSQL, [productCode, productName], async (err2, gampackProd) => {
-            if (err2) return res.status(500).json({ error: 'Error base de datos' });
-
-            if (gampackProd && linkAsEquivalent !== false) {
-              try {
-                await createRelationAndClean(newId, gampackProd.id_interno);
-                return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
-              } catch (error) {
-                return res.status(500).json({ error: 'Error creando relación' });
-              }
-            }
-
-            const motivo = gampackProd ? 'Usuario rechazó sugerencia de relación' : 'No se encontró coincidencia por código ni nombre';
-            db.run(
-              `INSERT INTO articulos_no_relacionados (id_lista_precios, motivo)
-               VALUES (?, ?)
-               ON CONFLICT (id_lista_precios) DO NOTHING`,
-              [newId, motivo],
-              (err3) => {
-                if (err3) return res.status(500).json({ error: 'Error base de datos' });
-                return res.status(201).json({ success: true, message: 'Producto creado - no relacionados' });
-              }
-            );
-          });
-        });
-      } catch (error) {
-        return res.status(500).json({ error: 'Error interno' });
+        return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
       }
-    });
-  } else if (companyType === 'Gampack') {
-    const selectExactSQL = `
-      SELECT * FROM lista_interna 
-      WHERE LOWER(cod_interno) = LOWER(?) AND LOWER(nom_interno) = LOWER(?)
-    `;
-    db.get(selectExactSQL, [productCode, productName], async (err, exactProduct) => {
-      if (err) return res.status(500).json({ error: 'Error base de datos' });
 
-      try {
-        if (exactProduct) {
-          if (exactProduct.precio_final !== finalPrice) {
-            const updateSQL = `
-              UPDATE lista_interna 
-              SET precio_final = ? 
-              WHERE LOWER(cod_interno) = LOWER(?) AND LOWER(nom_interno) = LOWER(?)
-            `;
-            await new Promise((resolve, reject) => {
-              db.run(updateSQL, [finalPrice, productCode, productName], (e) => (e ? reject(e) : resolve()));
-            });
-          }
+      const inserted = await getDbRow(
+        db,
+        `INSERT INTO lista_precios (cod_externo, nom_externo, precio_final, tipo_empresa, fecha, proveedor)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id_externo`,
+        [productCode, productName, finalPrice, companyType, date, company]
+      );
+      const newId = inserted?.id_externo;
 
-          return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
+      const gampackProd = await getDbRow(
+        db,
+        `SELECT * FROM lista_interna
+         WHERE LOWER(cod_interno) = LOWER($1) OR LOWER(nom_interno) = LOWER($2)
+         LIMIT 1`,
+        [productCode, productName]
+      );
+
+      if (gampackProd && linkAsEquivalent !== false) {
+        await createRelationAndClean(newId, gampackProd.id_interno);
+        return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
+      }
+
+      const motivo = gampackProd
+        ? 'Usuario rechazó sugerencia de relación'
+        : 'No se encontró coincidencia por código ni nombre';
+
+      await runDb(
+        db,
+        `INSERT INTO articulos_no_relacionados (id_lista_precios, motivo)
+         VALUES ($1, $2)
+         ON CONFLICT (id_lista_precios) DO NOTHING`,
+        [newId, motivo]
+      );
+
+      return res.status(201).json({ success: true, message: 'Producto creado - no relacionados' });
+    }
+
+    if (companyType === 'Gampack') {
+      const exact = await getDbRow(
+        db,
+        `SELECT * FROM lista_interna
+         WHERE LOWER(cod_interno) = LOWER($1) AND LOWER(nom_interno) = LOWER($2)`,
+        [productCode, productName]
+      );
+
+      if (exact) {
+        if (exact.precio_final !== finalPrice) {
+          await runDb(
+            db,
+            `UPDATE lista_interna
+             SET precio_final = $1
+             WHERE LOWER(cod_interno) = LOWER($2) AND LOWER(nom_interno) = LOWER($3)`,
+            [finalPrice, productCode, productName]
+          );
         }
-
-        const insertSQL = `
-          INSERT INTO lista_interna 
-          (cod_interno, nom_interno, precio_final, fecha) 
-          VALUES (?, ?, ?, ?)
-          RETURNING id_interno
-        `;
-        db.get(insertSQL, [productCode, productName, finalPrice, date], function (e, row) {
-          if (e) return res.status(500).json({ error: 'Error base de datos' });
-
-          const newId = row?.id_interno;
-
-          const selectProveedorSQL = `
-            SELECT * FROM lista_precios 
-            WHERE LOWER(cod_externo) = LOWER(?) OR LOWER(nom_externo) = LOWER(?) 
-            LIMIT 1
-          `;
-          db.get(selectProveedorSQL, [productCode, productName], async (err2, proveedorProd) => {
-            if (err2) return res.status(500).json({ error: 'Error base de datos' });
-
-            if (proveedorProd && linkAsEquivalent !== false) {
-              try {
-                await createRelationAndClean(proveedorProd.id_externo, newId);
-                return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
-              } catch (error) {
-                return res.status(500).json({ error: 'Error creando relación' });
-              }
-            }
-
-            const motivo = proveedorProd ? 'Usuario rechazó sugerencia de relación' : 'No se encontró coincidencia por código ni nombre';
-            db.run(
-              `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
-               VALUES (?, ?)
-               ON CONFLICT (id_lista_interna) DO NOTHING`,
-              [newId, motivo],
-              (err3) => {
-                if (err3) return res.status(500).json({ error: 'Error base de datos' });
-                return res.status(201).json({ success: true, message: 'Producto creado - no relacionados' });
-              }
-            );
-          });
-        });
-      } catch (error) {
-        return res.status(500).json({ error: 'Error interno' });
+        return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
       }
-    });
-  } else {
+
+      const inserted = await getDbRow(
+        db,
+        `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id_interno`,
+        [productCode, productName, finalPrice, date]
+      );
+      const newId = inserted?.id_interno;
+
+      const proveedorProd = await getDbRow(
+        db,
+        `SELECT * FROM lista_precios
+         WHERE LOWER(cod_externo) = LOWER($1) OR LOWER(nom_externo) = LOWER($2)
+         LIMIT 1`,
+        [productCode, productName]
+      );
+
+      if (proveedorProd && linkAsEquivalent !== false) {
+        await createRelationAndClean(proveedorProd.id_externo, newId);
+        return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
+      }
+
+      const motivo = proveedorProd
+        ? 'Usuario rechazó sugerencia de relación'
+        : 'No se encontró coincidencia por código ni nombre';
+
+      await runDb(
+        db,
+        `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
+         VALUES ($1, $2)
+         ON CONFLICT (id_lista_interna) DO NOTHING`,
+        [newId, motivo]
+      );
+
+      return res.status(201).json({ success: true, message: 'Producto creado - no relacionados' });
+    }
+
     return res.status(400).json({ error: 'Tipo de empresa no válido' });
+  } catch (error) {
+    console.error('Alta producto error:', error);
+    return res.status(500).json({ error: 'Error interno' });
   }
 });
 
 // ---------- BORRAR RELACIÓN + productos asociados ----------
-app.delete('/api/relacion/:id', (req, res) => {
+app.delete('/api/relacion/:id', async (req, res) => {
   const db = req.ctx.db;
-  const id = req.params.id;
-  console.log('🟠 DELETE recibido para id:', id);
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID inválido' });
 
-  if (isNaN(Number(id))) {
-    console.log('🔴 ID inválido:', id);
-    return res.status(400).json({ error: 'ID inválido' });
+  try {
+    const rel = await getDbRow(
+      db,
+      `SELECT id_lista_precios, id_lista_interna
+       FROM relacion_articulos
+       WHERE id = $1`,
+      [id]
+    );
+
+    if (!rel) return res.status(404).json({ error: 'Relación no encontrada' });
+
+    await runDb(db, 'BEGIN');
+    await runDb(db, `DELETE FROM relacion_articulos WHERE id = $1`, [id]);
+    await runDb(db, `DELETE FROM lista_precios WHERE id_externo = $1`, [rel.id_lista_precios]);
+    await runDb(db, `DELETE FROM lista_interna WHERE id_interno = $1`, [rel.id_lista_interna]);
+    await runDb(db, 'COMMIT');
+
+    return res.status(200).json({ success: true, message: 'Relación y productos eliminados correctamente' });
+  } catch (err) {
+    await runDb(db, 'ROLLBACK').catch(() => {});
+    console.error('Error eliminando relación y productos:', err);
+    return res.status(500).json({ error: 'Error en base de datos' });
   }
-
-  const sqlGetRelation = `
-    SELECT id_lista_precios, id_lista_interna 
-    FROM relacion_articulos 
-    WHERE id = ?
-  `;
-
-  db.get(sqlGetRelation, [id], (err, row) => {
-    if (err) {
-      console.error('❌ Error al buscar relación:', err.message);
-      return res.status(500).json({ error: 'Error en base de datos' });
-    }
-
-    if (!row) {
-      console.log('⚠️ Relación no encontrada para id:', id);
-      return res.status(404).json({ error: 'Relación no encontrada' });
-    }
-
-    console.log('🟢 Relación encontrada:', row);
-
-    const { id_lista_precios, id_lista_interna } = row;
-
-    db.serialize(() => {
-      db.run('BEGIN');
-      db.run(`DELETE FROM relacion_articulos WHERE id = ?`, [id], function (errDelRel) {
-        if (errDelRel) {
-          console.error('❌ Error eliminando relación:', errDelRel.message);
-          db.run('ROLLBACK');
-          return res.status(500).json({ error: 'Error eliminando relación' });
-        }
-
-        console.log(`✅ Relación con id=${id} eliminada, filas afectadas: ${this.changes}`);
-
-        db.run(`DELETE FROM lista_precios WHERE id_externo = ?`, [id_lista_precios], function (errDelProv) {
-          if (errDelProv) {
-            console.error('❌ Error eliminando producto proveedor:', errDelProv.message);
-            db.run('ROLLBACK');
-            return res.status(500).json({ error: 'Error eliminando producto proveedor' });
-          }
-
-          console.log(`✅ Producto proveedor eliminado, filas afectadas: ${this.changes}`);
-
-          db.run(`DELETE FROM lista_interna WHERE id_interno = ?`, [id_lista_interna], function (errDelInt) {
-            if (errDelInt) {
-              console.error('❌ Error eliminando producto interno:', errDelInt.message);
-              db.run('ROLLBACK');
-              return res.status(500).json({ error: 'Error eliminando producto interno' });
-            }
-
-            console.log(`✅ Producto interno eliminado, filas afectadas: ${this.changes}`);
-
-            db.run('COMMIT', (commitErr) => {
-              if (commitErr) {
-                console.error('❌ Error haciendo commit:', commitErr.message);
-                return res.status(500).json({ error: 'Error en la base de datos' });
-              }
-
-              console.log('🟢 Eliminación confirmada con COMMIT');
-              res.status(200).json({ success: true, message: 'Relación y productos eliminados correctamente' });
-            });
-          });
-        });
-      });
-    });
-  });
 });
 
 // ---------- COMPARACIONES DE PRECIOS ----------
-app.get('/api/price-comparisons', (req, res) => {
+app.get('/api/price-comparisons', async (req, res) => {
   const db = req.ctx.db;
   const search = (req.query.search || '').toString().toLowerCase();
   const dateFrom = (req.query.dateFrom || '').toString(); // YYYY-MM-DD
@@ -976,8 +743,6 @@ app.get('/api/price-comparisons', (req, res) => {
   const familia = (req.query.familia || '').toString().toLowerCase();
   const onlyRelated = String(req.query.onlyRelated || '0') === '1';
 
-  // ⬇️ CAMBIO CLAVE: por defecto usamos fecha de RELACIÓN,
-  // y si onlyRelated=1, forzamos sí o sí fecha de RELACIÓN.
   let dateMode = (req.query.dateMode || 'relation').toString(); // 'product' | 'relation'
   if (onlyRelated) dateMode = 'relation';
 
@@ -988,13 +753,13 @@ app.get('/api/price-comparisons', (req, res) => {
   const like = `%${search}%`;
   const familiaLike = `%${familia}%`;
 
+  // helpers que devuelven cláusulas con '?' para que prepareSql() las numere
   const applySearch = (cols) =>
     search ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
   const applyFamilia = (cols) =>
     hasFamilia ? '(' + cols.map(c => `LOWER(${c}) LIKE ?`).join(' OR ') + ')' : '1=1';
 
-  // Usa DATE(...) para comparar solo fecha (sin hora)
-  const buildDateRange = (col /* ya con DATE(...) */) => {
+  const buildDateRange = (col) => {
     if (hasFrom && hasTo) return `${col} BETWEEN ? AND ?`;
     if (hasFrom) return `${col} >= ?`;
     if (hasTo) return `${col} <= ?`;
@@ -1031,10 +796,12 @@ app.get('/api/price-comparisons', (req, res) => {
   }
 
   if (dateMode === 'relation' && (hasFrom || hasTo)) {
-    wherePairs.push(`${relDateRange}`);
-    if (hasFrom && hasTo) paramsPairs.push(dateFrom, dateTo);
-    else if (hasFrom) paramsPairs.push(dateFrom);
-    else paramsPairs.push(dateTo);
+    if (relDateRange) {
+      wherePairs.push(`${relDateRange}`);
+      if (hasFrom && hasTo) paramsPairs.push(dateFrom, dateTo);
+      else if (hasFrom) paramsPairs.push(dateFrom);
+      else paramsPairs.push(dateTo);
+    }
   }
 
   const sqlPairs = `
@@ -1058,7 +825,6 @@ app.get('/api/price-comparisons', (req, res) => {
     WHERE ${wherePairs.join(' AND ')}
   `;
 
-  // Internos solo (no relacionados)
   const whereInternal = ['ra.id_lista_precios IS NULL', applySearch(['li.nom_interno'])];
   const paramsInternal = search ? [like] : [];
   if (hasFamilia) {
@@ -1093,7 +859,6 @@ app.get('/api/price-comparisons', (req, res) => {
     WHERE ${whereInternal.join(' AND ')}
   `;
 
-  // Externos solo (no relacionados)
   const whereExternal = ['ra.id_lista_interna IS NULL', applySearch(['lp.nom_externo', 'lp.proveedor'])];
   const paramsExternal = search ? [like, like] : [];
   if (hasFamilia) {
@@ -1149,41 +914,41 @@ app.get('/api/price-comparisons', (req, res) => {
     params = [...paramsPairs, ...paramsInternal, ...paramsExternal];
   }
 
-  db.all(sql, params, (err, rows) => {
-    if (err) {
-      console.error('Error al obtener comparaciones de precios:', err.message);
-      return res.status(500).json({ error: 'Error al obtener comparaciones de precios' });
-    }
-
+  try {
+    const rows = await getDbRows(db, sql, params);
     const results = rows.map(row => {
-      const internal = row.internalFinalPrice ?? null;
-      const external = row.externalFinalPrice ?? null;
+      const internal = row.internalfinalprice ?? row.internalfinalprice === 0 ? Number(row.internalfinalprice) : row.internalfinalprice;
+      const external = row.externalfinalprice ?? row.externalfinalprice === 0 ? Number(row.externalfinalprice) : row.externalfinalprice;
+
       const priceDifference =
         external && external !== 0 && internal != null
           ? parseFloat((((internal - external) / external) * 100).toFixed(2))
           : null;
 
       return {
-        internalProduct: row.internalProduct || null,
-        externalProduct: row.externalProduct || null,
+        internalProduct: row.internalproduct || null,
+        externalProduct: row.externalproduct || null,
         supplier: row.supplier || null,
-        internalFinalPrice: internal,
-        externalFinalPrice: external,
-        internalDate: row.internalDate || null,
-        externalDate: row.externalDate || null,
-        relationDate: row.relationDate || null,
-        companyType: row.companyType === 'Gampack' ? 'supplier' : 'competitor',
-        saleConditions: row.saleConditions || 'Desconocido',
+        internalFinalPrice: internal ?? null,
+        externalFinalPrice: external ?? null,
+        internalDate: row.internaldate || null,
+        externalDate: row.externaldate || null,
+        relationDate: row.relationdate || null,
+        companyType: row.companytype === 'Gampack' ? 'supplier' : 'competitor',
+        saleConditions: row.saleconditions || 'Desconocido',
         priceDifference,
       };
     });
 
     res.json(results);
-  });
+  } catch (err) {
+    console.error('Error al obtener comparaciones de precios:', err);
+    return res.status(500).json({ error: 'Error al obtener comparaciones de precios' });
+  }
 });
 
 // ---------- RELACIONADOS POR CÓDIGO ----------
-app.get('/api/gampack/:codigo/relacionados', (req, res) => {
+app.get('/api/gampack/:codigo/relacionados', async (req, res) => {
   const db = req.ctx.db;
   const codInterno = req.params.codigo;
 
@@ -1197,28 +962,26 @@ app.get('/api/gampack/:codigo/relacionados', (req, res) => {
     FROM relacion_articulos ra
     JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
     JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
-    WHERE li.cod_interno = ?
+    WHERE li.cod_interno = $1
   `;
 
-  db.all(sql, [codInterno], (err, rows) => {
-    if (err) {
-      console.error('Error al obtener productos relacionados:', err.message);
-      return res.status(500).json({ error: 'Error al obtener productos relacionados' });
-    }
-
+  try {
+    const rows = await getDbRows(db, sql, [codInterno]);
     const data = rows.map(row => ({
       name: row.name,
       price: row.price,
       supplier: row.supplier,
-      externalDate: row.externalDate,
-      priceDifference: row.price - row.internalPrice,
-      percentageDifference: row.internalPrice !== 0
-        ? ((row.price - row.internalPrice) / row.internalPrice * 100).toFixed(2)
-        : 0
+      externalDate: row.externaldate,
+      priceDifference: (row.price ?? 0) - (row.internalprice ?? 0),
+      percentageDifference: row.internalprice
+        ? (((row.price ?? 0) - row.internalprice) / row.internalprice * 100).toFixed(2)
+        : '0.00'
     }));
-
     res.json(data);
-  });
+  } catch (err) {
+    console.error('Error al obtener productos relacionados:', err);
+    return res.status(500).json({ error: 'Error al obtener productos relacionados' });
+  }
 });
 
 // ---------- IMPORT XLSX (lista-precios / interna) ----------
@@ -1248,7 +1011,6 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
       const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
       const headersRaw = (matrix[headerIndex0] || []).map(v => String(v ?? ''));
       const dataRows = matrix.slice(headerIndex0 + 1);
-      console.log('Headers (fila seleccionada):', headersRaw);
 
       const rows = dataRows.map(arr => {
         const obj = {};
@@ -1474,480 +1236,98 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
 });
 
 // ---------- LOGIN (setea cookie firmada con tenant) ----------
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const db = req.ctx.db; // usa la DB por default (ventas) solo para leer users
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: 'Faltan credenciales' });
   }
 
-  db.get(
-    `SELECT * FROM users WHERE username = ? AND password = ?`,
-    [username, password],
-    (err, row) => {
-      if (err) {
-        console.error('Error en login:', err.message);
-        return res.status(500).json({ error: 'Error en base de datos' });
-      }
-      if (!row) {
-        return res.status(401).json({ error: 'Credenciales inválidas' });
-      }
+  try {
+    const row = await getDbRow(
+      db,
+      `SELECT * FROM users WHERE username = $1 AND password = $2`,
+      [username, password]
+    );
 
-      // Derivar tenant desde el rol
-      const role = (row.role || '').toLowerCase();
-      const tenant = role === 'compra' ? 'compra' : 'venta';
+    if (!row) return res.status(401).json({ error: 'Credenciales inválidas' });
 
-      res.cookie('tenant', tenant, {
-        httpOnly: true,
-        sameSite: 'none',   // <- permite cross-site
-        secure: true,       // <- obligatorio con SameSite=none
-        signed: true,
-        maxAge: 7 * 24 * 60 * 60 * 1000
-      });
+    const role = (row.role || '').toLowerCase();
+    const tenant = role === 'compra' ? 'compra' : 'venta';
 
-      return res.json({
-        success: true,
-        username: row.username,
-        role: row.role,
-        tenant
-      });
-    }
-  );
-});
-
-// ---------- STATS ----------
-app.get('/api/stats', (req, res) => {
-  const db = req.ctx.db;
-  const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
-
-  const q = {
-    internalCount: `SELECT COUNT(*) AS c FROM lista_interna`,
-    externalCount: `SELECT COUNT(*) AS c FROM lista_precios`,
-    activeSuppliers: `SELECT COUNT(DISTINCT proveedor) AS c FROM lista_precios`,
-    suppliersWithNewPriceToday: `SELECT COUNT(DISTINCT proveedor) AS c FROM lista_precios WHERE fecha = ?`,
-    pendingExternal: `SELECT COUNT(*) AS c FROM articulos_no_relacionados`,
-    pendingInternal: `SELECT COUNT(*) AS c FROM articulos_gampack_no_relacionados`,
-  };
-
-  const runGet = (sql, params=[]) =>
-    new Promise((resolve, reject) => {
-      db.get(sql, params, (err, row) => err ? reject(err) : resolve(row?.c ?? 0));
+    res.cookie('tenant', tenant, {
+      httpOnly: true,
+      sameSite: 'none',
+      secure: true,
+      signed: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-  (async () => {
-    try {
-      const [
-        internalCount,
-        externalCount,
-        activeSuppliers,
-        suppliersWithNewPriceToday,
-        pendingExternal,
-        pendingInternal,
-      ] = await Promise.all([
-        runGet(q.internalCount),
-        runGet(q.externalCount),
-        runGet(q.activeSuppliers),
-        runGet(q.suppliersWithNewPriceToday, [today]),
-        runGet(q.pendingExternal),
-        runGet(q.pendingInternal),
-      ]);
-
-      const totalProducts = internalCount + externalCount;
-      const pendingLinks = pendingExternal + pendingInternal;
-
-      res.json({
-        totalProducts,
-        internalCount,
-        externalCount,
-        activeSuppliers,
-        suppliersWithNewPriceToday,
-        pendingLinks,
-      });
-    } catch (e) {
-      console.error('Error /api/sta
-
-// ---------- RELACIONADOS POR CÓDIGO ----------
-app.get('/api/gampack/:codigo/relacionados', (req, res) => {
-  const db = req.ctx.db;
-  const codInterno = req.params.codigo;
-
-  const sql = `
-    SELECT 
-      lp.nom_externo AS name,
-      lp.precio_final AS price,
-      lp.proveedor AS supplier,
-      lp.fecha AS externalDate,
-      li.precio_final AS internalPrice
-    FROM relacion_articulos ra
-    JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
-    JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
-    WHERE li.cod_interno = ?
-  `;
-
-  db.all(sql, [codInterno], (err, rows) => {
-    if (err) {
-      console.error('Error al obtener productos relacionados:', err.message);
-      return res.status(500).json({ error: 'Error al obtener productos relacionados' });
-    }
-
-    const data = rows.map(row => ({
-      name: row.name,
-      price: row.price,
-      supplier: row.supplier,
-      externalDate: row.externalDate,
-      priceDifference: row.price - row.internalPrice,
-      percentageDifference: row.internalPrice !== 0
-        ? ((row.price - row.internalPrice) / row.internalPrice * 100).toFixed(2)
-        : 0
-    }));
-
-    res.json(data);
-  });
-});
-
-// ---------- IMPORT XLSX (lista-precios / interna) ----------
-app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
-  const db = req.ctx.db;
-
-  (async () => {
-    try {
-      if (!req.file) return res.status(400).json({ error: 'Falta archivo (campo "file")' });
-
-      const providerHint = (req.body.provider_hint || '').toString().trim();
-      if (!providerHint) return res.status(400).json({ error: 'El campo proveedor es obligatorio' });
-
-      const isGampack = providerHint.toLowerCase() === 'gampack';
-      const sourceFilename = (req.body.source_filename || '').toString().trim();
-      const headerRow1 = parseInt(req.body.header_row || '1', 10);
-      const headerIndex0 = isNaN(headerRow1) ? 0 : Math.max(0, headerRow1 - 1);
-
-      let mapping = {};
-      if (req.body.mapping) {
-        try { mapping = JSON.parse(req.body.mapping); } catch { mapping = {}; }
-      }
-
-      const wb = XLSX.read(req.file.buffer);
-      const ws = wb.Sheets[wb.SheetNames[0]];
-
-      const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
-      const headersRaw = (matrix[headerIndex0] || []).map(v => String(v ?? ''));
-      const dataRows = matrix.slice(headerIndex0 + 1);
-      console.log('Headers (fila seleccionada):', headersRaw);
-
-      const rows = dataRows.map(arr => {
-        const obj = {};
-        for (let i = 0; i < headersRaw.length; i++) {
-          const k = String(headersRaw[i] ?? '');
-          obj[k] = arr?.[i] ?? '';
-        }
-        return obj;
-      });
-
-      const normalizeLabel = (v) => String(v ?? '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
-      const normLower = (v) => normalizeLabel(v).toLowerCase();
-
-      const getCell = (row, key) => {
-        if (!key) return '';
-        if (key in row) return row[key];
-        const nk = normLower(key);
-        const realKey = Object.keys(row).find(k => normLower(k) === nk);
-        return realKey ? row[realKey] : '';
-      };
-
-      const parseNumberARLocal = (value) => {
-        if (value == null) return null;
-        let s = String(value).trim();
-        s = s.replace(/\./g, '').replace(',', '.').replace(/[$\sA-Za-z]/g, '');
-        const n = Number(s);
-        return Number.isFinite(n) ? n : null;
-      };
-
-      const run = (sql, params=[]) => runDb(db, sql, params);
-      const get = (sql, params=[]) => getDbRow(db, sql, params);
-
-      const colNom    = isGampack ? (mapping.nom_interno || mapping.nom_externo) : (mapping.nom_externo || mapping.nom_interno);
-      const colCod    = isGampack ? (mapping.cod_interno || mapping.cod_externo) : (mapping.cod_externo || mapping.cod_interno);
-      const colPrecio = mapping.precio_final;
-
-      if (!colNom || !colPrecio) {
-        return res.status(400).json({
-          error: 'Falta asignar columnas obligatorias',
-          detail: { required: isGampack ? ['nom_interno','precio_final'] : ['nom_externo','precio_final'], mapping }
-        });
-      }
-
-      const today = new Date().toISOString().slice(0, 10);
-
-      let inserted = 0;
-      let updated = 0;
-      let updatedPriceChanged = 0;
-      let skipped = 0;
-
-      const proveedorCanon = normalizeLabel(providerHint);
-      const proveedorLower = normLower(providerHint);
-
-      const getExistingInterno = async ({ codigo, nombre }) => {
-        const nombreN = normalizeLabel(nombre);
-        if (codigo) {
-          const byCode = await get(
-            `SELECT id_interno AS id, precio_final AS price
-             FROM lista_interna
-             WHERE TRIM(LOWER(cod_interno)) = TRIM(LOWER(?))
-             LIMIT 1`,
-            [codigo]
-          );
-          if (byCode) return byCode;
-        }
-        const byName = await get(
-          `SELECT id_interno AS id, precio_final AS price
-           FROM lista_interna
-           WHERE TRIM(LOWER(nom_interno)) = TRIM(LOWER(?))
-           LIMIT 1`,
-          [nombreN]
-        );
-        return byName || null;
-      };
-
-      const getExistingExterno = async ({ proveedorLower, codigo, nombre }) => {
-        const nombreN = normalizeLabel(nombre);
-        if (codigo) {
-          const byCode = await get(
-            `SELECT id_externo AS id, precio_final AS price
-             FROM lista_precios
-             WHERE TRIM(LOWER(proveedor)) = ?
-               AND TRIM(LOWER(cod_externo)) = TRIM(LOWER(?))
-             LIMIT 1`,
-            [proveedorLower, codigo]
-          );
-          if (byCode) return byCode;
-        }
-        const byName = await get(
-          `SELECT id_externo AS id, precio_final AS price
-           FROM lista_precios
-           WHERE TRIM(LOWER(proveedor)) = ?
-             AND TRIM(LOWER(nom_externo)) = TRIM(LOWER(?))
-           LIMIT 1`,
-          [proveedorLower, nombreN]
-        );
-        return byName || null;
-      };
-
-      const upsertListaInterna = async ({ nombre, codigo, price, today }) => {
-        const nombreN = normalizeLabel(nombre);
-        const codigoN = codigo ? normalizeLabel(codigo) : null;
-        const existing = await getExistingInterno({ codigo: codigoN, nombre: nombreN });
-
-        if (existing?.id) {
-          await run(
-            `UPDATE lista_interna
-             SET nom_interno = ?, precio_final = ?, fecha = ?
-             WHERE id_interno = ?`,
-            [nombreN, price, today, existing.id]
-          );
-          updated++;
-          if (existing.price !== price) updatedPriceChanged++;
-          return existing.id;
-        } else {
-          const ins = await run(
-            `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
-             VALUES (?, ?, ?, ?)`,
-            [nombreN, codigoN, price, today]
-          );
-          inserted++;
-          return ins.lastID;
-        }
-      };
-
-      const upsertListaPrecios = async ({ nombre, codigo, price, proveedorCanon, proveedorLower, today }) => {
-        const nombreN = normalizeLabel(nombre);
-        const codigoN = codigo ? normalizeLabel(codigo) : null;
-        const existing = await getExistingExterno({ proveedorLower, codigo: codigoN, nombre: nombreN });
-
-        if (existing?.id) {
-          await run(
-            `UPDATE lista_precios
-             SET nom_externo = ?, precio_final = ?, tipo_empresa = 'Proveedor', fecha = ?
-             WHERE id_externo = ?`,
-            [nombreN, price, today, existing.id]
-          );
-          updated++;
-          if (existing.price !== price) updatedPriceChanged++;
-          return existing.id;
-        } else {
-          const ins = await run(
-            `INSERT INTO lista_precios (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
-             VALUES (?, ?, ?, 'Proveedor', ?, ?)`,
-            [nombreN, codigoN, price, today, proveedorCanon]
-          );
-          inserted++;
-          return ins.lastID;
-        }
-      };
-
-      await run('BEGIN TRANSACTION');
-      try {
-        for (const r of rows) {
-          const nombre = String(getCell(r, colNom) ?? '');
-          const nombreN = normalizeLabel(nombre);
-          const codigoRaw = colCod ? String(getCell(r, colCod) ?? '') : '';
-          const codigo = normalizeLabel(codigoRaw) || null;
-          const precioRaw = getCell(r, colPrecio);
-          const price = typeof precioRaw === 'number' ? precioRaw : parseNumberARLocal(precioRaw);
-
-          if (!nombreN || price == null || !Number.isFinite(price)) {
-            skipped++;
-            continue;
-          }
-
-          if (isGampack) {
-            const idInterno = await upsertListaInterna({ nombre: nombreN, codigo, price, today });
-            if (idInterno) {
-              await run(
-                `INSERT OR IGNORE INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
-                 VALUES (?, ?)`,
-                [idInterno, 'Importado vía carga masiva']
-              );
-            }
-          } else {
-            const idExterno = await upsertListaPrecios({
-              nombre: nombreN, codigo, price, proveedorCanon, proveedorLower, today
-            });
-            if (idExterno) {
-              await run(
-                `INSERT OR IGNORE INTO articulos_no_relacionados (id_lista_precios, motivo)
-                 VALUES (?, ?)`,
-                [idExterno, 'Importado vía carga masiva']
-              );
-            }
-          }
-        }
-
-        await run('COMMIT');
-
-        const message = `Importación finalizada: ${updated} modificados (${updatedPriceChanged} con cambio de precio) y ${inserted} nuevos.${skipped ? ` Omitidos: ${skipped}.` : ''}`;
-
-        return res.json({
-          ok: true,
-          isGampack,
-          source: sourceFilename || req.file.originalname,
-          header_row_used: headerRow1,
-          counts: {
-            inserted,
-            updated,
-            updated_price_changed: updatedPriceChanged,
-            skipped
-          },
-          processed: inserted + updated,
-          saved_to: isGampack ? 'articulos_gampack_no_relacionados' : 'articulos_no_relacionados',
-          message
-        });
-      } catch (e) {
-        await run('ROLLBACK');
-        console.error('Fallo importación:', e);
-        return res.status(500).json({ error: 'Fallo importación', detail: e.message });
-      }
-    } catch (err) {
-      console.error('Error en importación:', err);
-      return res.status(500).json({ error: 'Error interno' });
-    }
-  })();
-});
-
-// ---------- LOGIN (setea cookie firmada con tenant) ----------
-app.post('/api/login', (req, res) => {
-  const db = req.ctx.db; // usa la DB por default (ventas) solo para leer users; si tenés tabla users separada, apuntá a donde corresponda
-  const { username, password } = req.body;
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Faltan credenciales' });
+    return res.json({
+      success: true,
+      username: row.username,
+      role: row.role,
+      tenant
+    });
+  } catch (err) {
+    console.error('Error en login:', err);
+    return res.status(500).json({ error: 'Error en base de datos' });
   }
-
-  db.get(
-    `SELECT * FROM users WHERE username = ? AND password = ?`,
-    [username, password],
-    (err, row) => {
-      if (err) {
-        console.error('Error en login:', err.message);
-        return res.status(500).json({ error: 'Error en base de datos' });
-      }
-      if (!row) {
-        return res.status(401).json({ error: 'Credenciales inválidas' });
-      }
-
-      // Derivar tenant desde el rol
-      const role = (row.role || '').toLowerCase();
-      const tenant = role === 'compra' ? 'compra' : 'venta';
-
-      res.cookie('tenant', tenant, {
-        httpOnly: true,
-        sameSite: 'none',   // <- permite cross-site
-        secure: true,       // <- obligatorio con SameSite=none
-        signed: true,
-        maxAge: 7 * 24 * 60 * 60 * 1000
-      });
-
-      return res.json({
-        success: true,
-        username: row.username,
-        role: row.role,
-        tenant
-      });
-    }
-  );
 });
 
 // ---------- STATS ----------
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
   const db = req.ctx.db;
   const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
 
-  const q = {
-    internalCount: `SELECT COUNT(*) AS c FROM lista_interna`,
-    externalCount: `SELECT COUNT(*) AS c FROM lista_precios`,
-    activeSuppliers: `SELECT COUNT(DISTINCT proveedor) AS c FROM lista_precios`,
-    suppliersWithNewPriceToday: `SELECT COUNT(DISTINCT proveedor) AS c FROM lista_precios WHERE fecha = ?`,
-    pendingExternal: `SELECT COUNT(*) AS c FROM articulos_no_relacionados`,
-    pendingInternal: `SELECT COUNT(*) AS c FROM articulos_gampack_no_relacionados`,
-  };
+  try {
+    const q = {
+      internalCount: `SELECT COUNT(*)::int AS c FROM lista_interna`,
+      externalCount: `SELECT COUNT(*)::int AS c FROM lista_precios`,
+      activeSuppliers: `SELECT COUNT(DISTINCT proveedor)::int AS c FROM lista_precios`,
+      suppliersWithNewPriceToday: `SELECT COUNT(DISTINCT proveedor)::int AS c FROM lista_precios WHERE fecha = $1`,
+      pendingExternal: `SELECT COUNT(*)::int AS c FROM articulos_no_relacionados`,
+      pendingInternal: `SELECT COUNT(*)::int AS c FROM articulos_gampack_no_relacionados`,
+    };
 
-  const runGet = (sql, params=[]) =>
-    new Promise((resolve, reject) => {
-      db.get(sql, params, (err, row) => err ? reject(err) : resolve(row?.c ?? 0));
+    const [
+      internalCountRow,
+      externalCountRow,
+      activeSuppliersRow,
+      suppliersWithNewPriceTodayRow,
+      pendingExternalRow,
+      pendingInternalRow
+    ] = await Promise.all([
+      getDbRow(db, q.internalCount),
+      getDbRow(db, q.externalCount),
+      getDbRow(db, q.activeSuppliers),
+      getDbRow(db, q.suppliersWithNewPriceToday, [today]),
+      getDbRow(db, q.pendingExternal),
+      getDbRow(db, q.pendingInternal),
+    ]);
+
+    const internalCount = internalCountRow?.c ?? 0;
+    const externalCount = externalCountRow?.c ?? 0;
+    const activeSuppliers = activeSuppliersRow?.c ?? 0;
+    const suppliersWithNewPriceToday = suppliersWithNewPriceTodayRow?.c ?? 0;
+    const pendingExternal = pendingExternalRow?.c ?? 0;
+    const pendingInternal = pendingInternalRow?.c ?? 0;
+
+    const totalProducts = internalCount + externalCount;
+    const pendingLinks = pendingExternal + pendingInternal;
+
+    res.json({
+      totalProducts,
+      internalCount,
+      externalCount,
+      activeSuppliers,
+      suppliersWithNewPriceToday,
+      pendingLinks,
     });
-
-  (async () => {
-    try {
-      const [
-        internalCount,
-        externalCount,
-        activeSuppliers,
-        suppliersWithNewPriceToday,
-        pendingExternal,
-        pendingInternal,
-      ] = await Promise.all([
-        runGet(q.internalCount),
-        runGet(q.externalCount),
-        runGet(q.activeSuppliers),
-        runGet(q.suppliersWithNewPriceToday, [today]),
-        runGet(q.pendingExternal),
-        runGet(q.pendingInternal),
-      ]);
-
-      const totalProducts = internalCount + externalCount;
-      const pendingLinks = pendingExternal + pendingInternal;
-
-      res.json({
-        totalProducts,
-        internalCount,
-        externalCount,
-        activeSuppliers,
-        suppliersWithNewPriceToday,
-        pendingLinks,
-      });
-    } catch (e) {
-      console.error('Error /api/stats:', e);
-      res.status(500).json({ error: 'stats_failed' });
-    }
-  })();
+  } catch (e) {
+    console.error('Error /api/stats:', e);
+    res.status(500).json({ error: 'stats_failed' });
+  }
 });
 
 // ---------- IMPORT FAMILIAS ----------
@@ -1978,22 +1358,30 @@ app.post('/api/imports/familias', upload.single('file'), async (req, res) => {
 
       let idInterno = null;
       if (codigo) {
-        const rr = await get(`SELECT id_interno FROM lista_interna WHERE TRIM(LOWER(cod_interno)) = TRIM(LOWER(?)) LIMIT 1`, [codigo]);
+        const rr = await get(
+          `SELECT id_interno FROM lista_interna
+           WHERE TRIM(LOWER(cod_interno)) = TRIM(LOWER($1)) LIMIT 1`,
+          [codigo]
+        );
         if (rr) idInterno = rr.id_interno;
       }
       if (!idInterno && nombre) {
-        const rr = await get(`SELECT id_interno FROM lista_interna WHERE TRIM(LOWER(nom_interno)) = TRIM(LOWER(?)) LIMIT 1`, [nombre]);
+        const rr = await get(
+          `SELECT id_interno FROM lista_interna
+           WHERE TRIM(LOWER(nom_interno)) = TRIM(LOWER($1)) LIMIT 1`,
+          [nombre]
+        );
         if (rr) idInterno = rr.id_interno;
       }
       if (!idInterno) { missProd++; continue; }
 
-      const rub = await get(`SELECT id FROM rubros WHERE LOWER(nombre)=LOWER(?)`, [rubro]);
+      const rub = await get(`SELECT id FROM rubros WHERE LOWER(nombre)=LOWER($1)`, [rubro]);
       const idRubro = rub?.id ?? null;
       if (!idRubro) { missRubro++; continue; }
 
       await run(
         `INSERT INTO producto_rubro(id_interno, id_rubro)
-         VALUES(?,?)
+         VALUES($1,$2)
          ON CONFLICT(id_interno) DO UPDATE SET id_rubro=excluded.id_rubro`,
         [idInterno, idRubro]
       );
@@ -2017,90 +1405,81 @@ app.post('/api/imports/familias', upload.single('file'), async (req, res) => {
 });
 
 // ---------- NO RELACIONADOS: delete single/bulk (EXTERNOS) ----------
-app.delete('/api/no-relacionados/externos/:id', (req, res) => {
+app.delete('/api/no-relacionados/externos/:id', async (req, res) => {
   if (req.ctx?.tenant === 'compra') return res.status(404).json({ error: 'no_disponible_en_compras' });
   const db = req.ctx.db;
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'id_invalido' });
 
-  db.serialize(() => {
-    db.run('BEGIN');
-    db.run(`DELETE FROM articulos_no_relacionados WHERE id_lista_precios = ?`, [id], (e1) => {
-      if (e1) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
-      db.run(`DELETE FROM lista_precios WHERE id_externo = ?`, [id], function (e2) {
-        if (e2) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
-        db.run('COMMIT', (e3) => {
-          if (e3) return res.status(500).json({ error: 'db_error' });
-          return res.json({ ok: true, deleted: this?.changes ?? 1 });
-        });
-      });
-    });
-  });
+  try {
+    await runDb(db, 'BEGIN');
+    await runDb(db, `DELETE FROM articulos_no_relacionados WHERE id_lista_precios = $1`, [id]);
+    const del = await runDb(db, `DELETE FROM lista_precios WHERE id_externo = $1`, [id]);
+    await runDb(db, 'COMMIT');
+    return res.json({ ok: true, deleted: del.rowCount ?? 1 });
+  } catch (e) {
+    await runDb(db, 'ROLLBACK').catch(()=>{});
+    console.error('Delete externo no-relacionado error:', e);
+    return res.status(500).json({ error: 'db_error' });
+  }
 });
 
-app.post('/api/no-relacionados/externos/delete', (req, res) => {
+app.post('/api/no-relacionados/externos/delete', async (req, res) => {
   if (req.ctx?.tenant === 'compra') return res.status(404).json({ error: 'no_disponible_en_compras' });
   const db = req.ctx.db;
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
   if (ids.length === 0) return res.status(400).json({ error: 'ids_requeridos' });
 
-  const placeholders = ids.map(() => '?').join(',');
-  db.serialize(() => {
-    db.run('BEGIN');
-    db.run(`DELETE FROM articulos_no_relacionados WHERE id_lista_precios IN (${placeholders})`, ids, (e1) => {
-      if (e1) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
-      db.run(`DELETE FROM lista_precios WHERE id_externo IN (${placeholders})`, ids, function (e2) {
-        if (e2) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
-        db.run('COMMIT', (e3) => {
-          if (e3) return res.status(500).json({ error: 'db_error' });
-          res.json({ ok: true, deleted: this?.changes ?? 0 });
-        });
-      });
-    });
-  });
+  const ph = ids.map((_, i) => `$${i+1}`).join(',');
+  try {
+    await runDb(db, 'BEGIN');
+    await runDb(db, `DELETE FROM articulos_no_relacionados WHERE id_lista_precios IN (${ph})`, ids);
+    const del = await runDb(db, `DELETE FROM lista_precios WHERE id_externo IN (${ph})`, ids);
+    await runDb(db, 'COMMIT');
+    return res.json({ ok: true, deleted: del.rowCount ?? 0 });
+  } catch (e) {
+    await runDb(db, 'ROLLBACK').catch(()=>{});
+    console.error('Bulk delete externos error:', e);
+    return res.status(500).json({ error: 'db_error' });
+  }
 });
 
 // ---------- NO RELACIONADOS: delete single/bulk (INTERNOS) ----------
-app.delete('/api/no-relacionados/internos/:id', (req, res) => {
+app.delete('/api/no-relacionados/internos/:id', async (req, res) => {
   const db = req.ctx.db;
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'id_invalido' });
 
-  db.serialize(() => {
-    db.run('BEGIN');
-    db.run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = ?`, [id], (e1) => {
-      if (e1) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
-      db.run(`DELETE FROM lista_interna WHERE id_interno = ?`, [id], function (e2) {
-        if (e2) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
-        db.run('COMMIT', (e3) => {
-          if (e3) return res.status(500).json({ error: 'db_error' });
-          return res.json({ ok: true, deleted: this?.changes ?? 1 });
-        });
-      });
-    });
-  });
+  try {
+    await runDb(db, 'BEGIN');
+    await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [id]);
+    const del = await runDb(db, `DELETE FROM lista_interna WHERE id_interno = $1`, [id]);
+    await runDb(db, 'COMMIT');
+    return res.json({ ok: true, deleted: del.rowCount ?? 1 });
+  } catch (e) {
+    await runDb(db, 'ROLLBACK').catch(()=>{});
+    console.error('Delete interno no-relacionado error:', e);
+    return res.status(500).json({ error: 'db_error' });
+  }
 });
 
-app.post('/api/no-relacionados/internos/delete', (req, res) => {
+app.post('/api/no-relacionados/internos/delete', async (req, res) => {
   const db = req.ctx.db;
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
   if (ids.length === 0) return res.status(400).json({ error: 'ids_requeridos' });
 
-  const placeholders = ids.map(() => '?').join(',');
-  db.serialize(() => {
-    db.run('BEGIN');
-    db.run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna IN (${placeholders})`, ids, (e1) => {
-      if (e1) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
-      db.run(`DELETE FROM lista_interna WHERE id_interno IN (${placeholders})`, ids, function (e2) {
-        if (e2) { db.run('ROLLBACK'); return res.status(500).json({ error: 'db_error' }); }
-        db.run('COMMIT', (e3) => {
-          if (e3) return res.status(500).json({ error: 'db_error' });
-          res.json({ ok: true, deleted: this?.changes ?? 0 });
-        });
-      });
-    });
-  });
+  const ph = ids.map((_, i) => `$${i+1}`).join(',');
+  try {
+    await runDb(db, 'BEGIN');
+    await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna IN (${ph})`, ids);
+    const del = await runDb(db, `DELETE FROM lista_interna WHERE id_interno IN (${ph})`, ids);
+    await runDb(db, 'COMMIT');
+    return res.json({ ok: true, deleted: del.rowCount ?? 0 });
+  } catch (e) {
+    await runDb(db, 'ROLLBACK').catch(()=>{});
+    console.error('Bulk delete internos error:', e);
+    return res.status(500).json({ error: 'db_error' });
+  }
 });
-
 
 module.exports = app;
