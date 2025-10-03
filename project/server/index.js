@@ -468,7 +468,7 @@ function createNoRelacionadosHandler(tipo) {
           SELECT DISTINCT
             lp.id_externo AS id_externo,
             lp.cod_externo AS codigo,
-            lp.nom_externo AS nombre,
+            COALESCE(lp.nom_externo, lp.cod_externo, '') AS nombre,
             lp.proveedor AS proveedor,
             lp.precio_final AS precio_final,
             lp.fecha AS fecha,
@@ -508,7 +508,7 @@ function createNoRelacionadosHandler(tipo) {
         SELECT DISTINCT
           li.id_interno AS id_interno,
           li.cod_interno AS codigo,
-          li.nom_interno AS nombre,
+          + COALESCE(li.nom_interno, li.cod_interno, '') AS nombre,
           li.precio_final AS precio_final,
           li.fecha AS fecha,
           agnr.motivo AS motivo,
