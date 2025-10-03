@@ -426,7 +426,6 @@ app.get('/api/lista_precios', async (req, res) => {
   }
 });
 
-// ---------- NO RELACIONADOS (externos / internos) ----------
 function createNoRelacionadosHandler(tipo) {
   const isExternos = tipo === 'externos';
 
@@ -474,7 +473,8 @@ function createNoRelacionadosHandler(tipo) {
             lp.precio_final AS precio_final,
             lp.fecha AS fecha,
             anr.motivo AS motivo,
-            CASE WHEN anr.id_lista_precios IS NULL THEN 0 ELSE 1 END AS es_pendiente
+            CASE WHEN anr.id_lista_precios IS NULL THEN 0 ELSE 1 END AS es_pendiente,
+            LOWER(lp.nom_externo) AS nombre_lower
           FROM lista_precios lp
           LEFT JOIN relacion_articulos ra ON ra.id_lista_precios = lp.id_externo
           LEFT JOIN articulos_no_relacionados anr ON anr.id_lista_precios = lp.id_externo
@@ -482,7 +482,7 @@ function createNoRelacionadosHandler(tipo) {
           ORDER BY es_pendiente DESC,
                    DATE(lp.fecha) DESC,
                    lp.id_externo DESC,
-                   LOWER(lp.nom_externo) ASC
+                   nombre_lower ASC
           LIMIT $${params.length + 1} OFFSET $${params.length + 2}
         `;
         params.push(limit, offset);
@@ -512,7 +512,8 @@ function createNoRelacionadosHandler(tipo) {
           li.precio_final AS precio_final,
           li.fecha AS fecha,
           agnr.motivo AS motivo,
-          CASE WHEN agnr.id_lista_interna IS NULL THEN 0 ELSE 1 END AS es_pendiente
+          CASE WHEN agnr.id_lista_interna IS NULL THEN 0 ELSE 1 END AS es_pendiente,
+          LOWER(li.nom_interno) AS nombre_lower
         FROM lista_interna li
         LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
         LEFT JOIN articulos_gampack_no_relacionados agnr ON agnr.id_lista_interna = li.id_interno
@@ -520,7 +521,7 @@ function createNoRelacionadosHandler(tipo) {
         ORDER BY es_pendiente DESC,
                  DATE(li.fecha) DESC,
                  li.id_interno DESC,
-                 LOWER(li.nom_interno) ASC
+                 nombre_lower ASC
         LIMIT $${params.length + 1} OFFSET $${params.length + 2}
       `;
       params.push(limit, offset);
@@ -533,6 +534,7 @@ function createNoRelacionadosHandler(tipo) {
     }
   };
 }
+
 
 const handleNoRelacionadosExternos = createNoRelacionadosHandler('externos');
 const handleNoRelacionadosInternos = createNoRelacionadosHandler('internos');
