@@ -544,6 +544,44 @@ app.get('/api/no-relacionados/proveedores', handleNoRelacionadosExternos);
 app.get('/api/no-relacionados/internos', handleNoRelacionadosInternos);
 app.get('/api/no-relacionados/gampack', handleNoRelacionadosInternos);
 
+// ---------- DEBUG: relaciones, schema y datos visibles ----------
+app.get('/api/debug/relaciones', async (req, res) => {
+  const db = req.ctx.db;
+  const tenant = req.ctx?.tenant || '(sin tenant)';
+
+  try {
+    // Obtenemos hasta 20 relaciones para inspeccionar
+    const sql = `
+      SELECT 
+        ra.id,
+        ra.created_at,
+        li.nom_interno AS producto_interno,
+        lp.nom_externo AS producto_externo,
+        lp.proveedor,
+        li.precio_final AS precio_interno,
+        lp.precio_final AS precio_externo
+      FROM relacion_articulos ra
+      LEFT JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
+      LEFT JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
+      ORDER BY ra.created_at DESC
+      LIMIT 20
+    `;
+
+    const rows = await getDbRows(db, sql, []);
+
+    return res.json({
+      ok: true,
+      tenant,
+      total: rows.length,
+      relaciones: rows
+    });
+  } catch (err) {
+    console.error('Error en /api/debug/relaciones:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+
 // ---------- CHECK PRODUCT ----------
 app.post('/api/check-product', async (req, res) => {
   const db = req.ctx.db;
