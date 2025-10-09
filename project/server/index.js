@@ -1006,7 +1006,7 @@ app.get('/api/price-comparisons', async (req, res) => {
   if (onlyRelated) {
     sql = `
       ${sqlPairs}
-      ORDER BY DATE(sortDate) DESC
+      ORDER BY sortDate DESC NULLS LAST
       LIMIT 1000
     `;
     params = [...paramsPairs];
@@ -1017,7 +1017,7 @@ app.get('/api/price-comparisons', async (req, res) => {
       ${sqlInternalOnly}
       UNION ALL
       ${sqlExternalOnly}
-      ORDER BY DATE(sortDate) DESC
+      ORDER BY sortDate DESC NULLS LAST
       LIMIT 1000
     `;
     params = [...paramsPairs, ...paramsInternal, ...paramsExternal];
