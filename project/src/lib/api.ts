@@ -7,9 +7,12 @@ export function currentRole() {
 }
 
 const API_BASE_URL = (() => {
-  const raw = import.meta.env.VITE_API_URL ?? '';
-  if (!raw) return '';
-  return raw.endsWith('/') ? raw.slice(0, -1) : raw;
+  const rawEnv = import.meta.env.VITE_API_URL ?? '';
+  const fallback = 'https://calculadoragampackback.onrender.com';
+  const raw = rawEnv || fallback;
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
 })();
 
 export { API_BASE_URL };
