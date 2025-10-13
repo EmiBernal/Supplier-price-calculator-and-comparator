@@ -76,6 +76,35 @@ function toYMD(s) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+const YMD_REGEX = /^(\d{4})-(\d{2})-(\d{2})/;
+
+function ensureYMD(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const match = value.match(YMD_REGEX);
+    if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+  }
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function normalizeRowDates(row, fields = []) {
+  if (!row || typeof row !== 'object') return row;
+  const copy = { ...row };
+  for (const field of fields) {
+    copy[field] = ensureYMD(copy[field]);
+  }
+  return copy;
+}
+
+function normalizeRowsDates(rows = [], fields = []) {
+  return rows.map((row) => normalizeRowDates(row, fields));
+}
+
 // ===== Helpers DB (PostgreSQL) =====
 async function runDb(db, sql, params = []) {
   const text = prepareSql(sql);
@@ -158,6 +187,51 @@ function buildProductKey(name, code) {
   const nameKey = normalizeForKey(name);
   if (codeKey && nameKey) return `${codeKey}__${nameKey}`;
   return codeKey || nameKey || null;
+}
+
+function levenshteinDistance(a, b) {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const prev = new Array(b.length + 1).fill(0);
+  const curr = new Array(b.length + 1).fill(0);
+  for (let j = 0; j <= b.length; j += 1) {
+    prev[j] = j;
+  }
+  for (let i = 1; i <= a.length; i += 1) {
+    curr[0] = i;
+    const charA = a.charAt(i - 1);
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = charA === b.charAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(
+        curr[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + cost
+      );
+    }
+    for (let j = 0; j <= b.length; j += 1) {
+      prev[j] = curr[j];
+    }
+  }
+  return prev[b.length];
+}
+
+function computeNameSimilarity(a, b) {
+  const normA = normalizeForKey(a);
+  const normB = normalizeForKey(b);
+  if (!normA || !normB) return 0;
+  if (normA === normB) return 1;
+  const distance = levenshteinDistance(normA, normB);
+  const maxLen = Math.max(normA.length, normB.length);
+  if (maxLen === 0) return 0;
+  return 1 - distance / maxLen;
+}
+
+function buildNameLikePattern(name) {
+  if (!name) return null;
+  const normalized = normalizeWhitespace(String(name).toLowerCase());
+  if (!normalized) return null;
+  return `%${normalized.replace(/\s+/g, '%')}%`;
 }
 
 function pickRepresentativeValue(values = []) {
@@ -273,12 +347,12 @@ app.get('/api/equivalencias', async (req, res) => {
       supplier: row.proveedor,
       externalCode: row.cod_externo,
       externalName: row.nom_externo,
-      externalDate: row.fecha_externo,
+      externalDate: ensureYMD(row.fecha_externo),
       internalSupplier: 'Gampack',
       internalCode: row.cod_interno,
       internalName: row.nom_interno,
-      internalDate: row.fecha_interno,
-      relationDate: row.relation_created_at,
+      internalDate: ensureYMD(row.fecha_interno),
+      relationDate: ensureYMD(row.relation_created_at),
       matchingCriteria: row.criterio_relacion
     }));
 
@@ -420,7 +494,7 @@ app.get('/api/lista_precios', async (req, res) => {
        ORDER BY fecha DESC`,
       [`%${search}%`, `%${search}%`]
     );
-    res.json(rows);
+    res.json(normalizeRowsDates(rows, ['fecha']));
   } catch (err) {
     console.error('Error al obtener lista_precios:', err);
     return res.status(500).json({ error: 'Error al obtener datos' });
@@ -489,7 +563,7 @@ function createNoRelacionadosHandler(tipo) {
         params.push(limit, offset);
 
         const rows = await getDbRows(db, sql, params);
-        return res.json(rows);
+        return res.json(normalizeRowsDates(rows, ['fecha']));
       }
 
       // internos
@@ -528,7 +602,7 @@ function createNoRelacionadosHandler(tipo) {
       params.push(limit, offset);
 
       const rows = await getDbRows(db, sql, params);
-      return res.json(rows);
+      return res.json(normalizeRowsDates(rows, ['fecha']));
     } catch (err) {
       console.error('Error al obtener productos no relacionados:', err);
       return res.status(500).json({ error: 'db_error' });
@@ -569,7 +643,7 @@ app.post('/api/check-product', async (req, res) => {
   try {
     const row = await getDbRow(db, sql, params);
     if (row) {
-      return res.status(200).json({ found: true, product: row });
+      return res.status(200).json({ found: true, product: normalizeRowDates(row, ['fecha']) });
     } else {
       return res.status(200).json({ found: false });
     }
@@ -663,7 +737,18 @@ app.post('/api/products', async (req, res) => {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
   }
 
-  async function createRelationAndClean(idListaPrecios, idListaInterna) {
+  const normalizedDate = ensureYMD(date);
+  if (!normalizedDate) {
+    return res.status(400).json({ error: 'Fecha inválida' });
+  }
+
+  const normalizedCode = normalizeCode(productCode);
+  const normalizedNameKey = normalizeForKey(productName);
+  const nameLikePattern = buildNameLikePattern(productName);
+  const normalizedCompany = normalizeWhitespace(String(company || '').toLowerCase());
+  const hasCompany = Boolean(normalizedCompany);
+
+  async function createRelationAndClean(idListaPrecios, idListaInterna, criterio = 'automatic') {
     const exists = await getDbRow(
       db,
       `SELECT 1 FROM relacion_articulos WHERE id_lista_precios = $1 AND id_lista_interna = $2`,
@@ -674,13 +759,102 @@ app.post('/api/products', async (req, res) => {
     await runDb(
       db,
       `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
-       VALUES ($1, $2, 'automatic')`,
-      [idListaPrecios, idListaInterna]
+       VALUES ($1, $2, $3)`,
+      [idListaPrecios, idListaInterna, criterio]
     );
 
     await runDb(db, `DELETE FROM articulos_no_relacionados WHERE id_lista_precios = $1`, [idListaPrecios]);
     await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [idListaInterna]);
   }
+
+  const pickBestNameMatch = (targetName, candidates, getName) => {
+    let best = null;
+    for (const candidate of candidates) {
+      const candidateName = getName(candidate);
+      if (!candidateName) continue;
+      const similarity = computeNameSimilarity(targetName, candidateName);
+      if (similarity >= 0.9 && (!best || similarity > best.similarity)) {
+        best = { row: candidate, similarity };
+      }
+    }
+    return best;
+  };
+
+  const findInternalAutoMatch = async () => {
+    if (normalizedCode) {
+      const match = await getDbRow(
+        db,
+        `SELECT * FROM lista_interna
+         WHERE cod_interno IS NOT NULL
+           AND LOWER(REGEXP_REPLACE(cod_interno, '[^a-z0-9]', '', 'g')) = $1
+         ORDER BY id_interno ASC
+         LIMIT 1`,
+        [normalizedCode]
+      );
+      if (match) {
+        return { row: match, criterion: 'codigo' };
+      }
+    }
+
+    if (normalizedNameKey && nameLikePattern) {
+      const candidates = await getDbRows(
+        db,
+        `SELECT * FROM lista_interna
+         WHERE nom_interno IS NOT NULL
+           AND LOWER(nom_interno) LIKE $1
+         LIMIT 50`,
+        [nameLikePattern]
+      );
+      const best = pickBestNameMatch(productName, candidates, (candidate) => candidate.nom_interno);
+      if (best) {
+        return { row: best.row, criterion: 'name' };
+      }
+    }
+
+    return null;
+  };
+
+  const findExternalAutoMatch = async () => {
+    const useCompanyFilter = hasCompany && companyType === 'Proveedor';
+    const paramsByCode = [normalizedCode].filter(Boolean);
+    if (normalizedCode && paramsByCode.length) {
+      const sqlParts = [
+        `SELECT * FROM lista_precios
+         WHERE cod_externo IS NOT NULL
+           AND LOWER(REGEXP_REPLACE(cod_externo, '[^a-z0-9]', '', 'g')) = $1`
+      ];
+      if (useCompanyFilter) {
+        sqlParts.push('AND LOWER(TRIM(proveedor)) = $2');
+        paramsByCode.push(normalizedCompany);
+      }
+      sqlParts.push('ORDER BY id_externo ASC LIMIT 1');
+      const match = await getDbRow(db, sqlParts.join('\n'), paramsByCode);
+      if (match) {
+        return { row: match, criterion: 'codigo' };
+      }
+    }
+
+    if (normalizedNameKey && nameLikePattern) {
+      const params = [nameLikePattern];
+      const clauses = [
+        `SELECT * FROM lista_precios
+         WHERE nom_externo IS NOT NULL
+           AND LOWER(nom_externo) LIKE $1`
+      ];
+      if (useCompanyFilter) {
+        clauses.push('AND LOWER(TRIM(proveedor)) = $2');
+        params.push(normalizedCompany);
+      }
+      clauses.push('LIMIT 50');
+      const candidates = await getDbRows(db, clauses.join('\n'), params);
+      const best = pickBestNameMatch(productName, candidates, (candidate) => candidate.nom_externo);
+      if (best) {
+        return { row: best.row, criterion: 'name' };
+      }
+    }
+
+    return null;
+  };
 
   try {
     if (companyType === 'Proveedor') {
@@ -695,16 +869,18 @@ app.post('/api/products', async (req, res) => {
       );
 
       if (exact) {
-        if (exact.precio_final !== finalPrice) {
+        const storedDate = ensureYMD(exact.fecha);
+        if (exact.precio_final !== finalPrice || storedDate !== normalizedDate) {
           await runDb(
             db,
             `UPDATE lista_precios
-             SET precio_final = $1
+             SET precio_final = $1,
+                 fecha = $6
              WHERE LOWER(cod_externo) = LOWER($2)
                AND LOWER(nom_externo) = LOWER($3)
                AND proveedor = $4
                AND tipo_empresa = $5`,
-            [finalPrice, productCode, productName, company, companyType]
+            [finalPrice, productCode, productName, company, companyType, normalizedDate]
           );
         }
         return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
@@ -715,24 +891,21 @@ app.post('/api/products', async (req, res) => {
         `INSERT INTO lista_precios (cod_externo, nom_externo, precio_final, tipo_empresa, fecha, proveedor)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id_externo`,
-        [productCode, productName, finalPrice, companyType, date, company]
+        [productCode, productName, finalPrice, companyType, normalizedDate, company]
       );
       const newId = inserted?.id_externo;
 
-      const gampackProd = await getDbRow(
-        db,
-        `SELECT * FROM lista_interna
-         WHERE LOWER(cod_interno) = LOWER($1) OR LOWER(nom_interno) = LOWER($2)
-         LIMIT 1`,
-        [productCode, productName]
-      );
+      let internalMatch = null;
+      if (newId) {
+        internalMatch = await findInternalAutoMatch();
+      }
 
-      if (gampackProd && linkAsEquivalent !== false) {
-        await createRelationAndClean(newId, gampackProd.id_interno);
+      if (internalMatch?.row && linkAsEquivalent !== false) {
+        await createRelationAndClean(newId, internalMatch.row.id_interno, internalMatch.criterion);
         return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
       }
 
-      const motivo = gampackProd
+      const motivo = internalMatch?.row
         ? 'Usuario rechazó sugerencia de relación'
         : 'No se encontró coincidencia por código ni nombre';
 
@@ -756,13 +929,15 @@ app.post('/api/products', async (req, res) => {
       );
 
       if (exact) {
-        if (exact.precio_final !== finalPrice) {
+        const storedDate = ensureYMD(exact.fecha);
+        if (exact.precio_final !== finalPrice || storedDate !== normalizedDate) {
           await runDb(
             db,
             `UPDATE lista_interna
-             SET precio_final = $1
+             SET precio_final = $1,
+                 fecha = $4
              WHERE LOWER(cod_interno) = LOWER($2) AND LOWER(nom_interno) = LOWER($3)`,
-            [finalPrice, productCode, productName]
+            [finalPrice, productCode, productName, normalizedDate]
           );
         }
         return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
@@ -773,24 +948,21 @@ app.post('/api/products', async (req, res) => {
         `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha)
          VALUES ($1, $2, $3, $4)
          RETURNING id_interno`,
-        [productCode, productName, finalPrice, date]
+        [productCode, productName, finalPrice, normalizedDate]
       );
       const newId = inserted?.id_interno;
 
-      const proveedorProd = await getDbRow(
-        db,
-        `SELECT * FROM lista_precios
-         WHERE LOWER(cod_externo) = LOWER($1) OR LOWER(nom_externo) = LOWER($2)
-         LIMIT 1`,
-        [productCode, productName]
-      );
+      let externalMatch = null;
+      if (newId) {
+        externalMatch = await findExternalAutoMatch();
+      }
 
-      if (proveedorProd && linkAsEquivalent !== false) {
-        await createRelationAndClean(proveedorProd.id_externo, newId);
+      if (externalMatch?.row && linkAsEquivalent !== false) {
+        await createRelationAndClean(externalMatch.row.id_externo, newId, externalMatch.criterion);
         return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
       }
 
-      const motivo = proveedorProd
+      const motivo = externalMatch?.row
         ? 'Usuario rechazó sugerencia de relación'
         : 'No se encontró coincidencia por código ni nombre';
 
@@ -1040,9 +1212,9 @@ app.get('/api/price-comparisons', async (req, res) => {
         supplier: row.supplier || null,
         internalFinalPrice: internal ?? null,
         externalFinalPrice: external ?? null,
-        internalDate: row.internaldate || null,
-        externalDate: row.externaldate || null,
-        relationDate: row.relationdate || null,
+        internalDate: ensureYMD(row.internaldate) || null,
+        externalDate: ensureYMD(row.externaldate) || null,
+        relationDate: ensureYMD(row.relationdate) || null,
         companyType: row.companytype === 'Gampack' ? 'supplier' : 'competitor',
         saleConditions: row.saleconditions || 'Desconocido',
         priceDifference,
@@ -1080,7 +1252,7 @@ app.get('/api/gampack/:codigo/relacionados', async (req, res) => {
       name: row.name,
       price: row.price,
       supplier: row.supplier,
-      externalDate: row.externaldate,
+      externalDate: ensureYMD(row.externaldate),
       priceDifference: (row.price ?? 0) - (row.internalprice ?? 0),
       percentageDifference: row.internalprice
         ? (((row.price ?? 0) - row.internalprice) / row.internalprice * 100).toFixed(2)
