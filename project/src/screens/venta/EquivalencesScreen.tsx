@@ -5,21 +5,14 @@ import { ProductEquivalence } from '../../tipos/database';
 import { Search, ArrowLeft, ArrowUp, Pencil, Save, X } from 'lucide-react';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
+import { normalizeToYMD } from '../../utils/date';
 
 interface EquivalencesScreenProps {
   onNavigate: (screen: Screen) => void;
 }
 
 // Utilidad para formatear fecha a yyyy-MM-dd para <input type="date">
-const toDateInput = (value: any) => {
-  if (!value) return '';
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return '';
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
+const toDateInput = (value: unknown) => normalizeToYMD(value) ?? '';
 
 export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNavigate }) => {
   const [equivalences, setEquivalences] = useState<ProductEquivalence[]>([]);

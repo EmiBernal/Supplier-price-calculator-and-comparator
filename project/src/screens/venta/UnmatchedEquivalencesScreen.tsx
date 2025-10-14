@@ -4,6 +4,7 @@ import { Navigation } from '../../components/Navigation';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
 import { Trash2 } from 'lucide-react';
+import { formatYMD, compareYMD } from '../../utils/date';
 
 /* ---------- Similaridad por trigramas + coseno (solo nombres) ---------- */
 function sanitizeText(s: string) {
@@ -280,10 +281,12 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     const q = normalizeStr(dSearchExt);
     const filtered = externals.filter(r => !q || normalizeStr(r.cod_externo).includes(q) || normalizeStr(r.nom_externo).includes(q) || normalizeStr(r.proveedor).includes(q));
     const sorted = [...filtered].sort((a, b) => {
-      let av: any = a[sortExtKey], bv: any = b[sortExtKey];
-      if (sortExtKey === 'fecha') { av = av ? new Date(av as string).getTime() : 0; bv = bv ? new Date(bv as string).getTime() : 0; }
-      else { av = normalizeStr(av); bv = normalizeStr(bv); }
-      const r = cmp(av, bv); return sortExtDir === 'asc' ? r : -r;
+      const av: any = a[sortExtKey];
+      const bv: any = b[sortExtKey];
+      const r = sortExtKey === 'fecha'
+        ? compareYMD(av, bv)
+        : cmp(normalizeStr(av), normalizeStr(bv));
+      return sortExtDir === 'asc' ? r : -r;
     });
     return sorted;
   }, [externals, dSearchExt, sortExtKey, sortExtDir]);
@@ -292,10 +295,12 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     const q = normalizeStr(dSearchInt);
     const filtered = internals.filter(r => !q || normalizeStr(r.cod_interno).includes(q) || normalizeStr(r.nom_interno).includes(q));
     const sorted = [...filtered].sort((a, b) => {
-      let av: any = a[sortIntKey], bv: any = b[sortIntKey];
-      if (sortIntKey === 'fecha') { av = av ? new Date(av as string).getTime() : 0; bv = bv ? new Date(bv as string).getTime() : 0; }
-      else { av = normalizeStr(av); bv = normalizeStr(bv); }
-      const r = cmp(av, bv); return sortIntDir === 'asc' ? r : -r;
+      const av: any = a[sortIntKey];
+      const bv: any = b[sortIntKey];
+      const r = sortIntKey === 'fecha'
+        ? compareYMD(av, bv)
+        : cmp(normalizeStr(av), normalizeStr(bv));
+      return sortIntDir === 'asc' ? r : -r;
     });
     return sorted;
   }, [internals, dSearchInt, sortIntKey, sortIntDir]);
@@ -548,7 +553,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                         >
                           <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.nom_externo ?? ''}</td>
                           <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.proveedor ?? 'Sin proveedor'}</td>
-                          <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{item.fecha ? new Date(item.fecha).toLocaleDateString() : ''}</td>
+                          <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{formatYMD(item.fecha)}</td>
                         </tr>
                       );
                     })}
@@ -616,7 +621,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                           </td>
                           {/* Fecha */}
                           <td className="px-6 py-4 text-gray-700 dark:text-gray-300">
-                            {item.fecha ? new Date(item.fecha).toLocaleDateString() : ''}
+                            {formatYMD(item.fecha)}
                           </td>
                         </tr>
                       );
@@ -658,3 +663,8 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
 };
 
 export default UnmatchedEquivalencesScreen;
+
+
+
+
+
