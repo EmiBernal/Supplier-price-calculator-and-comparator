@@ -76,6 +76,80 @@ function toYMD(s) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+const YMD_REGEX = /^(\d{4})-(\d{2})-(\d{2})/;
+
+function ensureYMD(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const match = value.match(YMD_REGEX);
+    if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+  }
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function levenshteinDistance(a, b) {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const prev = new Array(b.length + 1).fill(0);
+  const curr = new Array(b.length + 1).fill(0);
+  for (let j = 0; j <= b.length; j += 1) {
+    prev[j] = j;
+  }
+  for (let i = 1; i <= a.length; i += 1) {
+    curr[0] = i;
+    const charA = a.charAt(i - 1);
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = charA === b.charAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(
+        curr[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + cost
+      );
+    }
+    for (let j = 0; j <= b.length; j += 1) {
+      prev[j] = curr[j];
+    }
+  }
+  return prev[b.length];
+}
+
+function computeNameSimilarity(a, b) {
+  const normA = normalizeForKey(a);
+  const normB = normalizeForKey(b);
+  if (!normA || !normB) return 0;
+  if (normA === normB) return 1;
+  const distance = levenshteinDistance(normA, normB);
+  const maxLen = Math.max(normA.length, normB.length);
+  if (maxLen === 0) return 0;
+  return 1 - distance / maxLen;
+}
+
+function buildNameLikePattern(name) {
+  if (!name) return null;
+  const normalized = normalizeWhitespace(String(name).toLowerCase());
+  if (!normalized) return null;
+  return `%${normalized.replace(/\s+/g, '%')}%`;
+}
+
+function normalizeRowDates(row, fields = []) {
+  if (!row || typeof row !== 'object') return row;
+  const copy = { ...row };
+  for (const field of fields) {
+    copy[field] = ensureYMD(copy[field]);
+  }
+  return copy;
+}
+
+function normalizeRowsDates(rows = [], fields = []) {
+  return rows.map((row) => normalizeRowDates(row, fields));
+}
+
 // ===== Helpers DB (PostgreSQL) =====
 async function runDb(db, sql, params = []) {
   const text = prepareSql(sql);
@@ -273,12 +347,12 @@ app.get('/api/equivalencias', async (req, res) => {
       supplier: row.proveedor,
       externalCode: row.cod_externo,
       externalName: row.nom_externo,
-      externalDate: row.fecha_externo,
+      externalDate: ensureYMD(row.fecha_externo),
       internalSupplier: 'Gampack',
       internalCode: row.cod_interno,
       internalName: row.nom_interno,
-      internalDate: row.fecha_interno,
-      relationDate: row.relation_created_at,
+      internalDate: ensureYMD(row.fecha_interno),
+      relationDate: ensureYMD(row.relation_created_at),
       matchingCriteria: row.criterio_relacion
     }));
 
@@ -420,8 +494,8 @@ app.get('/api/lista_precios', async (req, res) => {
        ORDER BY fecha DESC`,
       [`%${search}%`, `%${search}%`]
     );
-    res.json(rows);
-  } catch (err) {
+    res.json(normalizeRowsDates(rows, ['fecha']));
+    } catch (err) {
     console.error('Error al obtener lista_precios:', err);
     return res.status(500).json({ error: 'Error al obtener datos' });
   }
@@ -489,7 +563,7 @@ function createNoRelacionadosHandler(tipo) {
         params.push(limit, offset);
 
         const rows = await getDbRows(db, sql, params);
-        return res.json(rows);
+        return res.json(normalizeRowsDates(rows, ['fecha']));
       }
 
       // internos
@@ -528,7 +602,7 @@ function createNoRelacionadosHandler(tipo) {
       params.push(limit, offset);
 
       const rows = await getDbRows(db, sql, params);
-      return res.json(rows);
+      return res.json(normalizeRowsDates(rows, ['fecha']));
     } catch (err) {
       console.error('Error al obtener productos no relacionados:', err);
       return res.status(500).json({ error: 'db_error' });
@@ -569,7 +643,7 @@ app.post('/api/check-product', async (req, res) => {
   try {
     const row = await getDbRow(db, sql, params);
     if (row) {
-      return res.status(200).json({ found: true, product: row });
+      return res.status(200).json({ found: true, product: normalizeRowDates(row, ['fecha']) });
     } else {
       return res.status(200).json({ found: false });
     }
