@@ -15,6 +15,7 @@ function buildTrigramFreq(s: string) {
   for (let i = 0; i < s.length - 2; i++) t[s.slice(i, i + 3)] = (t[s.slice(i, i + 3)] || 0) + 1;
   return t;
 }
+//Comentario
 function cosineByTri(a: Record<string, number>, b: Record<string, number>) {
   let dot = 0, nA = 0, nB = 0;
   for (const k in a) { nA += a[k] * a[k]; if (b[k]) dot += a[k] * b[k]; }
