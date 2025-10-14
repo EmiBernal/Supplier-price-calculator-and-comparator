@@ -1,2 +1,2 @@
 // types.ts
-export type Screen = 'home' | 'manual' | 'equivalences' | 'compare';
+export type Screen = 'home' | 'manual' | 'equivalences' | 'compare' | 'providers';

@@ -480,6 +480,225 @@ app.get('/api/providers/summary', async (req, res) => {
   }
 });
 
+// ---------- PROVEEDORES ACTIVOS (vista detallada) ----------
+app.get('/api/providers/active', async (req, res) => {
+  try {
+    const db = req.ctx.db;
+    if (!db) {
+      return res.status(500).json({ error: 'db_not_available' });
+    }
+
+    const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const params = [];
+    const conditions = ["proveedor IS NOT NULL", "TRIM(proveedor) <> ''"];
+
+    if (searchRaw) {
+      params.push(`%${searchRaw.toLowerCase()}%`);
+      conditions.push(`LOWER(TRIM(proveedor)) LIKE $${params.length}`);
+    }
+
+    const sql = `
+      SELECT
+        proveedor AS name,
+        COUNT(*)::int AS products,
+        MAX(fecha) AS last_update,
+        SUM(CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN 1 ELSE 0 END)::int AS recent_products,
+        CASE WHEN MAX(fecha) >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
+      FROM lista_precios
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY proveedor
+      ORDER BY LOWER(proveedor) ASC
+    `;
+
+    const rows = await getDbRows(db, sql, params);
+    const normalized = normalizeRowsDates(rows, ['last_update']).map((row) => ({
+      name: row.name,
+      products: Number(row.products ?? 0),
+      last_update: row.last_update ?? null,
+      recent_products: Number(row.recent_products ?? 0),
+      is_active: Boolean(row.is_active),
+    }));
+
+    res.json(normalized);
+  } catch (err) {
+    console.error('Error /api/providers/active:', err);
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
+app.get('/api/providers/products', async (req, res) => {
+  try {
+    const db = req.ctx.db;
+    if (!db) {
+      return res.status(500).json({ error: 'db_not_available' });
+    }
+
+    const rawName = typeof req.query.name === 'string' ? req.query.name.trim() : '';
+    if (!rawName) {
+      return res.status(400).json({ error: 'Proveedor requerido' });
+    }
+
+    const normalizedName = rawName.toLowerCase();
+    const rows = await getDbRows(
+      db,
+      `
+        SELECT
+          id_externo,
+          nom_externo,
+          cod_externo,
+          precio_final,
+          fecha,
+          proveedor,
+          tipo_empresa,
+          CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
+        FROM lista_precios
+        WHERE TRIM(LOWER(proveedor)) = $1
+        ORDER BY LOWER(nom_externo) ASC, cod_externo ASC NULLS LAST
+      `,
+      [normalizedName]
+    );
+
+    const normalized = normalizeRowsDates(rows, ['fecha']).map((row) => ({
+      id: row.id_externo,
+      name: row.nom_externo,
+      code: row.cod_externo,
+      price: Number(row.precio_final ?? 0),
+      date: row.fecha ?? null,
+      provider: row.proveedor,
+      companyType: row.tipo_empresa ?? null,
+      is_active: Boolean(row.is_active),
+    }));
+
+    res.json({
+      provider: normalized[0]?.provider ?? rawName,
+      products: normalized,
+    });
+  } catch (err) {
+    console.error('Error /api/providers/products:', err);
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
+app.put('/api/providers/products/:id', async (req, res) => {
+  const db = req.ctx.db;
+  if (!db) {
+    return res.status(500).json({ error: 'db_not_available' });
+  }
+
+  const rawId = req.params.id;
+  if (!rawId) {
+    return res.status(400).json({ error: 'id_requerido' });
+  }
+
+  const id = Number.parseInt(String(rawId), 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: 'id_invalido' });
+  }
+
+  const {
+    productName,
+    productCode,
+    finalPrice,
+    price,
+    companyType,
+    tipoEmpresa,
+    provider,
+    proveedor,
+    date,
+    fecha,
+    name,
+    cod_externo,
+    final_price,
+    precio_final,
+    company,
+    tipo_empresa,
+  } = req.body || {};
+
+  const resolvedName = normalizeWhitespace(productName ?? name ?? '');
+  if (!resolvedName) {
+    return res.status(400).json({ error: 'Nombre requerido' });
+  }
+
+  const resolvedDate = ensureYMD(date ?? fecha);
+  if (!resolvedDate) {
+    return res.status(400).json({ error: 'Fecha inválida' });
+  }
+
+  const priceSource = finalPrice ?? price ?? final_price ?? precio_final;
+  const resolvedPrice = parseNumberAR(priceSource);
+  if (resolvedPrice == null) {
+    return res.status(400).json({ error: 'Precio inválido' });
+  }
+
+  const resolvedCodeRaw = productCode !== undefined ? productCode : cod_externo;
+  const resolvedCode = resolvedCodeRaw == null ? null : normalizeWhitespace(resolvedCodeRaw) || null;
+
+  const resolvedCompanyTypeRaw = companyType ?? tipoEmpresa ?? company ?? tipo_empresa;
+  try {
+    const current = await getDbRow(
+      db,
+      `SELECT proveedor, tipo_empresa FROM lista_precios WHERE id_externo = $1`,
+      [id]
+    );
+
+    if (!current) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    const resolvedProvider = normalizeWhitespace(provider ?? proveedor ?? current.proveedor ?? '');
+    if (!resolvedProvider) {
+      return res.status(400).json({ error: 'Proveedor requerido' });
+    }
+
+    let resolvedCompanyType;
+    if (resolvedCompanyTypeRaw === undefined) {
+      resolvedCompanyType = current.tipo_empresa;
+    } else if (resolvedCompanyTypeRaw === null) {
+      resolvedCompanyType = null;
+    } else {
+      resolvedCompanyType = normalizeWhitespace(resolvedCompanyTypeRaw) || null;
+    }
+
+    const updated = await getDbRow(
+      db,
+      `
+        UPDATE lista_precios
+           SET nom_externo = $1,
+               cod_externo = $2,
+               precio_final = $3,
+               fecha = $4,
+               proveedor = $5,
+               tipo_empresa = $6
+         WHERE id_externo = $7
+         RETURNING id_externo, nom_externo, cod_externo, precio_final, fecha, proveedor, tipo_empresa,
+                   CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
+      `,
+      [resolvedName, resolvedCode, resolvedPrice, resolvedDate, resolvedProvider, resolvedCompanyType, id]
+    );
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    const [normalized] = normalizeRowsDates([updated], ['fecha']);
+    return res.json({
+      product: {
+        id: normalized.id_externo,
+        name: normalized.nom_externo,
+        code: normalized.cod_externo,
+        price: Number(normalized.precio_final ?? 0),
+        date: normalized.fecha ?? null,
+        provider: normalized.proveedor,
+        companyType: normalized.tipo_empresa ?? null,
+        isActive: Boolean(updated.is_active),
+      },
+    });
+  } catch (err) {
+    console.error('Error actualizando producto de proveedor:', err);
+    return res.status(500).json({ error: 'db_error' });
+  }
+});
+
 // ---------- LISTA PRECIOS (externos) ----------
 app.get('/api/lista_precios', async (req, res) => {
   try {

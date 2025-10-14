@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Screen } from '../../types';
 import {
-  Upload, GitCompare, BarChart3, ArrowRight, Package, Factory, Link2, Search, ChevronDown
+  Upload, GitCompare, BarChart3, ArrowRight, Package, Factory, Link2, Search, ChevronDown, Building2
   // LogOut
 } from 'lucide-react';
 import { apiFetch, currentRole } from '../../lib/api';
@@ -219,7 +219,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, userRole, on
           {/* === /HEADER === */}
 
           {/* Grid principal (tarjetas grandes) */}
-          <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="mt-10 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
             <button
               onClick={() => onNavigate('manual')}
               className="group text-left rounded-3xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 hover:bg-white/90 dark:hover:bg-white/10 transition-all shadow-lg hover:shadow-2xl p-8 min-h-44 md:min-h-56 backdrop-blur-xl transform hover:scale-[1.02]"
@@ -263,6 +263,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, userRole, on
               </div>
               <h3 className="mt-5 text-xl font-semibold text-gray-900 dark:text-white">Comparador de precios</h3>
               <p className="mt-2 text-sm text-gray-600 dark:text-white/80 max-w-[28ch]">Análisis y diferencias por proveedor.</p>
+            </button>
+
+            <button
+              onClick={() => onNavigate('providers')}
+              className="group text-left rounded-3xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 hover:bg-white/90 dark:hover:bg-white/10 transition-all shadow-lg hover:shadow-2xl p-8 min-h-44 md:min-h-56 backdrop-blur-xl transform hover:scale-[1.02]"
+            >
+              <div className="flex items-center justify-between">
+                <div className="p-4 rounded-2xl bg-teal-100 dark:bg-white/10">
+                  <Building2 size={24} strokeWidth={1.8} className="text-teal-700 dark:text-teal-300" aria-hidden />
+                </div>
+                <ArrowRight size={20} strokeWidth={1.8} className="text-gray-600 dark:text-gray-300 opacity-50 transition-transform group-hover:translate-x-2" aria-hidden />
+              </div>
+              <h3 className="mt-5 text-xl font-semibold text-gray-900 dark:text-white">Proveedores activos</h3>
+              <p className="mt-2 text-sm text-gray-600 dark:text-white/80 max-w-[28ch]">
+                Consultá el estado de cada proveedor y accedé a sus productos rápidamente.
+              </p>
             </button>
           </div>
 

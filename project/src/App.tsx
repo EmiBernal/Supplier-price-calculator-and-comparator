@@ -19,6 +19,7 @@ import CompareScreenVenta from "./screens/venta/CompareScreen";
 import MainEquivalencesVenta from "./screens/venta/MainEquivalences";
 import LoginScreenVenta from "./screens/venta/LoginScreen";
 import CalculadoraVentaScreen from "./screens/venta/CalculadoraVentaScreen";
+import ActiveSuppliersScreenVenta from "./screens/venta/ActiveSuppliersScreen";
 
 function getInitialTheme(): "light" | "dark" {
   try {
@@ -134,6 +135,9 @@ function App() {
       )}
       {currentScreen === "compare" && (
         <CompareScreenVenta onNavigate={handleNavigate} />
+      )}
+      {currentScreen === "providers" && (
+        <ActiveSuppliersScreenVenta onNavigate={handleNavigate} />
       )}
     </div>
   );

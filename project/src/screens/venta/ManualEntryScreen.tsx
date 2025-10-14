@@ -18,6 +18,9 @@ interface FormData {
   date: string;
 }
 
+const resolveFinalPriceValue = (value: FormData['finalPrice']) =>
+  typeof value === 'number' ? value : Number(value);
+
 // 🔧 NUEVO: normaliza cualquier forma de producto (manual o Excel)
 function normalizeProduct(p: any) {
   const company =
@@ -224,6 +227,34 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
   // Modal Importar
   const [showImport, setShowImport] = useState(false);
 
+  const parseServerError = async (response: Response) => {
+    try {
+      const text = await response.text();
+      if (!text) {
+        return response.status >= 500
+          ? 'El servidor no pudo guardar el producto.'
+          : 'No se pudo completar la solicitud.';
+      }
+      try {
+        const data = JSON.parse(text);
+        if (typeof data === 'string') return data;
+        if (data?.error) return data.error;
+        if (data?.message) return data.message;
+      } catch {}
+      return text;
+    } catch {
+      return 'No se pudo interpretar la respuesta del servidor.';
+    }
+  };
+
+  const formatServerErrorMessage = (message: string) => {
+    if (!message) return 'Fallo al subir el producto. Intenta nuevamente.';
+    if (/error interno/i.test(message)) {
+      return 'El servidor no pudo guardar el producto. Verificá los datos e intentá nuevamente.';
+    }
+    return message;
+  };
+
   const inferCompanyType = (name: string): 'Gampack' | 'Proveedor' =>
     name.trim().toLowerCase() === 'gampack' ? 'Gampack' : 'Proveedor';
 
@@ -231,7 +262,10 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     const newErrors: Record<string, string> = {};
     if (!formData.company.trim()) newErrors.supplier = 'Proveedor es requerido';
     if (!formData.productName.trim()) newErrors.productName = 'El nombre del producto es requerido';
-    if (formData.finalPrice === '' || formData.finalPrice <= 0) newErrors.finalPrice = 'El precio final debe ser mayor a 0';
+    const priceValue = resolveFinalPriceValue(formData.finalPrice);
+    if (!Number.isFinite(priceValue) || priceValue <= 0) {
+      newErrors.finalPrice = 'Ingresá un precio válido mayor a 0';
+    }
     if (!formData.date) newErrors.date = 'La fecha es requerida';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -303,20 +337,31 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     }
 
     const companyType = inferCompanyType(formData.company);
+    const finalPriceValue = resolveFinalPriceValue(formData.finalPrice);
+    if (!Number.isFinite(finalPriceValue) || finalPriceValue <= 0) {
+      setErrors((prev) => ({ ...prev, finalPrice: 'Ingresá un precio válido mayor a 0' }));
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
       const response = await apiFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...formData,
+          company: formData.company.trim(),
+          productCode: formData.productCode.trim(),
+          productName: formData.productName.trim(),
+          date: formData.date,
           companyType,
-          finalPrice: Number(formData.finalPrice),
+          finalPrice: finalPriceValue,
           updateExisting: wantsToUpdate || false,
         }),
       });
 
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) {
+        throw new Error(await parseServerError(response));
+      }
 
       const json = await response.json();
 
@@ -351,7 +396,11 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (error) {
       console.error('Error uploading product:', error);
-      setErrors({ general: 'Fallo al subir el producto. Intenta nuevamente.' });
+      const message =
+        error instanceof Error && error.message
+          ? formatServerErrorMessage(error.message)
+          : 'Fallo al subir el producto. Intenta nuevamente.';
+      setErrors({ general: message });
     } finally {
       setIsSubmitting(false);
     }
@@ -363,21 +412,32 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
     setErrors({});
 
     const companyType = inferCompanyType(formData.company);
+    const finalPriceValue = resolveFinalPriceValue(formData.finalPrice);
+    if (!Number.isFinite(finalPriceValue) || finalPriceValue <= 0) {
+      setErrors((prev) => ({ ...prev, finalPrice: 'Ingresá un precio válido mayor a 0' }));
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
       const response = await apiFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...formData,
+          company: formData.company.trim(),
+          productCode: formData.productCode.trim(),
+          productName: formData.productName.trim(),
+          date: formData.date,
           companyType,
-          finalPrice: Number(formData.finalPrice),
+          finalPrice: finalPriceValue,
           linkAsEquivalent,
           updateExisting: wantsToUpdate || false,
         }),
       });
 
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) {
+        throw new Error(await parseServerError(response));
+      }
 
       const json = await response.json();
 
@@ -399,7 +459,11 @@ export const ManualEntryScreen: React.FC<ManualEntryScreenProps> = ({ onNavigate
       }
     } catch (error) {
       console.error('Error uploading product:', error);
-      setErrors({ general: 'Fallo al subir el producto. Intenta nuevamente.' });
+      const message =
+        error instanceof Error && error.message
+          ? formatServerErrorMessage(error.message)
+          : 'Fallo al subir el producto. Intenta nuevamente.';
+      setErrors({ general: message });
     } finally {
       setIsSubmitting(false);
     }
