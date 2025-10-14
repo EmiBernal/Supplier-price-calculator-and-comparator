@@ -480,6 +480,103 @@ app.get('/api/providers/summary', async (req, res) => {
   }
 });
 
+// ---------- PROVEEDORES ACTIVOS (vista detallada) ----------
+app.get('/api/providers/active', async (req, res) => {
+  try {
+    const db = req.ctx.db;
+    if (!db) {
+      return res.status(500).json({ error: 'db_not_available' });
+    }
+
+    const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const params = [];
+    const conditions = ["proveedor IS NOT NULL", "TRIM(proveedor) <> ''"];
+
+    if (searchRaw) {
+      params.push(`%${searchRaw.toLowerCase()}%`);
+      conditions.push(`LOWER(TRIM(proveedor)) LIKE $${params.length}`);
+    }
+
+    const sql = `
+      SELECT
+        proveedor AS name,
+        COUNT(*)::int AS products,
+        MAX(fecha) AS last_update,
+        SUM(CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN 1 ELSE 0 END)::int AS recent_products,
+        CASE WHEN MAX(fecha) >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
+      FROM lista_precios
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY proveedor
+      ORDER BY LOWER(proveedor) ASC
+    `;
+
+    const rows = await getDbRows(db, sql, params);
+    const normalized = normalizeRowsDates(rows, ['last_update']).map((row) => ({
+      name: row.name,
+      products: Number(row.products ?? 0),
+      last_update: row.last_update ?? null,
+      recent_products: Number(row.recent_products ?? 0),
+      is_active: Boolean(row.is_active),
+    }));
+
+    res.json(normalized);
+  } catch (err) {
+    console.error('Error /api/providers/active:', err);
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
+app.get('/api/providers/products', async (req, res) => {
+  try {
+    const db = req.ctx.db;
+    if (!db) {
+      return res.status(500).json({ error: 'db_not_available' });
+    }
+
+    const rawName = typeof req.query.name === 'string' ? req.query.name.trim() : '';
+    if (!rawName) {
+      return res.status(400).json({ error: 'Proveedor requerido' });
+    }
+
+    const normalizedName = rawName.toLowerCase();
+    const rows = await getDbRows(
+      db,
+      `
+        SELECT
+          id_externo,
+          nom_externo,
+          cod_externo,
+          precio_final,
+          fecha,
+          proveedor,
+          CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
+        FROM lista_precios
+        WHERE TRIM(LOWER(proveedor)) = $1
+        ORDER BY LOWER(nom_externo) ASC, cod_externo ASC NULLS LAST
+      `,
+      [normalizedName]
+    );
+
+    const normalized = normalizeRowsDates(rows, ['fecha']).map((row) => ({
+      id: row.id_externo,
+      name: row.nom_externo,
+      code: row.cod_externo,
+      price: Number(row.precio_final ?? 0),
+      date: row.fecha ?? null,
+      provider: row.proveedor,
+      is_active: Boolean(row.is_active),
+    }));
+
+    res.json({
+      provider: normalized[0]?.provider ?? rawName,
+      products: normalized,
+    });
+  } catch (err) {
+    console.error('Error /api/providers/products:', err);
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
 // ---------- LISTA PRECIOS (externos) ----------
 app.get('/api/lista_precios', async (req, res) => {
   try {
