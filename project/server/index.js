@@ -820,14 +820,18 @@ app.post('/api/relacionar-manual', async (req, res) => {
 app.post('/api/products', async (req, res) => {
   const db = req.ctx.db;
   const {
-    productCode,
-    productName,
+    productCode: rawProductCode,
+    productName: rawProductName,
     finalPrice,
     companyType,
-    company,
+    company: rawCompany,
     date,
     linkAsEquivalent = null,
   } = req.body;
+
+  const productCode = normalizeWhitespace(rawProductCode ?? '');
+  const productName = normalizeWhitespace(rawProductName ?? '');
+  const company = normalizeWhitespace(rawCompany ?? '');
 
   if (!productName || finalPrice == null || !companyType || !date) {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
@@ -841,7 +845,7 @@ app.post('/api/products', async (req, res) => {
   const normalizedCode = normalizeCode(productCode);
   const normalizedNameKey = normalizeForKey(productName);
   const nameLikePattern = buildNameLikePattern(productName);
-  const normalizedCompany = normalizeWhitespace(String(company || '').toLowerCase());
+  const normalizedCompany = company ? company.toLowerCase() : '';
   const hasCompany = Boolean(normalizedCompany);
 
   async function createRelationAndClean(idListaPrecios, idListaInterna, criterio = 'automatic') {
@@ -957,38 +961,77 @@ app.post('/api/products', async (req, res) => {
       const exact = await getDbRow(
         db,
         `SELECT * FROM lista_precios
-         WHERE LOWER(cod_externo) = LOWER($1)
-           AND LOWER(nom_externo) = LOWER($2)
-           AND proveedor = $3
-           AND tipo_empresa = $4`,
-        [productCode, productName, company, companyType]
+         WHERE cod_externo IS NOT NULL
+           AND LOWER(TRIM(cod_externo)) = LOWER($1)
+           AND LOWER(TRIM(proveedor)) = LOWER($2)
+           AND LOWER(TRIM(tipo_empresa)) = LOWER($3)
+         LIMIT 1`,
+        [productCode, company, companyType]
       );
 
       if (exact) {
         const storedDate = ensureYMD(exact.fecha);
-        if (exact.precio_final !== finalPrice || storedDate !== normalizedDate) {
+        const needsUpdate =
+          normalizeWhitespace(exact.cod_externo || '') !== productCode ||
+          normalizeWhitespace(exact.nom_externo || '') !== productName ||
+          Number(exact.precio_final) !== Number(finalPrice) ||
+          storedDate !== normalizedDate ||
+          normalizeWhitespace(exact.proveedor || '') !== company ||
+          normalizeWhitespace(exact.tipo_empresa || '') !== companyType;
+        if (needsUpdate) {
           await runDb(
             db,
             `UPDATE lista_precios
-             SET precio_final = $1,
-                 fecha = $6
-             WHERE LOWER(cod_externo) = LOWER($2)
-               AND LOWER(nom_externo) = LOWER($3)
-               AND proveedor = $4
-               AND tipo_empresa = $5`,
-            [finalPrice, productCode, productName, company, companyType, normalizedDate]
+             SET cod_externo = $1,
+                 nom_externo = $2,
+                 precio_final = $3,
+                 tipo_empresa = $4,
+                 fecha = $5,
+                 proveedor = $6
+             WHERE id_externo = $7`,
+            [productCode || null, productName, finalPrice, companyType, normalizedDate, company, exact.id_externo]
           );
         }
         return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
       }
 
-      const inserted = await getDbRow(
-        db,
-        `INSERT INTO lista_precios (cod_externo, nom_externo, precio_final, tipo_empresa, fecha, proveedor)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id_externo`,
-        [productCode, productName, finalPrice, companyType, normalizedDate, company]
-      );
+      let inserted;
+      try {
+        inserted = await getDbRow(
+          db,
+          `INSERT INTO lista_precios (cod_externo, nom_externo, precio_final, tipo_empresa, fecha, proveedor)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id_externo`,
+          [productCode || null, productName, finalPrice, companyType, normalizedDate, company]
+        );
+      } catch (err) {
+        if (err?.code === '23505' && productCode) {
+          const conflict = await getDbRow(
+            db,
+            `SELECT * FROM lista_precios
+             WHERE cod_externo IS NOT NULL
+               AND LOWER(TRIM(cod_externo)) = LOWER($1)
+               AND LOWER(TRIM(proveedor)) = LOWER($2)
+             LIMIT 1`,
+            [productCode, company]
+          );
+          if (conflict) {
+            await runDb(
+              db,
+              `UPDATE lista_precios
+               SET nom_externo = $1,
+                   precio_final = $2,
+                   tipo_empresa = $3,
+                   fecha = $4,
+                   proveedor = $5
+               WHERE id_externo = $6`,
+              [productName, finalPrice, companyType, normalizedDate, company, conflict.id_externo]
+            );
+            return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
+          }
+        }
+        throw err;
+      }
       const newId = inserted?.id_externo;
 
       let internalMatch = null;
@@ -1017,35 +1060,73 @@ app.post('/api/products', async (req, res) => {
     }
 
     if (companyType === 'Gampack') {
-      const exact = await getDbRow(
-        db,
-        `SELECT * FROM lista_interna
-         WHERE LOWER(cod_interno) = LOWER($1) AND LOWER(nom_interno) = LOWER($2)`,
-        [productCode, productName]
-      );
+      const exact = productCode
+        ? await getDbRow(
+            db,
+            `SELECT * FROM lista_interna
+             WHERE cod_interno IS NOT NULL
+               AND LOWER(TRIM(cod_interno)) = LOWER($1)
+             LIMIT 1`,
+            [productCode]
+          )
+        : null;
 
       if (exact) {
         const storedDate = ensureYMD(exact.fecha);
-        if (exact.precio_final !== finalPrice || storedDate !== normalizedDate) {
+        const needsUpdate =
+          normalizeWhitespace(exact.cod_interno || '') !== productCode ||
+          normalizeWhitespace(exact.nom_interno || '') !== productName ||
+          Number(exact.precio_final) !== Number(finalPrice) ||
+          storedDate !== normalizedDate;
+        if (needsUpdate) {
           await runDb(
             db,
             `UPDATE lista_interna
-             SET precio_final = $1,
+             SET cod_interno = $1,
+                 nom_interno = $2,
+                 precio_final = $3,
                  fecha = $4
-             WHERE LOWER(cod_interno) = LOWER($2) AND LOWER(nom_interno) = LOWER($3)`,
-            [finalPrice, productCode, productName, normalizedDate]
+             WHERE id_interno = $5`,
+            [productCode || null, productName, finalPrice, normalizedDate, exact.id_interno]
           );
         }
         return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
       }
 
-      const inserted = await getDbRow(
-        db,
-        `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id_interno`,
-        [productCode, productName, finalPrice, normalizedDate]
-      );
+      let inserted;
+      try {
+        inserted = await getDbRow(
+          db,
+          `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id_interno`,
+          [productCode || null, productName, finalPrice, normalizedDate]
+        );
+      } catch (err) {
+        if (err?.code === '23505' && productCode) {
+          const conflict = await getDbRow(
+            db,
+            `SELECT * FROM lista_interna
+             WHERE cod_interno IS NOT NULL
+               AND LOWER(TRIM(cod_interno)) = LOWER($1)
+             LIMIT 1`,
+            [productCode]
+          );
+          if (conflict) {
+            await runDb(
+              db,
+              `UPDATE lista_interna
+               SET nom_interno = $1,
+                   precio_final = $2,
+                   fecha = $3
+               WHERE id_interno = $4`,
+              [productName, finalPrice, normalizedDate, conflict.id_interno]
+            );
+            return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
+          }
+        }
+        throw err;
+      }
       const newId = inserted?.id_interno;
 
       let externalMatch = null;
