@@ -20,7 +20,7 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   // Filtros
   const [dateFrom, setDateFrom] = useState(''); // YYYY-MM-DD
   const [dateTo, setDateTo] = useState('');     // YYYY-MM-DD
-  const [familia, setFamilia] = useState('');   // texto libre (compatibilidad)
+
 
   // NUEVO: selects guiados
   const [famGenSel, setFamGenSel] = useState('');
@@ -84,13 +84,13 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
       loadComparisons(searchTerm);
     }, 300);
     return () => clearTimeout(delay);
-  }, [searchTerm, dateFrom, dateTo, familia, famGenSel, famEspSel, dateRangeInvalid]);
+  }, [searchTerm, dateFrom, dateTo, famGenSel, famEspSel, dateRangeInvalid]);
 
   // Construye el valor que mandamos como `familia` al backend
   const buildFamiliaQuery = () => {
     if (famGenSel && famEspSel) return `${famGenSel} > ${famEspSel}`; // p.ej. "Desechables > Vasos"
     if (famGenSel) return famGenSel;                                   // p.ej. "Desechables"
-    return familia;                                                    // texto libre existente
+    return '';                                                    // texto libre existente
   };
 
   const loadComparisons = async (search = '') => {
@@ -181,7 +181,6 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     setSearchTerm('');
     setDateFrom('');
     setDateTo('');
-    setFamilia('');
     setFamGenSel('');
     setFamEspSel('');
   };
@@ -215,12 +214,6 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
           <div>
             <label className="block text-xs text-gray-600 dark:text-white/80 mb-1">Hasta</label>
             <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20" />
-          </div>
-
-          {/* Input libre (compatibilidad) */}
-          <div>
-            <label className="block text-xs text-gray-600 dark:text-white/80 mb-1">Familia (texto libre)</label>
-            <Input placeholder="Ej: bolsas, films..." value={familia} onChange={(e) => setFamilia(e.target.value)} className="dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20" />
           </div>
 
           <div className="flex items-end">
