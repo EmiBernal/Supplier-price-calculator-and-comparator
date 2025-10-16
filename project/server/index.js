@@ -849,22 +849,41 @@ app.post('/api/products', async (req, res) => {
   const hasCompany = Boolean(normalizedCompany);
 
   async function createRelationAndClean(idListaPrecios, idListaInterna, criterio = 'automatic') {
-    const exists = await getDbRow(
+    const existingPair = await getDbRow(
       db,
-      `SELECT 1 FROM relacion_articulos WHERE id_lista_precios = $1 AND id_lista_interna = $2`,
+      `SELECT id FROM relacion_articulos WHERE id_lista_precios = $1 AND id_lista_interna = $2`,
       [idListaPrecios, idListaInterna]
     );
-    if (exists) return;
+    if (existingPair) {
+      return { created: true, relationId: existingPair.id, alreadyExisted: true };
+    }
 
-    await runDb(
+    const existingForInternal = await getDbRow(
+      db,
+      `SELECT id, id_lista_precios FROM relacion_articulos WHERE id_lista_interna = $1 LIMIT 1`,
+      [idListaInterna]
+    );
+    if (existingForInternal) {
+      return {
+        created: false,
+        reason: 'internal_already_related',
+        conflictingRelationId: existingForInternal.id,
+        conflictingExternalId: existingForInternal.id_lista_precios,
+      };
+    }
+
+    const insertedRelation = await getDbRow(
       db,
       `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
-       VALUES ($1, $2, $3)`,
+       VALUES ($1, $2, $3)
+       RETURNING id`,
       [idListaPrecios, idListaInterna, criterio]
     );
 
     await runDb(db, `DELETE FROM articulos_no_relacionados WHERE id_lista_precios = $1`, [idListaPrecios]);
     await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [idListaInterna]);
+
+    return { created: true, relationId: insertedRelation?.id ?? null, alreadyExisted: false };
   }
 
   const pickBestNameMatch = (targetName, candidates, getName) => {
@@ -1039,14 +1058,23 @@ app.post('/api/products', async (req, res) => {
         internalMatch = await findInternalAutoMatch();
       }
 
+      let relationResult = null;
       if (internalMatch?.row && linkAsEquivalent !== false) {
-        await createRelationAndClean(newId, internalMatch.row.id_interno, internalMatch.criterion);
-        return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
+        relationResult = await createRelationAndClean(newId, internalMatch.row.id_interno, internalMatch.criterion);
+        if (relationResult?.created) {
+          return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
+        }
       }
 
-      const motivo = internalMatch?.row
-        ? 'Usuario rechazó sugerencia de relación'
-        : 'No se encontró coincidencia por código ni nombre';
+      const motivo = (() => {
+        if (!internalMatch?.row) {
+          return 'No se encontró coincidencia por código ni nombre';
+        }
+        if (relationResult?.reason === 'internal_already_related') {
+          return 'Coincidencia automática omitida: el producto interno ya está relacionado';
+        }
+        return 'Usuario rechazó sugerencia de relación';
+      })();
 
       await runDb(
         db,
@@ -1056,7 +1084,11 @@ app.post('/api/products', async (req, res) => {
         [newId, motivo]
       );
 
-      return res.status(201).json({ success: true, message: 'Producto creado - no relacionados' });
+      return res.status(201).json({
+        success: true,
+        message: 'Producto creado - no relacionados',
+        skippedRelationReason: relationResult?.reason ?? (internalMatch?.row ? 'user_declined' : 'no_match'),
+      });
     }
 
     if (companyType === 'Gampack') {
@@ -1134,14 +1166,23 @@ app.post('/api/products', async (req, res) => {
         externalMatch = await findExternalAutoMatch();
       }
 
+      let relationResult = null;
       if (externalMatch?.row && linkAsEquivalent !== false) {
-        await createRelationAndClean(externalMatch.row.id_externo, newId, externalMatch.criterion);
-        return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
+        relationResult = await createRelationAndClean(externalMatch.row.id_externo, newId, externalMatch.criterion);
+        if (relationResult?.created) {
+          return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
+        }
       }
 
-      const motivo = externalMatch?.row
-        ? 'Usuario rechazó sugerencia de relación'
-        : 'No se encontró coincidencia por código ni nombre';
+      const motivo = (() => {
+        if (!externalMatch?.row) {
+          return 'No se encontró coincidencia por código ni nombre';
+        }
+        if (relationResult?.reason === 'internal_already_related') {
+          return 'Coincidencia automática omitida: el producto interno ya está relacionado';
+        }
+        return 'Usuario rechazó sugerencia de relación';
+      })();
 
       await runDb(
         db,
@@ -1151,7 +1192,11 @@ app.post('/api/products', async (req, res) => {
         [newId, motivo]
       );
 
-      return res.status(201).json({ success: true, message: 'Producto creado - no relacionados' });
+      return res.status(201).json({
+        success: true,
+        message: 'Producto creado - no relacionados',
+        skippedRelationReason: relationResult?.reason ?? (externalMatch?.row ? 'user_declined' : 'no_match'),
+      });
     }
 
     return res.status(400).json({ error: 'Tipo de empresa no válido' });
