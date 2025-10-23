@@ -212,6 +212,110 @@ async function findExternalByExactName(db, normalizedName, normalizedSupplier = 
   return getDbRow(db, clauses.join('\n'), params);
 }
 
+async function findInternalByNormalizedCode(db, normalizedCode) {
+  if (!normalizedCode) return null;
+  return getDbRow(
+    db,
+    `SELECT * FROM lista_interna
+     WHERE cod_interno IS NOT NULL
+       AND LOWER(REGEXP_REPLACE(cod_interno, '[^a-z0-9]', '', 'g')) = $1
+     ORDER BY id_interno ASC
+     LIMIT 1`,
+    [normalizedCode]
+  );
+}
+
+async function upsertInternalProduct(db, { productCode, productName, finalPrice, normalizedDate }) {
+  const normalizedCode = normalizeCode(productCode);
+  const normalizedExactName = normalizeNameForExactMatch(productName);
+  const currentMonth = getCurrentYearMonth();
+
+  let existing = null;
+  let matchType = null;
+
+  if (normalizedCode) {
+    existing = await findInternalByNormalizedCode(db, normalizedCode);
+    if (existing) matchType = 'code';
+  }
+
+  if (!existing && normalizedExactName) {
+    existing = await findInternalByExactName(db, normalizedExactName);
+    if (existing) matchType = 'name';
+  }
+
+  if (existing) {
+    const storedDate = ensureYMD(existing.fecha);
+    const storedMonth = ensureYearMonth(existing.mes_actualizacion || existing.fecha);
+    const normalizedProvidedCode = normalizeWhitespace(productCode || '');
+    const normalizedStoredCode = normalizeWhitespace(existing.cod_interno || '');
+    const normalizedStoredName = normalizeWhitespace(existing.nom_interno || '');
+
+    const needsUpdate =
+      normalizedStoredCode !== normalizedProvidedCode ||
+      normalizedStoredName !== productName ||
+      Number(existing.precio_final) !== Number(finalPrice) ||
+      storedDate !== normalizedDate ||
+      storedMonth !== currentMonth;
+
+    if (needsUpdate) {
+      await runDb(
+        db,
+        `UPDATE lista_interna
+         SET cod_interno = $1,
+             nom_interno = $2,
+             precio_final = $3,
+             fecha = $4,
+             mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+         WHERE id_interno = $5`,
+        [productCode || null, productName, finalPrice, normalizedDate, existing.id_interno]
+      );
+    }
+
+    return {
+      id: existing.id_interno,
+      inserted: false,
+      updated: needsUpdate,
+      priceChanged: Number(existing.precio_final) !== Number(finalPrice),
+      matchType,
+      existingRow: existing,
+    };
+  }
+
+  const insertedRow = await getDbRow(
+    db,
+    `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha, mes_actualizacion)
+     VALUES ($1, $2, $3, $4, TO_CHAR(CURRENT_DATE, 'YYYY-MM'))
+     ON CONFLICT (cod_interno) DO UPDATE
+       SET cod_interno = EXCLUDED.cod_interno,
+           nom_interno = EXCLUDED.nom_interno,
+           precio_final = EXCLUDED.precio_final,
+           fecha = EXCLUDED.fecha,
+           mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+     RETURNING id_interno, (xmax = 0)::boolean AS inserted_directly`,
+    [productCode || null, productName, finalPrice, normalizedDate]
+  );
+
+  if (!insertedRow) {
+    return {
+      id: null,
+      inserted: false,
+      updated: false,
+      priceChanged: false,
+      matchType: null,
+      existingRow: null,
+    };
+  }
+
+  return {
+    id: insertedRow.id_interno,
+    inserted: Boolean(insertedRow.inserted_directly),
+    updated: !insertedRow.inserted_directly,
+    priceChanged: !insertedRow.inserted_directly,
+    matchType: insertedRow.inserted_directly ? 'insert' : 'code_conflict',
+    existingRow: null,
+  };
+}
+
 async function createRelationAndClean(db, idListaPrecios, idListaInterna, criterio = 'automatic') {
   if (!idListaPrecios || !idListaInterna) {
     return { created: false, reason: 'missing_ids' };
@@ -1208,85 +1312,20 @@ app.post('/api/products', async (req, res) => {
     }
 
     if (companyType === 'Gampack') {
-      const currentMonth = getCurrentYearMonth();
+      const upsertResult = await upsertInternalProduct(db, {
+        productCode,
+        productName,
+        finalPrice,
+        normalizedDate,
+      });
 
-      const exact = productCode
-        ? await getDbRow(
-            db,
-            `SELECT * FROM lista_interna
-             WHERE cod_interno IS NOT NULL
-               AND LOWER(TRIM(cod_interno)) = LOWER($1)
-             LIMIT 1`,
-            [productCode]
-          )
-        : null;
-
-      let existing = exact;
-      if (!existing && normalizedExactName) {
-        existing = await findInternalByExactName(db, normalizedExactName);
+      if (!upsertResult?.id) {
+        return res.status(500).json({ error: 'No se pudo guardar el producto interno' });
       }
 
-      if (existing) {
-        const storedDate = ensureYMD(existing.fecha);
-        const storedMonth = ensureYearMonth(existing.mes_actualizacion || existing.fecha);
-        const needsUpdate =
-          normalizeWhitespace(existing.cod_interno || '') !== productCode ||
-          normalizeWhitespace(existing.nom_interno || '') !== productName ||
-          Number(existing.precio_final) !== Number(finalPrice) ||
-          storedDate !== normalizedDate ||
-          storedMonth !== currentMonth;
-        if (needsUpdate) {
-          await runDb(
-            db,
-            `UPDATE lista_interna
-             SET cod_interno = $1,
-                 nom_interno = $2,
-                 precio_final = $3,
-                 fecha = $4,
-                 mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
-             WHERE id_interno = $5`,
-            [productCode || null, productName, finalPrice, normalizedDate, existing.id_interno]
-          );
-        }
-        return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
-      }
-
-      let inserted;
-      try {
-        inserted = await getDbRow(
-          db,
-          `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha, mes_actualizacion)
-           VALUES ($1, $2, $3, $4, TO_CHAR(CURRENT_DATE, 'YYYY-MM'))
-           RETURNING id_interno`,
-          [productCode || null, productName, finalPrice, normalizedDate]
-        );
-      } catch (err) {
-        if (err?.code === '23505' && productCode) {
-          const conflict = await getDbRow(
-            db,
-            `SELECT * FROM lista_interna
-             WHERE cod_interno IS NOT NULL
-               AND LOWER(TRIM(cod_interno)) = LOWER($1)
-            LIMIT 1`,
-            [productCode]
-          );
-          if (conflict) {
-            await runDb(
-              db,
-              `UPDATE lista_interna
-               SET nom_interno = $1,
-                   precio_final = $2,
-                   fecha = $3,
-                   mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
-               WHERE id_interno = $4`,
-              [productName, finalPrice, normalizedDate, conflict.id_interno]
-            );
-            return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
-          }
-        }
-        throw err;
-      }
-      const newId = inserted?.id_interno;
+      const newId = upsertResult.id;
+      const wasInserted = Boolean(upsertResult.inserted);
+      const statusCode = wasInserted ? 201 : 200;
 
       let externalMatch = null;
       if (newId) {
@@ -1297,7 +1336,12 @@ app.post('/api/products', async (req, res) => {
       if (externalMatch?.row && linkAsEquivalent !== false) {
         relationResult = await createRelationAndClean(db, externalMatch.row.id_externo, newId, externalMatch.criterion);
         if (relationResult?.created) {
-          return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
+          return res.status(statusCode).json({
+            success: true,
+            message: `Producto ${wasInserted ? 'creado' : 'actualizado'} y relacionado`,
+            updated: !wasInserted,
+            related: true,
+          });
         }
       }
 
@@ -1316,19 +1360,25 @@ app.post('/api/products', async (req, res) => {
 
       await runDb(
         db,
+        `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`,
+        [newId]
+      );
+
+      await runDb(
+        db,
         `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
          VALUES ($1, $2)
          ON CONFLICT (id_lista_interna) DO NOTHING`,
         [newId, motivo]
       );
 
-      return res.status(201).json({
+      return res.status(statusCode).json({
         success: true,
-        message: 'Producto creado - no relacionados',
+        message: wasInserted ? 'Producto creado - no relacionados' : 'Producto actualizado - no relacionados',
+        updated: !wasInserted,
         skippedRelationReason: relationResult?.reason ?? (externalMatch?.row ? 'user_declined' : 'no_match'),
       });
     }
-
     return res.status(400).json({ error: 'Tipo de empresa no válido' });
   } catch (error) {
     console.error('Alta producto error:', error);
@@ -1698,28 +1748,6 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
       const proveedorCanon = normalizeLabel(providerHint);
       const proveedorLower = normLower(providerHint);
 
-      const getExistingInterno = async ({ codigo, nombre }) => {
-        const nombreN = normalizeLabel(nombre);
-        if (codigo) {
-          const byCode = await get(
-            `SELECT id_interno AS id, precio_final AS price
-             FROM lista_interna
-             WHERE TRIM(LOWER(cod_interno)) = TRIM(LOWER($1))
-             LIMIT 1`,
-            [codigo]
-          );
-          if (byCode) return byCode;
-        }
-        const byName = await get(
-          `SELECT id_interno AS id, precio_final AS price
-           FROM lista_interna
-           WHERE TRIM(LOWER(nom_interno)) = TRIM(LOWER($1))
-           LIMIT 1`,
-          [nombreN]
-        );
-        return byName || null;
-      };
-
       const getExistingExterno = async ({ proveedorLower, codigo, nombre }) => {
         const nombreN = normalizeLabel(nombre);
         if (codigo) {
@@ -1747,28 +1775,26 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
       const upsertListaInterna = async ({ nombre, codigo, price, today }) => {
         const nombreN = normalizeLabel(nombre);
         const codigoN = codigo ? normalizeLabel(codigo) : null;
-        const existing = await getExistingInterno({ codigo: codigoN, nombre: nombreN });
 
-        if (existing?.id) {
-          await run(
-            `UPDATE lista_interna
-             SET nom_interno = $1, precio_final = $2, fecha = $3, mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
-             WHERE id_interno = $4`,
-            [nombreN, price, today, existing.id]
-          );
-          updated++;
-          if (existing.price !== price) updatedPriceChanged++;
-          return existing.id;
-        } else {
-          const ins = await get(
-            `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha, mes_actualizacion)
-             VALUES ($1, $2, $3, $4, TO_CHAR(CURRENT_DATE, 'YYYY-MM'))
-             RETURNING id_interno AS id`,
-            [nombreN, codigoN, price, today]
-          );
-          inserted++;
-          return ins.id;
+        const result = await upsertInternalProduct(db, {
+          productCode: codigoN,
+          productName: nombreN,
+          finalPrice: price,
+          normalizedDate: today,
+        });
+
+        if (!result?.id) {
+          return null;
         }
+
+        if (result.inserted) {
+          inserted++;
+        } else {
+          updated++;
+          if (result.priceChanged) updatedPriceChanged++;
+        }
+
+        return result.id;
       };
 
       const upsertListaPrecios = async ({ nombre, codigo, price, proveedorCanon, proveedorLower, today }) => {
@@ -1827,6 +1853,10 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
               }
 
               if (!relationResult?.created) {
+                await run(
+                  `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`,
+                  [idInterno]
+                );
                 await run(
                   `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
                    VALUES ($1, $2)
