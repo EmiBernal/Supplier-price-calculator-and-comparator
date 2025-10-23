@@ -218,10 +218,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, userRole, on
                       sessionStorage.clear();
                     } catch {}
                     onLogout?.();
-                    setTimeout(() => {
-                      if (window.location.pathname !== '/login') window.location.assign('/login');
-                      else window.location.reload();
-                    }, 10);
+                    if (!onLogout) {
+                      setTimeout(() => {
+                        if (window.location.pathname !== '/login') window.location.assign('/login');
+                        else window.location.reload();
+                      }, 10);
+                    }
                   }
                 }}
                 aria-label="Cerrar sesión"
