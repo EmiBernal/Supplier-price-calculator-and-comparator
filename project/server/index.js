@@ -1323,6 +1323,10 @@ app.post('/api/products', async (req, res) => {
         return res.status(500).json({ error: 'No se pudo guardar el producto interno' });
       }
 
+      const newId = upsertResult.id;
+      const wasInserted = Boolean(upsertResult.inserted);
+      const statusCode = wasInserted ? 201 : 200;
+
       if (!upsertResult.inserted) {
         return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
       }
@@ -1338,7 +1342,12 @@ app.post('/api/products', async (req, res) => {
       if (externalMatch?.row && linkAsEquivalent !== false) {
         relationResult = await createRelationAndClean(db, externalMatch.row.id_externo, newId, externalMatch.criterion);
         if (relationResult?.created) {
-          return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
+          return res.status(statusCode).json({
+            success: true,
+            message: `Producto ${wasInserted ? 'creado' : 'actualizado'} y relacionado`,
+            updated: !wasInserted,
+            related: true,
+          });
         }
       }
 
@@ -1357,15 +1366,22 @@ app.post('/api/products', async (req, res) => {
 
       await runDb(
         db,
+        `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`,
+        [newId]
+      );
+
+      await runDb(
+        db,
         `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
          VALUES ($1, $2)
          ON CONFLICT (id_lista_interna) DO NOTHING`,
         [newId, motivo]
       );
 
-      return res.status(201).json({
+      return res.status(statusCode).json({
         success: true,
-        message: 'Producto creado - no relacionados',
+        message: wasInserted ? 'Producto creado - no relacionados' : 'Producto actualizado - no relacionados',
+        updated: !wasInserted,
         skippedRelationReason: relationResult?.reason ?? (externalMatch?.row ? 'user_declined' : 'no_match'),
       });
     }
@@ -1843,6 +1859,10 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
               }
 
               if (!relationResult?.created) {
+                await run(
+                  `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`,
+                  [idInterno]
+                );
                 await run(
                   `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
                    VALUES ($1, $2)
