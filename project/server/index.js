@@ -1331,8 +1331,6 @@ app.post('/api/products', async (req, res) => {
         return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
       }
 
-      const newId = upsertResult.id;
-
       let externalMatch = null;
       if (newId) {
         externalMatch = await findExternalAutoMatch();
