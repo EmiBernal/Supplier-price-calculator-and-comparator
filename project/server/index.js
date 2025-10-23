@@ -91,6 +91,17 @@ function ensureYMD(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
+function ensureYearMonth(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const ymMatch = value.match(/^(\d{4})-(\d{2})/);
+    if (ymMatch) return `${ymMatch[1]}-${ymMatch[2]}`;
+  }
+  const ymd = ensureYMD(value);
+  if (ymd) return ymd.slice(0, 7);
+  return null;
+}
+
 function normalizeRowDates(row, fields = []) {
   if (!row || typeof row !== 'object') return row;
   const copy = { ...row };
@@ -157,6 +168,99 @@ function parsePositiveInt(raw, defaultValue, min, max) {
 
 function normalizeWhitespace(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeNameForExactMatch(value) {
+  if (!value) return '';
+  return normalizeWhitespace(value).toLowerCase();
+}
+
+async function findInternalByExactName(db, normalizedName) {
+  if (!normalizedName) return null;
+  return getDbRow(
+    db,
+    `SELECT * FROM lista_interna
+     WHERE nom_interno IS NOT NULL
+       AND LOWER(REGEXP_REPLACE(TRIM(nom_interno), '\\s+', ' ', 'g')) = $1
+     ORDER BY id_interno ASC
+     LIMIT 1`,
+    [normalizedName]
+  );
+}
+
+async function findExternalByExactName(db, normalizedName, normalizedSupplier = null) {
+  if (!normalizedName) return null;
+  const params = [normalizedName];
+  const clauses = [
+    `SELECT * FROM lista_precios
+     WHERE nom_externo IS NOT NULL
+       AND LOWER(REGEXP_REPLACE(TRIM(nom_externo), '\\s+', ' ', 'g')) = $1
+       AND LOWER(TRIM(tipo_empresa)) = 'proveedor'`
+  ];
+  if (normalizedSupplier) {
+    clauses.push('AND LOWER(TRIM(proveedor)) = $2');
+    params.push(normalizedSupplier);
+  }
+  clauses.push('ORDER BY id_externo ASC\nLIMIT 1');
+  return getDbRow(db, clauses.join('\n'), params);
+}
+
+async function createRelationAndClean(db, idListaPrecios, idListaInterna, criterio = 'automatic') {
+  if (!idListaPrecios || !idListaInterna) {
+    return { created: false, reason: 'missing_ids' };
+  }
+
+  const existingPair = await getDbRow(
+    db,
+    `SELECT id FROM relacion_articulos WHERE id_lista_precios = $1 AND id_lista_interna = $2`,
+    [idListaPrecios, idListaInterna]
+  );
+  if (existingPair) {
+    await runDb(db, `DELETE FROM articulos_no_relacionados WHERE id_lista_precios = $1`, [idListaPrecios]);
+    await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [idListaInterna]);
+    return { created: true, relationId: existingPair.id, alreadyExisted: true };
+  }
+
+  const existingForExternal = await getDbRow(
+    db,
+    `SELECT id, id_lista_interna FROM relacion_articulos WHERE id_lista_precios = $1 LIMIT 1`,
+    [idListaPrecios]
+  );
+  if (existingForExternal) {
+    return {
+      created: false,
+      reason: 'external_already_related',
+      conflictingRelationId: existingForExternal.id,
+      conflictingInternalId: existingForExternal.id_lista_interna,
+    };
+  }
+
+  const existingForInternal = await getDbRow(
+    db,
+    `SELECT id, id_lista_precios FROM relacion_articulos WHERE id_lista_interna = $1 LIMIT 1`,
+    [idListaInterna]
+  );
+  if (existingForInternal) {
+    return {
+      created: false,
+      reason: 'internal_already_related',
+      conflictingRelationId: existingForInternal.id,
+      conflictingExternalId: existingForInternal.id_lista_precios,
+    };
+  }
+
+  const insertedRelation = await getDbRow(
+    db,
+    `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
+     VALUES ($1, $2, $3)
+     RETURNING id`,
+    [idListaPrecios, idListaInterna, criterio]
+  );
+
+  await runDb(db, `DELETE FROM articulos_no_relacionados WHERE id_lista_precios = $1`, [idListaPrecios]);
+  await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [idListaInterna]);
+
+  return { created: true, relationId: insertedRelation?.id ?? null, alreadyExisted: false };
 }
 
 function removeDiacritics(value) {
@@ -643,6 +747,7 @@ function createNoRelacionadosHandler(tipo) {
             lp.proveedor AS proveedor,
             lp.precio_final AS precio_final,
             lp.fecha AS fecha,
+            lp.mes_actualizacion AS mes_actualizacion,
             anr.motivo AS motivo,
             CASE WHEN anr.id_lista_precios IS NULL THEN 0 ELSE 1 END AS es_pendiente,
             LOWER(lp.nom_externo) AS nombre_lower
@@ -682,6 +787,7 @@ function createNoRelacionadosHandler(tipo) {
           li.nom_interno AS nom_interno,
           li.precio_final AS precio_final,
           li.fecha AS fecha,
+          li.mes_actualizacion AS mes_actualizacion,
           agnr.motivo AS motivo,
           CASE WHEN agnr.id_lista_interna IS NULL THEN 0 ELSE 1 END AS es_pendiente,
           LOWER(li.nom_interno) AS nombre_lower
@@ -844,47 +950,10 @@ app.post('/api/products', async (req, res) => {
 
   const normalizedCode = normalizeCode(productCode);
   const normalizedNameKey = normalizeForKey(productName);
+  const normalizedExactName = normalizeNameForExactMatch(productName);
   const nameLikePattern = buildNameLikePattern(productName);
   const normalizedCompany = company ? company.toLowerCase() : '';
   const hasCompany = Boolean(normalizedCompany);
-
-  async function createRelationAndClean(idListaPrecios, idListaInterna, criterio = 'automatic') {
-    const existingPair = await getDbRow(
-      db,
-      `SELECT id FROM relacion_articulos WHERE id_lista_precios = $1 AND id_lista_interna = $2`,
-      [idListaPrecios, idListaInterna]
-    );
-    if (existingPair) {
-      return { created: true, relationId: existingPair.id, alreadyExisted: true };
-    }
-
-    const existingForInternal = await getDbRow(
-      db,
-      `SELECT id, id_lista_precios FROM relacion_articulos WHERE id_lista_interna = $1 LIMIT 1`,
-      [idListaInterna]
-    );
-    if (existingForInternal) {
-      return {
-        created: false,
-        reason: 'internal_already_related',
-        conflictingRelationId: existingForInternal.id,
-        conflictingExternalId: existingForInternal.id_lista_precios,
-      };
-    }
-
-    const insertedRelation = await getDbRow(
-      db,
-      `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
-       VALUES ($1, $2, $3)
-       RETURNING id`,
-      [idListaPrecios, idListaInterna, criterio]
-    );
-
-    await runDb(db, `DELETE FROM articulos_no_relacionados WHERE id_lista_precios = $1`, [idListaPrecios]);
-    await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [idListaInterna]);
-
-    return { created: true, relationId: insertedRelation?.id ?? null, alreadyExisted: false };
-  }
 
   const pickBestNameMatch = (targetName, candidates, getName) => {
     let best = null;
@@ -912,6 +981,13 @@ app.post('/api/products', async (req, res) => {
       );
       if (match) {
         return { row: match, criterion: 'codigo' };
+      }
+    }
+
+    if (normalizedExactName) {
+      const exactByName = await findInternalByExactName(db, normalizedExactName);
+      if (exactByName) {
+        return { row: exactByName, criterion: 'nombre_exact' };
       }
     }
 
@@ -953,6 +1029,13 @@ app.post('/api/products', async (req, res) => {
       }
     }
 
+    if (normalizedExactName) {
+      const exactByName = await findExternalByExactName(db, normalizedExactName, useCompanyFilter ? normalizedCompany : null);
+      if (exactByName) {
+        return { row: exactByName, criterion: 'nombre_exact' };
+      }
+    }
+
     if (normalizedNameKey && nameLikePattern) {
       const params = [nameLikePattern];
       const clauses = [
@@ -977,6 +1060,8 @@ app.post('/api/products', async (req, res) => {
 
   try {
     if (companyType === 'Proveedor') {
+      const normalizedMonth = ensureYearMonth(normalizedDate) || normalizedDate.slice(0, 7);
+
       const exact = await getDbRow(
         db,
         `SELECT * FROM lista_precios
@@ -988,15 +1073,23 @@ app.post('/api/products', async (req, res) => {
         [productCode, company, companyType]
       );
 
-      if (exact) {
-        const storedDate = ensureYMD(exact.fecha);
+      let existing = exact;
+      if (!existing && normalizedExactName && normalizedCompany) {
+        existing = await findExternalByExactName(db, normalizedExactName, normalizedCompany);
+      }
+
+      if (existing) {
+        const storedDate = ensureYMD(existing.fecha);
+        const storedMonth = ensureYearMonth(existing.mes_actualizacion || existing.fecha);
         const needsUpdate =
-          normalizeWhitespace(exact.cod_externo || '') !== productCode ||
-          normalizeWhitespace(exact.nom_externo || '') !== productName ||
-          Number(exact.precio_final) !== Number(finalPrice) ||
+          normalizeWhitespace(existing.cod_externo || '') !== productCode ||
+          normalizeWhitespace(existing.nom_externo || '') !== productName ||
+          Number(existing.precio_final) !== Number(finalPrice) ||
           storedDate !== normalizedDate ||
-          normalizeWhitespace(exact.proveedor || '') !== company ||
-          normalizeWhitespace(exact.tipo_empresa || '') !== companyType;
+          normalizeWhitespace(existing.proveedor || '') !== company ||
+          normalizeWhitespace(existing.tipo_empresa || '') !== companyType ||
+          storedMonth !== normalizedMonth;
+
         if (needsUpdate) {
           await runDb(
             db,
@@ -1006,11 +1099,22 @@ app.post('/api/products', async (req, res) => {
                  precio_final = $3,
                  tipo_empresa = $4,
                  fecha = $5,
-                 proveedor = $6
-             WHERE id_externo = $7`,
-            [productCode || null, productName, finalPrice, companyType, normalizedDate, company, exact.id_externo]
+                 proveedor = $6,
+                 mes_actualizacion = $7
+             WHERE id_externo = $8`,
+            [
+              productCode || null,
+              productName,
+              finalPrice,
+              companyType,
+              normalizedDate,
+              company,
+              normalizedMonth,
+              existing.id_externo,
+            ]
           );
         }
+
         return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
       }
 
@@ -1018,10 +1122,10 @@ app.post('/api/products', async (req, res) => {
       try {
         inserted = await getDbRow(
           db,
-          `INSERT INTO lista_precios (cod_externo, nom_externo, precio_final, tipo_empresa, fecha, proveedor)
-           VALUES ($1, $2, $3, $4, $5, $6)
+          `INSERT INTO lista_precios (cod_externo, nom_externo, precio_final, tipo_empresa, fecha, proveedor, mes_actualizacion)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            RETURNING id_externo`,
-          [productCode || null, productName, finalPrice, companyType, normalizedDate, company]
+          [productCode || null, productName, finalPrice, companyType, normalizedDate, company, normalizedMonth]
         );
       } catch (err) {
         if (err?.code === '23505' && productCode) {
@@ -1031,7 +1135,7 @@ app.post('/api/products', async (req, res) => {
              WHERE cod_externo IS NOT NULL
                AND LOWER(TRIM(cod_externo)) = LOWER($1)
                AND LOWER(TRIM(proveedor)) = LOWER($2)
-             LIMIT 1`,
+            LIMIT 1`,
             [productCode, company]
           );
           if (conflict) {
@@ -1042,9 +1146,10 @@ app.post('/api/products', async (req, res) => {
                    precio_final = $2,
                    tipo_empresa = $3,
                    fecha = $4,
-                   proveedor = $5
-               WHERE id_externo = $6`,
-              [productName, finalPrice, companyType, normalizedDate, company, conflict.id_externo]
+                   proveedor = $5,
+                   mes_actualizacion = $6
+               WHERE id_externo = $7`,
+              [productName, finalPrice, companyType, normalizedDate, company, normalizedMonth, conflict.id_externo]
             );
             return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
           }
@@ -1060,7 +1165,7 @@ app.post('/api/products', async (req, res) => {
 
       let relationResult = null;
       if (internalMatch?.row && linkAsEquivalent !== false) {
-        relationResult = await createRelationAndClean(newId, internalMatch.row.id_interno, internalMatch.criterion);
+        relationResult = await createRelationAndClean(db, newId, internalMatch.row.id_interno, internalMatch.criterion);
         if (relationResult?.created) {
           return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
         }
@@ -1072,6 +1177,9 @@ app.post('/api/products', async (req, res) => {
         }
         if (relationResult?.reason === 'internal_already_related') {
           return 'Coincidencia automática omitida: el producto interno ya está relacionado';
+        }
+        if (relationResult?.reason === 'external_already_related') {
+          return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
         }
         return 'Usuario rechazó sugerencia de relación';
       })();
@@ -1092,6 +1200,8 @@ app.post('/api/products', async (req, res) => {
     }
 
     if (companyType === 'Gampack') {
+      const normalizedMonth = ensureYearMonth(normalizedDate) || normalizedDate.slice(0, 7);
+
       const exact = productCode
         ? await getDbRow(
             db,
@@ -1103,13 +1213,20 @@ app.post('/api/products', async (req, res) => {
           )
         : null;
 
-      if (exact) {
-        const storedDate = ensureYMD(exact.fecha);
+      let existing = exact;
+      if (!existing && normalizedExactName) {
+        existing = await findInternalByExactName(db, normalizedExactName);
+      }
+
+      if (existing) {
+        const storedDate = ensureYMD(existing.fecha);
+        const storedMonth = ensureYearMonth(existing.mes_actualizacion || existing.fecha);
         const needsUpdate =
-          normalizeWhitespace(exact.cod_interno || '') !== productCode ||
-          normalizeWhitespace(exact.nom_interno || '') !== productName ||
-          Number(exact.precio_final) !== Number(finalPrice) ||
-          storedDate !== normalizedDate;
+          normalizeWhitespace(existing.cod_interno || '') !== productCode ||
+          normalizeWhitespace(existing.nom_interno || '') !== productName ||
+          Number(existing.precio_final) !== Number(finalPrice) ||
+          storedDate !== normalizedDate ||
+          storedMonth !== normalizedMonth;
         if (needsUpdate) {
           await runDb(
             db,
@@ -1117,9 +1234,10 @@ app.post('/api/products', async (req, res) => {
              SET cod_interno = $1,
                  nom_interno = $2,
                  precio_final = $3,
-                 fecha = $4
-             WHERE id_interno = $5`,
-            [productCode || null, productName, finalPrice, normalizedDate, exact.id_interno]
+                 fecha = $4,
+                 mes_actualizacion = $5
+             WHERE id_interno = $6`,
+            [productCode || null, productName, finalPrice, normalizedDate, normalizedMonth, existing.id_interno]
           );
         }
         return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
@@ -1129,10 +1247,10 @@ app.post('/api/products', async (req, res) => {
       try {
         inserted = await getDbRow(
           db,
-          `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha)
-           VALUES ($1, $2, $3, $4)
+          `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha, mes_actualizacion)
+           VALUES ($1, $2, $3, $4, $5)
            RETURNING id_interno`,
-          [productCode || null, productName, finalPrice, normalizedDate]
+          [productCode || null, productName, finalPrice, normalizedDate, normalizedMonth]
         );
       } catch (err) {
         if (err?.code === '23505' && productCode) {
@@ -1141,7 +1259,7 @@ app.post('/api/products', async (req, res) => {
             `SELECT * FROM lista_interna
              WHERE cod_interno IS NOT NULL
                AND LOWER(TRIM(cod_interno)) = LOWER($1)
-             LIMIT 1`,
+            LIMIT 1`,
             [productCode]
           );
           if (conflict) {
@@ -1150,9 +1268,10 @@ app.post('/api/products', async (req, res) => {
               `UPDATE lista_interna
                SET nom_interno = $1,
                    precio_final = $2,
-                   fecha = $3
-               WHERE id_interno = $4`,
-              [productName, finalPrice, normalizedDate, conflict.id_interno]
+                   fecha = $3,
+                   mes_actualizacion = $4
+               WHERE id_interno = $5`,
+              [productName, finalPrice, normalizedDate, normalizedMonth, conflict.id_interno]
             );
             return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
           }
@@ -1168,7 +1287,7 @@ app.post('/api/products', async (req, res) => {
 
       let relationResult = null;
       if (externalMatch?.row && linkAsEquivalent !== false) {
-        relationResult = await createRelationAndClean(externalMatch.row.id_externo, newId, externalMatch.criterion);
+        relationResult = await createRelationAndClean(db, externalMatch.row.id_externo, newId, externalMatch.criterion);
         if (relationResult?.created) {
           return res.status(201).json({ success: true, message: 'Producto creado y relacionado' });
         }
@@ -1180,6 +1299,9 @@ app.post('/api/products', async (req, res) => {
         }
         if (relationResult?.reason === 'internal_already_related') {
           return 'Coincidencia automática omitida: el producto interno ya está relacionado';
+        }
+        if (relationResult?.reason === 'external_already_related') {
+          return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
         }
         return 'Usuario rechazó sugerencia de relación';
       })();
@@ -1558,11 +1680,13 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
       }
 
       const today = new Date().toISOString().slice(0, 10);
+      const todayMonth = ensureYearMonth(today) || today.slice(0, 7);
 
       let inserted = 0;
       let updated = 0;
       let updatedPriceChanged = 0;
       let skipped = 0;
+      let autoRelated = 0;
 
       const proveedorCanon = normalizeLabel(providerHint);
       const proveedorLower = normLower(providerHint);
@@ -1613,7 +1737,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         return byName || null;
       };
 
-      const upsertListaInterna = async ({ nombre, codigo, price, today }) => {
+      const upsertListaInterna = async ({ nombre, codigo, price, today, month }) => {
         const nombreN = normalizeLabel(nombre);
         const codigoN = codigo ? normalizeLabel(codigo) : null;
         const existing = await getExistingInterno({ codigo: codigoN, nombre: nombreN });
@@ -1621,26 +1745,26 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         if (existing?.id) {
           await run(
             `UPDATE lista_interna
-             SET nom_interno = $1, precio_final = $2, fecha = $3
-             WHERE id_interno = $4`,
-            [nombreN, price, today, existing.id]
+             SET nom_interno = $1, precio_final = $2, fecha = $3, mes_actualizacion = $4
+             WHERE id_interno = $5`,
+            [nombreN, price, today, month, existing.id]
           );
           updated++;
           if (existing.price !== price) updatedPriceChanged++;
           return existing.id;
         } else {
           const ins = await get(
-            `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha)
-             VALUES ($1, $2, $3, $4)
+            `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha, mes_actualizacion)
+             VALUES ($1, $2, $3, $4, $5)
              RETURNING id_interno AS id`,
-            [nombreN, codigoN, price, today]
+            [nombreN, codigoN, price, today, month]
           );
           inserted++;
           return ins.id;
         }
       };
 
-      const upsertListaPrecios = async ({ nombre, codigo, price, proveedorCanon, proveedorLower, today }) => {
+      const upsertListaPrecios = async ({ nombre, codigo, price, proveedorCanon, proveedorLower, today, month }) => {
         const nombreN = normalizeLabel(nombre);
         const codigoN = codigo ? normalizeLabel(codigo) : null;
         const existing = await getExistingExterno({ proveedorLower, codigo: codigoN, nombre: nombreN });
@@ -1648,19 +1772,19 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         if (existing?.id) {
           await run(
             `UPDATE lista_precios
-             SET nom_externo = $1, precio_final = $2, tipo_empresa = 'Proveedor', fecha = $3
-             WHERE id_externo = $4`,
-            [nombreN, price, today, existing.id]
+             SET nom_externo = $1, precio_final = $2, tipo_empresa = 'Proveedor', fecha = $3, mes_actualizacion = $4
+             WHERE id_externo = $5`,
+            [nombreN, price, today, month, existing.id]
           );
           updated++;
           if (existing.price !== price) updatedPriceChanged++;
           return existing.id;
         } else {
           const ins = await get(
-            `INSERT INTO lista_precios (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor)
-             VALUES ($1, $2, $3, 'Proveedor', $4, $5)
+            `INSERT INTO lista_precios (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor, mes_actualizacion)
+             VALUES ($1, $2, $3, 'Proveedor', $4, $5, $6)
              RETURNING id_externo AS id`,
-            [nombreN, codigoN, price, today, proveedorCanon]
+            [nombreN, codigoN, price, today, proveedorCanon, month]
           );
           inserted++;
           return ins.id;
@@ -1672,6 +1796,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         for (const r of rows) {
           const nombre = String(getCell(r, colNom) ?? '');
           const nombreN = normalizeLabel(nombre);
+          const nombreExactKey = normalizeNameForExactMatch(nombreN);
           const codigoRaw = colCod ? String(getCell(r, colCod) ?? '') : '';
           const codigo = normalizeLabel(codigoRaw) || null;
           const precioRaw = getCell(r, colPrecio);
@@ -1683,33 +1808,55 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
           }
 
           if (isGampack) {
-            const idInterno = await upsertListaInterna({ nombre: nombreN, codigo, price, today });
+            const idInterno = await upsertListaInterna({ nombre: nombreN, codigo, price, today, month: todayMonth });
             if (idInterno) {
-              await run(
-                `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
-                 VALUES ($1, $2)
-                 ON CONFLICT (id_lista_interna) DO NOTHING`,
-                [idInterno, 'Importado vía carga masiva']
-              );
+              let relationResult = null;
+              if (nombreExactKey) {
+                const externalMatch = await findExternalByExactName(db, nombreExactKey);
+                if (externalMatch?.id_externo) {
+                  relationResult = await createRelationAndClean(db, externalMatch.id_externo, idInterno, 'nombre_exact');
+                  if (relationResult?.created) autoRelated++;
+                }
+              }
+
+              if (!relationResult?.created) {
+                await run(
+                  `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
+                   VALUES ($1, $2)
+                   ON CONFLICT (id_lista_interna) DO NOTHING`,
+                  [idInterno, 'Importado vía carga masiva']
+                );
+              }
             }
           } else {
             const idExterno = await upsertListaPrecios({
-              nombre: nombreN, codigo, price, proveedorCanon, proveedorLower, today
+              nombre: nombreN, codigo, price, proveedorCanon, proveedorLower, today, month: todayMonth
             });
             if (idExterno) {
-              await run(
-                `INSERT INTO articulos_no_relacionados (id_lista_precios, motivo)
-                 VALUES ($1, $2)
-                 ON CONFLICT (id_lista_precios) DO NOTHING`,
-                [idExterno, 'Importado vía carga masiva']
-              );
+              let relationResult = null;
+              if (nombreExactKey) {
+                const internalMatch = await findInternalByExactName(db, nombreExactKey);
+                if (internalMatch?.id_interno) {
+                  relationResult = await createRelationAndClean(db, idExterno, internalMatch.id_interno, 'nombre_exact');
+                  if (relationResult?.created) autoRelated++;
+                }
+              }
+
+              if (!relationResult?.created) {
+                await run(
+                  `INSERT INTO articulos_no_relacionados (id_lista_precios, motivo)
+                   VALUES ($1, $2)
+                   ON CONFLICT (id_lista_precios) DO NOTHING`,
+                  [idExterno, 'Importado vía carga masiva']
+                );
+              }
             }
           }
         }
 
         await run('COMMIT');
 
-        const message = `Importación finalizada: ${updated} modificados (${updatedPriceChanged} con cambio de precio) y ${inserted} nuevos.${skipped ? ` Omitidos: ${skipped}.` : ''}`;
+        const message = `Importación finalizada: ${updated} modificados (${updatedPriceChanged} con cambio de precio) y ${inserted} nuevos.${skipped ? ` Omitidos: ${skipped}.` : ''}${autoRelated ? ` Vinculados automáticamente: ${autoRelated}.` : ''}`;
 
         return res.json({
           ok: true,
@@ -1720,7 +1867,8 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
             inserted,
             updated,
             updated_price_changed: updatedPriceChanged,
-            skipped
+            skipped,
+            auto_related: autoRelated
           },
           processed: inserted + updated,
           saved_to: isGampack ? 'articulos_gampack_no_relacionados' : 'articulos_no_relacionados',
