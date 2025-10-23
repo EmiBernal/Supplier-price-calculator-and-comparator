@@ -102,6 +102,13 @@ function ensureYearMonth(value) {
   return null;
 }
 
+function getCurrentYearMonth() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  return `${yyyy}-${mm}`;
+}
+
 function normalizeRowDates(row, fields = []) {
   if (!row || typeof row !== 'object') return row;
   const copy = { ...row };
@@ -523,7 +530,8 @@ app.put('/api/relacion/:id', async (req, res) => {
           SET proveedor = COALESCE($1, proveedor),
               cod_externo = $2,
               nom_externo = COALESCE($3, nom_externo),
-              fecha = COALESCE($4, fecha)
+              fecha = COALESCE($4, fecha),
+              mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
         WHERE id_externo = $5`,
       [lp.proveedor, lp.cod_externo, lp.nom_externo, lp.fecha, lp.id_externo]
     );
@@ -533,7 +541,8 @@ app.put('/api/relacion/:id', async (req, res) => {
       `UPDATE lista_interna
           SET cod_interno = $1,
               nom_interno = COALESCE($2, nom_interno),
-              fecha = COALESCE($3, fecha)
+              fecha = COALESCE($3, fecha),
+              mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
         WHERE id_interno = $4`,
       [li.cod_interno, li.nom_interno, li.fecha, li.id_interno]
     );
@@ -1060,7 +1069,7 @@ app.post('/api/products', async (req, res) => {
 
   try {
     if (companyType === 'Proveedor') {
-      const normalizedMonth = ensureYearMonth(normalizedDate) || normalizedDate.slice(0, 7);
+      const currentMonth = getCurrentYearMonth();
 
       const exact = await getDbRow(
         db,
@@ -1088,7 +1097,7 @@ app.post('/api/products', async (req, res) => {
           storedDate !== normalizedDate ||
           normalizeWhitespace(existing.proveedor || '') !== company ||
           normalizeWhitespace(existing.tipo_empresa || '') !== companyType ||
-          storedMonth !== normalizedMonth;
+          storedMonth !== currentMonth;
 
         if (needsUpdate) {
           await runDb(
@@ -1100,8 +1109,8 @@ app.post('/api/products', async (req, res) => {
                  tipo_empresa = $4,
                  fecha = $5,
                  proveedor = $6,
-                 mes_actualizacion = $7
-             WHERE id_externo = $8`,
+                 mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+             WHERE id_externo = $7`,
             [
               productCode || null,
               productName,
@@ -1109,7 +1118,6 @@ app.post('/api/products', async (req, res) => {
               companyType,
               normalizedDate,
               company,
-              normalizedMonth,
               existing.id_externo,
             ]
           );
@@ -1123,9 +1131,9 @@ app.post('/api/products', async (req, res) => {
         inserted = await getDbRow(
           db,
           `INSERT INTO lista_precios (cod_externo, nom_externo, precio_final, tipo_empresa, fecha, proveedor, mes_actualizacion)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           VALUES ($1, $2, $3, $4, $5, $6, TO_CHAR(CURRENT_DATE, 'YYYY-MM'))
            RETURNING id_externo`,
-          [productCode || null, productName, finalPrice, companyType, normalizedDate, company, normalizedMonth]
+          [productCode || null, productName, finalPrice, companyType, normalizedDate, company]
         );
       } catch (err) {
         if (err?.code === '23505' && productCode) {
@@ -1147,9 +1155,9 @@ app.post('/api/products', async (req, res) => {
                    tipo_empresa = $3,
                    fecha = $4,
                    proveedor = $5,
-                   mes_actualizacion = $6
-               WHERE id_externo = $7`,
-              [productName, finalPrice, companyType, normalizedDate, company, normalizedMonth, conflict.id_externo]
+                   mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+               WHERE id_externo = $6`,
+              [productName, finalPrice, companyType, normalizedDate, company, conflict.id_externo]
             );
             return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
           }
@@ -1200,7 +1208,7 @@ app.post('/api/products', async (req, res) => {
     }
 
     if (companyType === 'Gampack') {
-      const normalizedMonth = ensureYearMonth(normalizedDate) || normalizedDate.slice(0, 7);
+      const currentMonth = getCurrentYearMonth();
 
       const exact = productCode
         ? await getDbRow(
@@ -1226,7 +1234,7 @@ app.post('/api/products', async (req, res) => {
           normalizeWhitespace(existing.nom_interno || '') !== productName ||
           Number(existing.precio_final) !== Number(finalPrice) ||
           storedDate !== normalizedDate ||
-          storedMonth !== normalizedMonth;
+          storedMonth !== currentMonth;
         if (needsUpdate) {
           await runDb(
             db,
@@ -1235,9 +1243,9 @@ app.post('/api/products', async (req, res) => {
                  nom_interno = $2,
                  precio_final = $3,
                  fecha = $4,
-                 mes_actualizacion = $5
-             WHERE id_interno = $6`,
-            [productCode || null, productName, finalPrice, normalizedDate, normalizedMonth, existing.id_interno]
+                 mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+             WHERE id_interno = $5`,
+            [productCode || null, productName, finalPrice, normalizedDate, existing.id_interno]
           );
         }
         return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
@@ -1248,9 +1256,9 @@ app.post('/api/products', async (req, res) => {
         inserted = await getDbRow(
           db,
           `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha, mes_actualizacion)
-           VALUES ($1, $2, $3, $4, $5)
+           VALUES ($1, $2, $3, $4, TO_CHAR(CURRENT_DATE, 'YYYY-MM'))
            RETURNING id_interno`,
-          [productCode || null, productName, finalPrice, normalizedDate, normalizedMonth]
+          [productCode || null, productName, finalPrice, normalizedDate]
         );
       } catch (err) {
         if (err?.code === '23505' && productCode) {
@@ -1269,9 +1277,9 @@ app.post('/api/products', async (req, res) => {
                SET nom_interno = $1,
                    precio_final = $2,
                    fecha = $3,
-                   mes_actualizacion = $4
-               WHERE id_interno = $5`,
-              [productName, finalPrice, normalizedDate, normalizedMonth, conflict.id_interno]
+                   mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+               WHERE id_interno = $4`,
+              [productName, finalPrice, normalizedDate, conflict.id_interno]
             );
             return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
           }
@@ -1680,7 +1688,6 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
       }
 
       const today = new Date().toISOString().slice(0, 10);
-      const todayMonth = ensureYearMonth(today) || today.slice(0, 7);
 
       let inserted = 0;
       let updated = 0;
@@ -1737,7 +1744,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         return byName || null;
       };
 
-      const upsertListaInterna = async ({ nombre, codigo, price, today, month }) => {
+      const upsertListaInterna = async ({ nombre, codigo, price, today }) => {
         const nombreN = normalizeLabel(nombre);
         const codigoN = codigo ? normalizeLabel(codigo) : null;
         const existing = await getExistingInterno({ codigo: codigoN, nombre: nombreN });
@@ -1745,9 +1752,9 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         if (existing?.id) {
           await run(
             `UPDATE lista_interna
-             SET nom_interno = $1, precio_final = $2, fecha = $3, mes_actualizacion = $4
-             WHERE id_interno = $5`,
-            [nombreN, price, today, month, existing.id]
+             SET nom_interno = $1, precio_final = $2, fecha = $3, mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+             WHERE id_interno = $4`,
+            [nombreN, price, today, existing.id]
           );
           updated++;
           if (existing.price !== price) updatedPriceChanged++;
@@ -1755,16 +1762,16 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         } else {
           const ins = await get(
             `INSERT INTO lista_interna (nom_interno, cod_interno, precio_final, fecha, mes_actualizacion)
-             VALUES ($1, $2, $3, $4, $5)
+             VALUES ($1, $2, $3, $4, TO_CHAR(CURRENT_DATE, 'YYYY-MM'))
              RETURNING id_interno AS id`,
-            [nombreN, codigoN, price, today, month]
+            [nombreN, codigoN, price, today]
           );
           inserted++;
           return ins.id;
         }
       };
 
-      const upsertListaPrecios = async ({ nombre, codigo, price, proveedorCanon, proveedorLower, today, month }) => {
+      const upsertListaPrecios = async ({ nombre, codigo, price, proveedorCanon, proveedorLower, today }) => {
         const nombreN = normalizeLabel(nombre);
         const codigoN = codigo ? normalizeLabel(codigo) : null;
         const existing = await getExistingExterno({ proveedorLower, codigo: codigoN, nombre: nombreN });
@@ -1772,9 +1779,9 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         if (existing?.id) {
           await run(
             `UPDATE lista_precios
-             SET nom_externo = $1, precio_final = $2, tipo_empresa = 'Proveedor', fecha = $3, mes_actualizacion = $4
-             WHERE id_externo = $5`,
-            [nombreN, price, today, month, existing.id]
+             SET nom_externo = $1, precio_final = $2, tipo_empresa = 'Proveedor', fecha = $3, mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+             WHERE id_externo = $4`,
+            [nombreN, price, today, existing.id]
           );
           updated++;
           if (existing.price !== price) updatedPriceChanged++;
@@ -1782,9 +1789,9 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
         } else {
           const ins = await get(
             `INSERT INTO lista_precios (nom_externo, cod_externo, precio_final, tipo_empresa, fecha, proveedor, mes_actualizacion)
-             VALUES ($1, $2, $3, 'Proveedor', $4, $5, $6)
+             VALUES ($1, $2, $3, 'Proveedor', $4, $5, TO_CHAR(CURRENT_DATE, 'YYYY-MM'))
              RETURNING id_externo AS id`,
-            [nombreN, codigoN, price, today, proveedorCanon, month]
+            [nombreN, codigoN, price, today, proveedorCanon]
           );
           inserted++;
           return ins.id;
@@ -1808,7 +1815,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
           }
 
           if (isGampack) {
-            const idInterno = await upsertListaInterna({ nombre: nombreN, codigo, price, today, month: todayMonth });
+            const idInterno = await upsertListaInterna({ nombre: nombreN, codigo, price, today });
             if (idInterno) {
               let relationResult = null;
               if (nombreExactKey) {
@@ -1830,7 +1837,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
             }
           } else {
             const idExterno = await upsertListaPrecios({
-              nombre: nombreN, codigo, price, proveedorCanon, proveedorLower, today, month: todayMonth
+              nombre: nombreN, codigo, price, proveedorCanon, proveedorLower, today
             });
             if (idExterno) {
               let relationResult = null;
