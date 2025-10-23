@@ -6,20 +6,36 @@ type AuthCtx = { isLoggedIn: boolean; role: Role | null; setAuth: (r: Role) => v
 const Ctx = createContext<AuthCtx>({ isLoggedIn: false, role: null, setAuth: () => {}, logout: () => {} });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [role, setRole] = useState<Role | null>(null);
+  const [role, setRole] = useState<Role | null>(() => {
+    try {
+      const stored = localStorage.getItem("role");
+      return stored === "venta" || stored === "compra" ? stored : null;
+    } catch {
+      return null;
+    }
+  });
 
   useEffect(() => {
-    const r = localStorage.getItem("role") as Role | null;
-    if (r === "venta" || r === "compra") setRole(r);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== "role") return;
+      const value = event.newValue;
+      setRole(value === "venta" || value === "compra" ? (value as Role) : null);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   const setAuth = (r: Role) => {
     setRole(r);
-    localStorage.setItem("role", r);
+    try {
+      localStorage.setItem("role", r);
+    } catch {}
   };
   const logout = () => {
     setRole(null);
-    localStorage.removeItem("role");
+    try {
+      localStorage.removeItem("role");
+    } catch {}
   };
 
   return (

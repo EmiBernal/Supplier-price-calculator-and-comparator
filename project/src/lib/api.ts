@@ -1,8 +1,9 @@
-export function currentRole() {
+export function currentRole(): "compra" | "venta" | null {
   try {
-    return (localStorage.getItem("role") || "venta").toLowerCase();
+    const stored = localStorage.getItem("role");
+    return stored === "venta" || stored === "compra" ? stored : null;
   } catch {
-    return "venta";
+    return null;
   }
 }
 
@@ -24,6 +25,7 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
       ? `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
       : path;
   const headers = new Headers(init.headers || {});
-  if (!headers.has("X-Role")) headers.set("X-Role", currentRole());
+  const role = currentRole();
+  if (!headers.has("X-Role") && role) headers.set("X-Role", role);
   return fetch(url, { ...init, headers, credentials: "include" });
 }

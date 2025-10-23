@@ -177,10 +177,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, userRole, on
                       console.error('No se pudo limpiar la sesión local:', storageError);
                     }
                     onLogout?.();
-                    setTimeout(() => {
-                      if (window.location.pathname !== '/login') window.location.assign('/login');
-                      else window.location.reload();
-                    }, 10);
+                    if (!onLogout) {
+                      setTimeout(() => {
+                        if (window.location.pathname !== '/login') window.location.assign('/login');
+                        else window.location.reload();
+                      }, 10);
+                    }
                   }
                 }}
                 aria-label="Cerrar sesión"
