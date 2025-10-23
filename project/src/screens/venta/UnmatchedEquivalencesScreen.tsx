@@ -4,7 +4,7 @@ import { Navigation } from '../../components/Navigation';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
 import { Trash2 } from 'lucide-react';
-import { formatYMD, compareYMD } from '../../utils/date';
+import { formatYMD, compareYMD, formatYearMonth, compareYearMonth } from '../../utils/date';
 
 /* ---------- Similaridad por trigramas + coseno (solo nombres) ---------- */
 function sanitizeText(s: string) {
@@ -28,8 +28,8 @@ function tokenizeName(s: string) {
 }
 
 type SortDir = 'asc' | 'desc';
-type SortKeyExternal = 'cod_externo' | 'nom_externo' | 'proveedor' | 'fecha';
-type SortKeyInternal = 'cod_interno' | 'nom_interno' | 'fecha';
+type SortKeyExternal = 'cod_externo' | 'nom_externo' | 'proveedor' | 'fecha' | 'mes_actualizacion';
+type SortKeyInternal = 'cod_interno' | 'nom_interno' | 'fecha' | 'mes_actualizacion';
 
 type ExternalItem = {
   id_externo: number;
@@ -37,6 +37,7 @@ type ExternalItem = {
   nom_externo?: string | null;
   proveedor?: string | null;
   fecha?: string | null;
+  mes_actualizacion?: string | null;
   precio?: number | null;
 };
 
@@ -45,6 +46,7 @@ type InternalItem = {
   cod_interno?: string | null;
   nom_interno?: string | null;
   fecha?: string | null;
+  mes_actualizacion?: string | null;
   precio?: number | null;
 };
 
@@ -72,6 +74,12 @@ function classHeader(active: boolean) {
 }
 const normalizeStr = (v: any) => String(v ?? '').toLowerCase().trim();
 const cmp = (a: any, b: any) => (a < b ? -1 : a > b ? 1 : 0);
+const formatMonthLabel = (value: unknown) => {
+  const normalized = formatYearMonth(value);
+  if (!normalized) return '—';
+  const [year, month] = normalized.split('-');
+  return `${month}/${year}`;
+};
 
 /* ---------- Input de búsqueda ---------- */
 const SearchInput: React.FC<{ value: string; onChange: (v: string) => void; placeholder: string; }> =
@@ -284,9 +292,10 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     const sorted = [...filtered].sort((a, b) => {
       const av: any = a[sortExtKey];
       const bv: any = b[sortExtKey];
-      const r = sortExtKey === 'fecha'
-        ? compareYMD(av, bv)
-        : cmp(normalizeStr(av), normalizeStr(bv));
+      let r: number;
+      if (sortExtKey === 'fecha') r = compareYMD(av, bv);
+      else if (sortExtKey === 'mes_actualizacion') r = compareYearMonth(av, bv);
+      else r = cmp(normalizeStr(av), normalizeStr(bv));
       return sortExtDir === 'asc' ? r : -r;
     });
     return sorted;
@@ -298,9 +307,10 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     const sorted = [...filtered].sort((a, b) => {
       const av: any = a[sortIntKey];
       const bv: any = b[sortIntKey];
-      const r = sortIntKey === 'fecha'
-        ? compareYMD(av, bv)
-        : cmp(normalizeStr(av), normalizeStr(bv));
+      let r: number;
+      if (sortIntKey === 'fecha') r = compareYMD(av, bv);
+      else if (sortIntKey === 'mes_actualizacion') r = compareYearMonth(av, bv);
+      else r = cmp(normalizeStr(av), normalizeStr(bv));
       return sortIntDir === 'asc' ? r : -r;
     });
     return sorted;
@@ -308,11 +318,11 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
 
   const toggleSortExternal = (key: SortKeyExternal) => {
     if (sortExtKey === key) setSortExtDir(d => (d === 'asc' ? 'desc' : 'asc'));
-    else { setSortExtKey(key); setSortExtDir(key === 'fecha' ? 'desc' : 'asc'); }
+    else { setSortExtKey(key); setSortExtDir(key === 'fecha' || key === 'mes_actualizacion' ? 'desc' : 'asc'); }
   };
   const toggleSortInternal = (key: SortKeyInternal) => {
     if (sortIntKey === key) setSortIntDir(d => (d === 'asc' ? 'desc' : 'asc'));
-    else { setSortIntKey(key); setSortIntDir(key === 'fecha' ? 'desc' : 'asc'); }
+    else { setSortIntKey(key); setSortIntDir(key === 'fecha' || key === 'mes_actualizacion' ? 'desc' : 'asc'); }
   };
 
   /* ---------- Selecciones ---------- */
@@ -538,11 +548,14 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                       <th className={classHeader(sortExtKey === 'fecha')} onClick={() => toggleSortExternal('fecha')}>
                         Fecha ingreso {sortExtKey === 'fecha' ? sortIcon(sortExtDir) : sortIcon()}
                       </th>
+                      <th className={classHeader(sortExtKey === 'mes_actualizacion')} onClick={() => toggleSortExternal('mes_actualizacion')}>
+                        Mes actualización {sortExtKey === 'mes_actualizacion' ? sortIcon(sortExtDir) : sortIcon()}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-white/10 bg-white/80 dark:bg-transparent">
                     {filteredSortedExternals.length === 0 ? (
-                      <tr><td colSpan={3} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">{externals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}</td></tr>
+                      <tr><td colSpan={4} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">{externals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}</td></tr>
                     ) : filteredSortedExternals.map(item => {
                       const linkSel = selectedExternals.some(e => e.id_externo === item.id_externo);
                       const delSel = extDeleteIds.has(item.id_externo);
@@ -555,6 +568,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                           <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.nom_externo ?? ''}</td>
                           <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{item.proveedor ?? 'Sin proveedor'}</td>
                           <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{formatYMD(item.fecha)}</td>
+                          <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{formatMonthLabel(item.mes_actualizacion)}</td>
                         </tr>
                       );
                     })}
@@ -598,12 +612,15 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                       <th className={classHeader(sortIntKey === 'fecha')} onClick={() => toggleSortInternal('fecha')}>
                         Fecha ingreso {sortIntKey === 'fecha' ? sortIcon(sortIntDir) : sortIcon()}
                       </th>
+                      <th className={classHeader(sortIntKey === 'mes_actualizacion')} onClick={() => toggleSortInternal('mes_actualizacion')}>
+                        Mes actualización {sortIntKey === 'mes_actualizacion' ? sortIcon(sortIntDir) : sortIcon()}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-white/10 bg-white/80 dark:bg-transparent">
                     {filteredSortedInternals.length === 0 ? (
                       <tr>
-                        <td colSpan={2} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">
+                        <td colSpan={3} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">
                           {internals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}
                         </td>
                       </tr>
@@ -623,6 +640,9 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
                           {/* Fecha */}
                           <td className="px-6 py-4 text-gray-700 dark:text-gray-300">
                             {formatYMD(item.fecha)}
+                          </td>
+                          <td className="px-6 py-4 text-gray-700 dark:text-gray-300">
+                            {formatMonthLabel(item.mes_actualizacion)}
                           </td>
                         </tr>
                       );

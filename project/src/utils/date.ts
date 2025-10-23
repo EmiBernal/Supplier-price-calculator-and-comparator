@@ -19,6 +19,31 @@ export function formatYMD(value: unknown, fallback = ''): string {
   return normalized ?? fallback;
 }
 
+export function normalizeToYearMonth(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const match = value.match(/^(\d{4})-(\d{2})/);
+    if (match) {
+      return `${match[1]}-${match[2]}`;
+    }
+  }
+  const ymd = normalizeToYMD(value);
+  if (ymd) return ymd.slice(0, 7);
+  return null;
+}
+
+export function formatYearMonth(value: unknown, fallback = ''): string {
+  const normalized = normalizeToYearMonth(value);
+  return normalized ?? fallback;
+}
+
+export function compareYearMonth(a: unknown, b: unknown): number {
+  const normalizedA = normalizeToYearMonth(a) ?? '';
+  const normalizedB = normalizeToYearMonth(b) ?? '';
+  if (normalizedA === normalizedB) return 0;
+  return normalizedA < normalizedB ? -1 : 1;
+}
+
 export function compareYMD(a: unknown, b: unknown): number {
   const normalizedA = normalizeToYMD(a) ?? '';
   const normalizedB = normalizeToYMD(b) ?? '';

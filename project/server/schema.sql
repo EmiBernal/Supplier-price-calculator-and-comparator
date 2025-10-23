@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS lista_precios (
   tipo_empresa TEXT NOT NULL,
   fecha DATE NOT NULL,
   proveedor TEXT NOT NULL,
+  mes_actualizacion TEXT,
   familia TEXT
 );
 
@@ -38,8 +39,28 @@ CREATE TABLE IF NOT EXISTS lista_interna (
   cod_interno TEXT,
   precio_final NUMERIC(18, 4) NOT NULL,
   fecha DATE NOT NULL,
+  mes_actualizacion TEXT,
   familia TEXT
 );
+
+ALTER TABLE lista_precios
+  ADD COLUMN IF NOT EXISTS mes_actualizacion TEXT;
+ALTER TABLE lista_interna
+  ADD COLUMN IF NOT EXISTS mes_actualizacion TEXT;
+
+UPDATE lista_precios
+   SET mes_actualizacion = TO_CHAR(fecha, 'YYYY-MM')
+ WHERE mes_actualizacion IS NULL;
+UPDATE lista_interna
+   SET mes_actualizacion = TO_CHAR(fecha, 'YYYY-MM')
+ WHERE mes_actualizacion IS NULL;
+
+ALTER TABLE lista_precios
+  ALTER COLUMN mes_actualizacion SET NOT NULL,
+  ALTER COLUMN mes_actualizacion SET DEFAULT TO_CHAR(CURRENT_DATE, 'YYYY-MM');
+ALTER TABLE lista_interna
+  ALTER COLUMN mes_actualizacion SET NOT NULL,
+  ALTER COLUMN mes_actualizacion SET DEFAULT TO_CHAR(CURRENT_DATE, 'YYYY-MM');
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_li_cod_not_null
   ON lista_interna (cod_interno)
@@ -132,6 +153,7 @@ CREATE TABLE IF NOT EXISTS lista_precios (
   tipo_empresa TEXT NOT NULL,
   fecha DATE NOT NULL,
   proveedor TEXT NOT NULL,
+  mes_actualizacion TEXT,
   familia TEXT
 );
 
@@ -147,8 +169,28 @@ CREATE TABLE IF NOT EXISTS lista_interna (
   cod_interno TEXT,
   precio_final NUMERIC(18, 4) NOT NULL,
   fecha DATE NOT NULL,
+  mes_actualizacion TEXT,
   familia TEXT
 );
+
+ALTER TABLE lista_precios
+  ADD COLUMN IF NOT EXISTS mes_actualizacion TEXT;
+ALTER TABLE lista_interna
+  ADD COLUMN IF NOT EXISTS mes_actualizacion TEXT;
+
+UPDATE lista_precios
+   SET mes_actualizacion = TO_CHAR(fecha, 'YYYY-MM')
+ WHERE mes_actualizacion IS NULL;
+UPDATE lista_interna
+   SET mes_actualizacion = TO_CHAR(fecha, 'YYYY-MM')
+ WHERE mes_actualizacion IS NULL;
+
+ALTER TABLE lista_precios
+  ALTER COLUMN mes_actualizacion SET NOT NULL,
+  ALTER COLUMN mes_actualizacion SET DEFAULT TO_CHAR(CURRENT_DATE, 'YYYY-MM');
+ALTER TABLE lista_interna
+  ALTER COLUMN mes_actualizacion SET NOT NULL,
+  ALTER COLUMN mes_actualizacion SET DEFAULT TO_CHAR(CURRENT_DATE, 'YYYY-MM');
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_li_cod_not_null
   ON lista_interna (cod_interno)
