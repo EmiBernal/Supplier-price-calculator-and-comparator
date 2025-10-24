@@ -9,6 +9,7 @@ import VentaCompare from "../screens/venta/CompareScreen";
 import VentaManual from "../screens/venta/ManualEntryScreen";
 import VentaMainEq from "../screens/venta/MainEquivalences";
 import VentaUnmatched from "../screens/venta/UnmatchedEquivalencesScreen";
+import VentaActiveSuppliers from "../screens/venta/ActiveSuppliersScreen";
 
 // COMPRA (por ahora alias a venta)
 import CompraHome from "../screens/compra/HomeScreen";
@@ -16,10 +17,11 @@ import CompraCompare from "../screens/compra/CompareScreen";
 import CompraManual from "../screens/compra/ManualEntryScreen";
 import CompraMainEq from "../screens/compra/MainEquivalences";
 import CompraUnmatched from "../screens/compra/UnmatchedEquivalencesScreen";
+import CompraActiveSuppliers from "../screens/venta/ActiveSuppliersScreen";
 
 // Si ya tenés este tipo en otro archivo, podés importarlo.
 // Lo defino acá para que compile sin depender de otros imports.
-type Screen = "home" | "compare" | "manual" | "equivalences" | "unmatched";
+type Screen = "home" | "compare" | "manual" | "equivalences" | "unmatched" | "providers";
 
 function pathFor(base: "/venta" | "/compra", screen: Screen) {
   switch (screen) {
@@ -28,6 +30,7 @@ function pathFor(base: "/venta" | "/compra", screen: Screen) {
     case "manual":        return `${base}/manual`;
     case "equivalences":  return `${base}/equivalences`;
     case "unmatched":     return `${base}/unmatched`;
+    case "providers":     return `${base}/providers`;
   }
 }
 
@@ -83,6 +86,14 @@ export default function RoleRouter() {
           </RequireRole>
         }
       />
+      <Route
+        path="/venta/providers"
+        element={
+          <RequireRole allow="venta">
+            <VentaActiveSuppliers onNavigate={goVenta} />
+          </RequireRole>
+        }
+      />
 
       {/* COMPRA */}
       <Route
@@ -122,6 +133,14 @@ export default function RoleRouter() {
         element={
           <RequireRole allow="compra">
             <CompraUnmatched onNavigate={goCompra} />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="/compra/providers"
+        element={
+          <RequireRole allow="compra">
+            <CompraActiveSuppliers onNavigate={goCompra} />
           </RequireRole>
         }
       />
