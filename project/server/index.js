@@ -1314,77 +1314,88 @@ app.post('/api/products', async (req, res) => {
     }
 
     if (companyType === 'Gampack') {
-      const upsertResult = await upsertInternalProduct(db, {
-        productCode,
-        productName,
-        finalPrice,
-        normalizedDate,
-      });
+  const upsertResult = await upsertInternalProduct(db, {
+    productCode,
+    productName,
+    finalPrice,
+    normalizedDate,
+  });
 
-      if (!upsertResult?.id) {
-        return res.status(500).json({ error: 'No se pudo guardar el producto interno' });
+  if (!upsertResult?.id) {
+    return res.status(500).json({ error: 'No se pudo guardar el producto interno' });
+  }
+
+  const newId = upsertResult.id;
+  const wasInserted = Boolean(upsertResult.inserted);
+  const statusCode = wasInserted ? 201 : 200;
+
+  // SIEMPRE intentar auto-relacionar, incluso cuando fue una actualización
+  let externalMatch = null;
+  if (newId) {
+    externalMatch = await findExternalAutoMatch();
+  }
+
+  let relationResult = null;
+  if (externalMatch?.row && linkAsEquivalent !== false) {
+    relationResult = await createRelationAndClean(
+      db,
+      externalMatch.row.id_externo,
+      newId,
+      externalMatch.criterion
+    );
+  }
+
+  const related = Boolean(relationResult?.created);
+
+  // Si NO quedó relacionado, aseguramos que figure como "pendiente" en articulos_gampack_no_relacionados
+  if (!related) {
+    const motivo = (() => {
+      if (!externalMatch?.row) {
+        return 'No se encontró coincidencia por código ni nombre';
       }
-
-      const newId = upsertResult.id;
-      const wasInserted = Boolean(upsertResult.inserted);
-      const statusCode = wasInserted ? 201 : 200;
-
-      if (!upsertResult.inserted) {
-        return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
+      if (relationResult?.reason === 'internal_already_related') {
+        return 'Coincidencia automática omitida: el producto interno ya está relacionado';
       }
-
-      let externalMatch = null;
-      if (newId) {
-        externalMatch = await findExternalAutoMatch();
+      if (relationResult?.reason === 'external_already_related') {
+        return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
       }
+      return 'Usuario rechazó sugerencia de relación';
+    })();
 
-      let relationResult = null;
-      if (externalMatch?.row && linkAsEquivalent !== false) {
-        relationResult = await createRelationAndClean(db, externalMatch.row.id_externo, newId, externalMatch.criterion);
-        if (relationResult?.created) {
-          return res.status(statusCode).json({
-            success: true,
-            message: `Producto ${wasInserted ? 'creado' : 'actualizado'} y relacionado`,
-            updated: !wasInserted,
-            related: true,
-          });
-        }
-      }
+    // Limpio cualquier marca previa y dejo marcada como pendiente
+    await runDb(
+      db,
+      `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`,
+      [newId]
+    );
+    await runDb(
+      db,
+      `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
+       VALUES ($1, $2)
+       ON CONFLICT (id_lista_interna) DO NOTHING`,
+      [newId, motivo]
+    );
+  }
 
-      const motivo = (() => {
-        if (!externalMatch?.row) {
-          return 'No se encontró coincidencia por código ni nombre';
-        }
-        if (relationResult?.reason === 'internal_already_related') {
-          return 'Coincidencia automática omitida: el producto interno ya está relacionado';
-        }
-        if (relationResult?.reason === 'external_already_related') {
-          return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
-        }
-        return 'Usuario rechazó sugerencia de relación';
-      })();
+  // Responder coherente según insert/update y si se relacionó o no
+  if (related) {
+    return res.status(statusCode).json({
+      success: true,
+      message: `Producto ${wasInserted ? 'creado' : 'actualizado'} y relacionado`,
+      updated: !wasInserted,
+      related: true,
+    });
+  }
 
-      await runDb(
-        db,
-        `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`,
-        [newId]
-      );
+  return res.status(statusCode).json({
+    success: true,
+    message: wasInserted ? 'Producto creado - no relacionados' : 'Producto actualizado - no relacionados',
+    updated: !wasInserted,
+    related: false,
+    skippedRelationReason: relationResult?.reason ?? (externalMatch?.row ? 'user_declined' : 'no_match'),
+  });
+}
 
-      await runDb(
-        db,
-        `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
-         VALUES ($1, $2)
-         ON CONFLICT (id_lista_interna) DO NOTHING`,
-        [newId, motivo]
-      );
-
-      return res.status(statusCode).json({
-        success: true,
-        message: wasInserted ? 'Producto creado - no relacionados' : 'Producto actualizado - no relacionados',
-        updated: !wasInserted,
-        skippedRelationReason: relationResult?.reason ?? (externalMatch?.row ? 'user_declined' : 'no_match'),
-      });
-    }
     return res.status(400).json({ error: 'Tipo de empresa no válido' });
   } catch (error) {
     console.error('Alta producto error:', error);
