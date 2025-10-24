@@ -855,6 +855,7 @@ function createNoRelacionadosHandler(tipo) {
         const sql = `
           SELECT DISTINCT
             lp.id_externo AS id_externo,
+            lp.cod_externo AS cod_externo,
             lp.cod_externo AS codigo,
             lp.nom_externo AS nom_externo,
             lp.proveedor AS proveedor,
@@ -896,6 +897,7 @@ function createNoRelacionadosHandler(tipo) {
       const sql = `
         SELECT DISTINCT
           li.id_interno AS id_interno,
+          li.cod_interno AS cod_interno,
           li.cod_interno AS codigo,
           li.nom_interno AS nom_interno,
           li.precio_final AS precio_final,

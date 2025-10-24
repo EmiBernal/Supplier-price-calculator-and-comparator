@@ -143,8 +143,37 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const [showTop, setShowTop] = useState(false);
 
   useEffect(() => {
-    apiFetch('/api/no-relacionados/proveedores').then(r => r.json()).then(d => setExternals(Array.isArray(d) ? d : [])).catch(() => setExternals([]));
-    apiFetch('/api/no-relacionados/gampack').then(r => r.json()).then(d => setInternals(Array.isArray(d) ? d : [])).catch(() => setInternals([]));
+    apiFetch('/api/no-relacionados/proveedores')
+      .then(r => r.json())
+      .then(d => {
+        if (!Array.isArray(d)) { setExternals([]); return; }
+        setExternals(
+          d
+            .map((item: any) => ({
+              ...item,
+              id_externo: Number(item?.id_externo ?? item?.id ?? 0),
+              cod_externo: item?.cod_externo ?? item?.codigo ?? null,
+            }))
+            .filter((item: any) => Number.isFinite(item.id_externo) && item.id_externo > 0)
+        );
+      })
+      .catch(() => setExternals([]));
+
+    apiFetch('/api/no-relacionados/gampack')
+      .then(r => r.json())
+      .then(d => {
+        if (!Array.isArray(d)) { setInternals([]); return; }
+        setInternals(
+          d
+            .map((item: any) => ({
+              ...item,
+              id_interno: Number(item?.id_interno ?? item?.id ?? 0),
+              cod_interno: item?.cod_interno ?? item?.codigo ?? null,
+            }))
+            .filter((item: any) => Number.isFinite(item.id_interno) && item.id_interno > 0)
+        );
+      })
+      .catch(() => setInternals([]));
   }, []);
 
   // accesos rápidos teclado

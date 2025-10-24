@@ -4,6 +4,7 @@ import ManualEntryScreen from './ManualEntryScreen';
 import CompareScreen from './CompareScreen';
 import MainEquivalences from './MainEquivalences';
 import UnmatchedEquivalencesScreen from './UnmatchedEquivalencesScreen';
+import ActiveSuppliersScreen from './ActiveSuppliersScreen';
 
 const SCREENS = {
   home: HomeScreen,
@@ -11,6 +12,7 @@ const SCREENS = {
   compare: CompareScreen,
   equivalences: MainEquivalences,
   unmatched: UnmatchedEquivalencesScreen,
+  providers: ActiveSuppliersScreen,
 } as const;
 
 type ScreenKey = keyof typeof SCREENS;
