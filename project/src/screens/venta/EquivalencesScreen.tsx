@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Input } from '../../components/Input';
 import { Table, Column } from '../../components/Table';
 import { ProductEquivalence } from '../../tipos/database';
 import { Search, ArrowLeft, ArrowUp, Pencil, Save, X } from 'lucide-react';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
-import { normalizeToYMD, formatYearMonth } from '../../utils/date';
+import { normalizeToYMD } from '../../utils/date';
 
 interface EquivalencesScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -13,21 +13,6 @@ interface EquivalencesScreenProps {
 
 // Utilidad para formatear fecha a yyyy-MM-dd para <input type="date">
 const toDateInput = (value: unknown) => normalizeToYMD(value) ?? '';
-
-interface UnmatchedInternal {
-  id_interno: number;
-  cod_interno?: string | null;
-  nom_interno?: string | null;
-  fecha?: string | null;
-  mes_actualizacion?: string | null;
-}
-
-const formatMonthLabel = (value: unknown) => {
-  const normalized = formatYearMonth(value);
-  if (!normalized) return '—';
-  const [year, month] = normalized.split('-');
-  return `${month}/${year}`;
-};
 
 export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNavigate }) => {
   const [equivalences, setEquivalences] = useState<ProductEquivalence[]>([]);
@@ -41,11 +26,6 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
   // Botón “Top”
   const [showBackToTop, setShowBackToTop] = useState(false);
 
-  // Productos Gampack sin relación
-  const [unmatchedInternals, setUnmatchedInternals] = useState<UnmatchedInternal[]>([]);
-  const [loadingUnmatched, setLoadingUnmatched] = useState(false);
-  const [unmatchedError, setUnmatchedError] = useState<string | null>(null);
-
   // Edición
   const [editOpen, setEditOpen] = useState(false);
   const [editRow, setEditRow] = useState<ProductEquivalence | null>(null);
@@ -58,34 +38,6 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
 
   const searchInputId = 'equiv-search-input';
   const topAnchorRef = useRef<HTMLDivElement>(null);
-
-  const fetchUnmatchedInternals = useCallback(async () => {
-    setLoadingUnmatched(true);
-    setUnmatchedError(null);
-    try {
-      const res = await apiFetch('/api/no-relacionados/gampack?limit=500');
-      if (!res.ok) throw new Error('Error al obtener productos Gampack no relacionados');
-      const data = await res.json();
-      const normalized: UnmatchedInternal[] = Array.isArray(data)
-        ? data
-            .map((item: any) => ({
-              id_interno: Number(item?.id_interno ?? item?.id ?? 0),
-              cod_interno: item?.cod_interno ?? item?.codigo ?? null,
-              nom_interno: item?.nom_interno ?? item?.nombre ?? null,
-              fecha: item?.fecha ?? null,
-              mes_actualizacion: item?.mes_actualizacion ?? null,
-            }))
-            .filter((item) => Number.isFinite(item.id_interno) && item.id_interno > 0)
-        : [];
-      setUnmatchedInternals(normalized);
-    } catch (error) {
-      console.error('Error fetching unmatched Gampack:', error);
-      setUnmatchedInternals([]);
-      setUnmatchedError('No se pudieron cargar los productos Gampack no relacionados.');
-    } finally {
-      setLoadingUnmatched(false);
-    }
-  }, []);
 
   const fetchEquivalences = async (search: string) => {
     setLoading(true);
@@ -104,8 +56,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
 
   useEffect(() => {
     fetchEquivalences('');
-    fetchUnmatchedInternals();
-  }, [fetchUnmatchedInternals]);
+  }, []);
   useEffect(() => {
     const timeout = setTimeout(() => { fetchEquivalences(searchTerm.trim()); }, 300);
     return () => clearTimeout(timeout);
@@ -190,7 +141,6 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
       const data = await res.json();
       if (data?.success) {
         setEquivalences((prev) => prev.filter((eq) => (eq as any).id !== id));
-        fetchUnmatchedInternals();
         showToast('🗑️ Relación eliminada');
       } else {
         alert('Error eliminando relación');
@@ -250,13 +200,13 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
           proveedor: editForm.supplier || null,
           cod_externo: editForm.externalCode || null,
           nom_externo: editForm.externalName || null,
-          fecha: editForm.externalDate || null, // YYYY-MM-DD o ''
+          fecha: editForm.externalDate || null,
         },
         lista_interna: {
           id_interno: Number(internalId),
           cod_interno: editForm.internalCode || null,
           nom_interno: editForm.internalName || null,
-          fecha: editForm.internalDate || null, // YYYY-MM-DD o ''
+          fecha: editForm.internalDate || null,
         },
       };
 
@@ -290,7 +240,6 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
       );
 
       showToast('✅ Relación actualizada');
-      fetchUnmatchedInternals();
       closeEdit();
     } catch (err: any) {
       console.error('❌ Error actualizando relación:', err);
@@ -299,7 +248,6 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
       setSaving(false);
     }
   };
-
 
   // Filtro por criterio + búsqueda
   const filteredEquivalences = () => {
@@ -313,16 +261,6 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
       return byCriteria && values.some((v) => v.includes(q));
     });
   };
-
-  const filteredUnmatchedInternals = useMemo(() => {
-    const q = searchTerm.trim().toLowerCase();
-    if (!q) return unmatchedInternals;
-    return unmatchedInternals.filter((item) => {
-      const name = (item.nom_interno ?? '').toLowerCase();
-      const code = (item.cod_interno ?? '').toLowerCase();
-      return name.includes(q) || code.includes(q);
-    });
-  }, [searchTerm, unmatchedInternals]);
 
   const columns: Column<ProductEquivalence>[] = [
     { key: 'supplier', label: 'Proveedor Externo', sortable: true },
@@ -414,6 +352,18 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {/* Filtro por criterio */}
+              <select
+                value={criteriaFilter}
+                onChange={(e) => setCriteriaFilter(e.target.value)}
+                className="rounded-md border border-gray-200 dark:border-white/10 bg-white dark:bg-white/10 text-sm px-2 py-1 text-gray-700 dark:text-white/80"
+              >
+                <option value="">Todos los criterios</option>
+                <option value="manual">Manual</option>
+                <option value="name">Nombre</option>
+                <option value="codigo">Código</option>
+              </select>
+
               <span className="ml-1 text-xs text-gray-600 dark:text-white/60">
                 {filteredEquivalences().length} registros
               </span>
@@ -423,7 +373,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
           {/* Tabla */}
           <div className="overflow-x-auto">
             {loading ? (
-              <p className="text-sm text-gray-600 dark:text:white/70">Cargando…</p>
+              <p className="text-sm text-gray-600 dark:text-white/70">Cargando…</p>
             ) : filteredEquivalences().length === 0 ? (
               <p className="text-sm text-gray-600 dark:text-white/70">No hay equivalencias para mostrar</p>
             ) : (
@@ -438,85 +388,6 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
             )}
           </div>
         </div>
-
-        <section className="mt-10">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Productos Gampack sin relación</h2>
-              <p className="text-sm text-gray-600 dark:text-white/70 max-w-2xl">
-                Revisá rápidamente los artículos internos que todavía no tienen un proveedor asociado para crear nuevas
-                equivalencias.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={fetchUnmatchedInternals}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 dark:border-white/10 px-3 py-1.5 text-sm text-gray-700 dark:text-white/80 hover:bg-gray-100 dark:hover:bg-white/10 transition"
-                disabled={loadingUnmatched}
-              >
-                {loadingUnmatched ? 'Actualizando…' : 'Actualizar lista'}
-              </button>
-              <button
-                onClick={() => onNavigate('unmatched')}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-500"
-              >
-                Gestionar equivalencias
-              </button>
-            </div>
-          </div>
-
-          {unmatchedError && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-700/40 dark:bg-red-900/20 dark:text-red-200">
-              {unmatchedError}
-            </div>
-          )}
-
-          <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#0e1526]">
-            {loadingUnmatched ? (
-              <div className="divide-y divide-gray-200 dark:divide-white/10">
-                {[...Array(4)].map((_, index) => (
-                  <div key={index} className="h-12 animate-pulse bg-gray-100/80 dark:bg-white/5" />
-                ))}
-              </div>
-            ) : filteredUnmatchedInternals.length === 0 ? (
-              <div className="px-4 py-6 text-center text-sm text-gray-600 dark:text-white/70">
-                {unmatchedInternals.length === 0
-                  ? 'No hay productos Gampack pendientes de relacionar.'
-                  : 'No se encontraron productos que coincidan con la búsqueda.'}
-              </div>
-            ) : (
-              <table className="min-w-full divide-y divide-gray-200 dark:divide-white/10 text-sm">
-                <thead className="bg-gray-50 dark:bg-white/10 dark:text-white/90">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-white/70">Nombre interno</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-white/70">Código</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-white/70">Fecha de alta</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-white/70">Mes actualización</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-white/10">
-                  {filteredUnmatchedInternals.map((item) => (
-                    <tr
-                      key={item.id_interno}
-                      className="bg-white/80 text-gray-900 transition hover:bg-gray-50 dark:bg-transparent dark:text-white/80 dark:hover:bg-white/10"
-                    >
-                      <td className="px-4 py-3">{item.nom_interno ?? 'Sin nombre'}</td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-white/60">{item.cod_interno ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-white/60">{normalizeToYMD(item.fecha) ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-white/60">{formatMonthLabel(item.mes_actualizacion)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          <div className="mt-2 text-xs text-gray-600 dark:text-white/60">
-            {loadingUnmatched
-              ? 'Cargando productos Gampack…'
-              : `${filteredUnmatchedInternals.length} producto${filteredUnmatchedInternals.length === 1 ? '' : 's'} visibles`}
-          </div>
-        </section>
       </div>
 
       {/* Botón flotante: volver al top */}
@@ -606,6 +477,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
           </div>
         </div>
       )}
+
       {/* Toast */}
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-3 py-2 rounded-full bg-black/80 text-white text-sm shadow-lg z-50">
