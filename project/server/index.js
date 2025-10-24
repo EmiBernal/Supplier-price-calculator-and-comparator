@@ -834,14 +834,13 @@ function createNoRelacionadosHandler(tipo) {
         const params = [];
         const where = [];
 
-        // EXTERNOS NO RELACIONADOS = no existe relación
+        // EXTERNOS SIN RELACIÓN
         where.push(`NOT EXISTS (
           SELECT 1 FROM relacion_articulos ra
           WHERE ra.id_lista_precios = lp.id_externo
         )`);
 
         if (onlyPending) {
-          // Sólo los que están marcados en articulos_no_relacionados
           where.push(`EXISTS (
             SELECT 1 FROM articulos_no_relacionados anr
             WHERE anr.id_lista_precios = lp.id_externo
@@ -866,7 +865,8 @@ function createNoRelacionadosHandler(tipo) {
             lp.proveedor,
             lp.precio_final,
             lp.fecha,
-            lp.mes_actualizacion,
+            -- Evitar depender de columna ausente: calculo el mes desde fecha
+            TO_CHAR(lp.fecha, 'YYYY-MM') AS mes_actualizacion,
             (
               SELECT motivo
               FROM articulos_no_relacionados anr
@@ -894,73 +894,72 @@ function createNoRelacionadosHandler(tipo) {
         return res.json(normalizeRowsDates(rows, ['fecha']));
       }
 
-      // INTERNOS NO RELACIONADOS
-      {
-        const params = [];
-        const where = [];
+      // INTERNOS SIN RELACIÓN
+      const params = [];
+      const where = [];
 
-        // Internos sin relación
-        where.push(`NOT EXISTS (
-          SELECT 1 FROM relacion_articulos ra
-          WHERE ra.id_lista_interna = li.id_interno
+      where.push(`NOT EXISTS (
+        SELECT 1 FROM relacion_articulos ra
+        WHERE ra.id_lista_interna = li.id_interno
+      )`);
+
+      if (onlyPending) {
+        where.push(`EXISTS (
+          SELECT 1 FROM articulos_gampack_no_relacionados agnr
+          WHERE agnr.id_lista_interna = li.id_interno
         )`);
-
-        if (onlyPending) {
-          where.push(`EXISTS (
-            SELECT 1 FROM articulos_gampack_no_relacionados agnr
-            WHERE agnr.id_lista_interna = li.id_interno
-          )`);
-        }
-
-        if (hasSearch) {
-          where.push(`(
-            LOWER(li.cod_interno) LIKE $${params.length + 1} OR
-            LOWER(li.nom_interno) LIKE $${params.length + 2}
-          )`);
-          params.push(searchTerm, searchTerm);
-        }
-
-        const sql = `
-          SELECT
-            li.id_interno,
-            li.cod_interno,
-            li.cod_interno AS codigo,
-            li.nom_interno,
-            li.precio_final,
-            li.fecha,
-            li.mes_actualizacion,
-            (
-              SELECT motivo
-              FROM articulos_gampack_no_relacionados agnr
-              WHERE agnr.id_lista_interna = li.id_interno
-              LIMIT 1
-            ) AS motivo,
-            CASE
-              WHEN EXISTS (
-                SELECT 1 FROM articulos_gampack_no_relacionados agnr
-                WHERE agnr.id_lista_interna = li.id_interno
-              ) THEN 1 ELSE 0
-            END AS es_pendiente,
-            LOWER(li.nom_interno) AS nombre_lower
-          FROM lista_interna li
-          ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-          ORDER BY es_pendiente DESC,
-                   li.fecha DESC NULLS LAST,
-                   li.id_interno DESC,
-                   nombre_lower ASC
-          LIMIT $${params.length + 1} OFFSET $${params.length + 2}
-        `;
-        params.push(limit, offset);
-
-        const rows = await getDbRows(db, sql, params);
-        return res.json(normalizeRowsDates(rows, ['fecha']));
       }
+
+      if (hasSearch) {
+        where.push(`(
+          LOWER(li.cod_interno) LIKE $${params.length + 1} OR
+          LOWER(li.nom_interno) LIKE $${params.length + 2}
+        )`);
+        params.push(searchTerm, searchTerm);
+      }
+
+      const sql = `
+        SELECT
+          li.id_interno,
+          li.cod_interno,
+          li.cod_interno AS codigo,
+          li.nom_interno,
+          li.precio_final,
+          li.fecha,
+          -- Evitar columna faltante: calcular el mes desde fecha
+          TO_CHAR(li.fecha, 'YYYY-MM') AS mes_actualizacion,
+          (
+            SELECT motivo
+            FROM articulos_gampack_no_relacionados agnr
+            WHERE agnr.id_lista_interna = li.id_interno
+            LIMIT 1
+          ) AS motivo,
+          CASE
+            WHEN EXISTS (
+              SELECT 1 FROM articulos_gampack_no_relacionados agnr
+              WHERE agnr.id_lista_interna = li.id_interno
+            ) THEN 1 ELSE 0
+          END AS es_pendiente,
+          LOWER(li.nom_interno) AS nombre_lower
+        FROM lista_interna li
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        ORDER BY es_pendiente DESC,
+                 li.fecha DESC NULLS LAST,
+                 li.id_interno DESC,
+                 nombre_lower ASC
+        LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+      `;
+      params.push(limit, offset);
+
+      const rows = await getDbRows(db, sql, params);
+      return res.json(normalizeRowsDates(rows, ['fecha']));
     } catch (err) {
       console.error('Error al obtener productos no relacionados:', err);
       return res.status(500).json({ error: 'db_error' });
     }
   };
 }
+
 
 app.get('/api/debug/whoami', async (req, res) => {
   try {
