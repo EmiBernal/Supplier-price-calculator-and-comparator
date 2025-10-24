@@ -233,22 +233,25 @@ async function upsertInternalProduct(db, { productCode, productName, finalPrice,
   let existing = null;
   let matchType = null;
 
+  // 1) Intentamos encontrar existente por código normalizado
   if (normalizedCode) {
     existing = await findInternalByNormalizedCode(db, normalizedCode);
     if (existing) matchType = 'code';
   }
 
+  // 2) Si no hay por código, probamos nombre exacto normalizado
   if (!existing && normalizedExactName) {
     existing = await findInternalByExactName(db, normalizedExactName);
     if (existing) matchType = 'name';
   }
 
+  // 3) Si existe, actualizamos si hace falta
   if (existing) {
     const storedDate = ensureYMD(existing.fecha);
     const storedMonth = ensureYearMonth(existing.mes_actualizacion || existing.fecha);
     const normalizedProvidedCode = normalizeWhitespace(productCode || '');
-    const normalizedStoredCode = normalizeWhitespace(existing.cod_interno || '');
-    const normalizedStoredName = normalizeWhitespace(existing.nom_interno || '');
+    const normalizedStoredCode   = normalizeWhitespace(existing.cod_interno || '');
+    const normalizedStoredName   = normalizeWhitespace(existing.nom_interno || '');
 
     const needsUpdate =
       normalizedStoredCode !== normalizedProvidedCode ||
@@ -261,11 +264,11 @@ async function upsertInternalProduct(db, { productCode, productName, finalPrice,
       await runDb(
         db,
         `UPDATE lista_interna
-         SET cod_interno = $1,
-             nom_interno = $2,
-             precio_final = $3,
-             fecha = $4,
-             mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+           SET cod_interno = $1,
+               nom_interno = $2,
+               precio_final = $3,
+               fecha = $4,
+               mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
          WHERE id_interno = $5`,
         [productCode || null, productName, finalPrice, normalizedDate, existing.id_interno]
       );
@@ -281,39 +284,60 @@ async function upsertInternalProduct(db, { productCode, productName, finalPrice,
     };
   }
 
-  const insertedRow = await getDbRow(
-    db,
-    `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha, mes_actualizacion)
-     VALUES ($1, $2, $3, $4, TO_CHAR(CURRENT_DATE, 'YYYY-MM'))
-     ON CONFLICT (cod_interno) DO UPDATE
-       SET cod_interno = EXCLUDED.cod_interno,
-           nom_interno = EXCLUDED.nom_interno,
-           precio_final = EXCLUDED.precio_final,
-           fecha = EXCLUDED.fecha,
-           mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
-     RETURNING id_interno, (xmax = 0)::boolean AS inserted_directly`,
-    [productCode || null, productName, finalPrice, normalizedDate]
-  );
+  // 4) No existe: intentamos INSERT "puro" y, si choca por unique (23505), resolvemos con UPDATE
+  try {
+    const insertedRow = await getDbRow(
+      db,
+      `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha, mes_actualizacion)
+       VALUES ($1, $2, $3, $4, TO_CHAR(CURRENT_DATE, 'YYYY-MM'))
+       RETURNING id_interno`,
+      [productCode || null, productName, finalPrice, normalizedDate]
+    );
 
-  if (!insertedRow) {
     return {
-      id: null,
-      inserted: false,
+      id: insertedRow?.id_interno ?? null,
+      inserted: true,
       updated: false,
       priceChanged: false,
-      matchType: null,
+      matchType: 'insert',
       existingRow: null,
     };
-  }
+  } catch (err) {
+    // Si hay conflicto por código (único no-nulo), buscamos y actualizamos
+    if (err?.code === '23505' && productCode) {
+      const conflict = await getDbRow(
+        db,
+        `SELECT * FROM lista_interna
+          WHERE cod_interno IS NOT NULL
+            AND TRIM(LOWER(cod_interno)) = TRIM(LOWER($1))
+          LIMIT 1`,
+        [productCode]
+      );
 
-  return {
-    id: insertedRow.id_interno,
-    inserted: Boolean(insertedRow.inserted_directly),
-    updated: !insertedRow.inserted_directly,
-    priceChanged: !insertedRow.inserted_directly,
-    matchType: insertedRow.inserted_directly ? 'insert' : 'code_conflict',
-    existingRow: null,
-  };
+      if (conflict) {
+        await runDb(
+          db,
+          `UPDATE lista_interna
+             SET nom_interno = $1,
+                 precio_final = $2,
+                 fecha = $3,
+                 mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
+           WHERE id_interno = $4`,
+          [productName, finalPrice, normalizedDate, conflict.id_interno]
+        );
+
+        return {
+          id: conflict.id_interno,
+          inserted: false,
+          updated: true,
+          priceChanged: Number(conflict.precio_final) !== Number(finalPrice),
+          matchType: 'code_conflict',
+          existingRow: conflict,
+        };
+      }
+    }
+    throw err; // propagamos otros errores para que /api/products devuelva 500
+  }
 }
 
 async function createRelationAndClean(db, idListaPrecios, idListaInterna, criterio = 'automatic') {
@@ -959,7 +983,6 @@ function createNoRelacionadosHandler(tipo) {
     }
   };
 }
-
 
 app.get('/api/debug/whoami', async (req, res) => {
   try {
