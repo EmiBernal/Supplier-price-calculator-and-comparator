@@ -818,140 +818,141 @@ function createNoRelacionadosHandler(tipo) {
   const isExternos = tipo === 'externos';
 
   return async (req, res) => {
-    if (req.ctx?.tenant === 'compra') {
-      return res.status(404).json({ error: 'no_disponible_en_compras' });
-    }
-
     const db = req.ctx.db;
-    if (!db) {
-      return res.status(500).json({ error: 'db_not_available' });
-    }
+    if (!db) return res.status(500).json({ error: 'db_not_available' });
 
     try {
       const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
       const hasSearch = searchRaw.length > 0;
       const searchTerm = hasSearch ? `%${searchRaw.toLowerCase()}%` : null;
+
       const onlyPending = String(req.query.onlyPending || '1') === '1';
       const limit = parseLimitParam(req.query.limit);
       const offset = parseOffsetParam(req.query.offset);
 
       if (isExternos) {
-        const paramsExt = [];
-        const whereExt = ['ra.id IS NULL'];
-        if (onlyPending) whereExt.push('anr.id_lista_precios IS NOT NULL');
-        if (hasSearch) {
-          whereExt.push(`(
-            LOWER(lp.cod_externo) LIKE $1 OR
-            LOWER(lp.nom_externo) LIKE $2 OR
-            LOWER(lp.proveedor) LIKE $3
+        const params = [];
+        const where = [];
+
+        // EXTERNOS NO RELACIONADOS = no existe relación
+        where.push(`NOT EXISTS (
+          SELECT 1 FROM relacion_articulos ra
+          WHERE ra.id_lista_precios = lp.id_externo
+        )`);
+
+        if (onlyPending) {
+          // Sólo los que están marcados en articulos_no_relacionados
+          where.push(`EXISTS (
+            SELECT 1 FROM articulos_no_relacionados anr
+            WHERE anr.id_lista_precios = lp.id_externo
           )`);
-          paramsExt.push(searchTerm, searchTerm, searchTerm);
         }
 
-        const sqlExt = `
-          SELECT DISTINCT
-            lp.id_externo AS id_externo,
-            lp.cod_externo AS cod_externo,
+        if (hasSearch) {
+          where.push(`(
+            LOWER(lp.cod_externo) LIKE $${params.length + 1} OR
+            LOWER(lp.nom_externo) LIKE $${params.length + 2} OR
+            LOWER(lp.proveedor)  LIKE $${params.length + 3}
+          )`);
+          params.push(searchTerm, searchTerm, searchTerm);
+        }
+
+        const sql = `
+          SELECT
+            lp.id_externo,
+            lp.cod_externo,
             lp.cod_externo AS codigo,
-            lp.nom_externo AS nom_externo,
-            lp.proveedor AS proveedor,
-            lp.precio_final AS precio_final,
-            lp.fecha AS fecha,
-            lp.mes_actualizacion AS mes_actualizacion,
-            anr.motivo AS motivo,
-            CASE WHEN anr.id_lista_precios IS NULL THEN 0 ELSE 1 END AS es_pendiente,
+            lp.nom_externo,
+            lp.proveedor,
+            lp.precio_final,
+            lp.fecha,
+            lp.mes_actualizacion,
+            (
+              SELECT motivo
+              FROM articulos_no_relacionados anr
+              WHERE anr.id_lista_precios = lp.id_externo
+              LIMIT 1
+            ) AS motivo,
+            CASE
+              WHEN EXISTS (
+                SELECT 1 FROM articulos_no_relacionados anr
+                WHERE anr.id_lista_precios = lp.id_externo
+              ) THEN 1 ELSE 0
+            END AS es_pendiente,
             LOWER(lp.nom_externo) AS nombre_lower
           FROM lista_precios lp
-          LEFT JOIN relacion_articulos ra ON ra.id_lista_precios = lp.id_externo
-          LEFT JOIN articulos_no_relacionados anr ON anr.id_lista_precios = lp.id_externo
-          ${whereExt.length ? 'WHERE ' + whereExt.join(' AND ') : ''}
+          ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
           ORDER BY es_pendiente DESC,
-                   DATE(lp.fecha) DESC,
+                   lp.fecha DESC NULLS LAST,
                    lp.id_externo DESC,
                    nombre_lower ASC
-          LIMIT $${paramsExt.length + 1} OFFSET $${paramsExt.length + 2}
+          LIMIT $${params.length + 1} OFFSET $${params.length + 2}
         `;
+        params.push(limit, offset);
 
-        const rows = await getDbRows(db, sqlExt, [...paramsExt, limit, offset]);
+        const rows = await getDbRows(db, sql, params);
         return res.json(normalizeRowsDates(rows, ['fecha']));
       }
 
-      // === INTERNOS (Gampack) ===
-      // Construimos where/params independientes para evitar referencias a agnr en el fallback
-      const paramsInt = [];
-      const whereInt = ['ra.id IS NULL'];
-      if (onlyPending) whereInt.push('agnr.id_lista_interna IS NOT NULL');
-      if (hasSearch) {
-        whereInt.push(`(
-          LOWER(li.cod_interno) LIKE $1 OR
-          LOWER(li.nom_interno) LIKE $2
+      // INTERNOS NO RELACIONADOS
+      {
+        const params = [];
+        const where = [];
+
+        // Internos sin relación
+        where.push(`NOT EXISTS (
+          SELECT 1 FROM relacion_articulos ra
+          WHERE ra.id_lista_interna = li.id_interno
         )`);
-        paramsInt.push(searchTerm, searchTerm);
-      }
 
-      const sqlInt = `
-        SELECT DISTINCT
-          li.id_interno AS id_interno,
-          li.cod_interno AS cod_interno,
-          li.cod_interno AS codigo,
-          li.nom_interno AS nom_interno,
-          li.precio_final AS precio_final,
-          li.fecha AS fecha,
-          li.mes_actualizacion AS mes_actualizacion,
-          agnr.motivo AS motivo,
-          CASE WHEN agnr.id_lista_interna IS NULL THEN 0 ELSE 1 END AS es_pendiente,
-          LOWER(li.nom_interno) AS nombre_lower
-        FROM lista_interna li
-        LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
-        LEFT JOIN articulos_gampack_no_relacionados agnr ON agnr.id_lista_interna = li.id_interno
-        ${whereInt.length ? 'WHERE ' + whereInt.join(' AND ') : ''}
-        ORDER BY es_pendiente DESC,
-                 DATE(li.fecha) DESC,
-                 li.id_interno DESC,
-                 nombre_lower ASC
-        LIMIT $${paramsInt.length + 1} OFFSET $${paramsInt.length + 2}
-      `;
-
-      try {
-        const rows = await getDbRows(db, sqlInt, [...paramsInt, limit, offset]);
-        return res.json(normalizeRowsDates(rows, ['fecha']));
-      } catch (e) {
-        // Si la tabla articulos_gampack_no_relacionados no existe, hacemos fallback sin ese JOIN
-        if (e?.code !== '42P01') throw e;
-
-        const paramsFallback = [];
-        const whereFallback = ['ra.id IS NULL'];
-        if (hasSearch) {
-          whereFallback.push(`(
-            LOWER(li.cod_interno) LIKE $1 OR
-            LOWER(li.nom_interno) LIKE $2
+        if (onlyPending) {
+          where.push(`EXISTS (
+            SELECT 1 FROM articulos_gampack_no_relacionados agnr
+            WHERE agnr.id_lista_interna = li.id_interno
           )`);
-          paramsFallback.push(searchTerm, searchTerm);
         }
 
-        const sqlFallback = `
-          SELECT DISTINCT
-            li.id_interno AS id_interno,
-            li.cod_interno AS cod_interno,
+        if (hasSearch) {
+          where.push(`(
+            LOWER(li.cod_interno) LIKE $${params.length + 1} OR
+            LOWER(li.nom_interno) LIKE $${params.length + 2}
+          )`);
+          params.push(searchTerm, searchTerm);
+        }
+
+        const sql = `
+          SELECT
+            li.id_interno,
+            li.cod_interno,
             li.cod_interno AS codigo,
-            li.nom_interno AS nom_interno,
-            li.precio_final AS precio_final,
-            li.fecha AS fecha,
-            li.mes_actualizacion AS mes_actualizacion,
-            NULL AS motivo,
-            1 AS es_pendiente, -- asumimos pendiente sin la tabla auxiliar
+            li.nom_interno,
+            li.precio_final,
+            li.fecha,
+            li.mes_actualizacion,
+            (
+              SELECT motivo
+              FROM articulos_gampack_no_relacionados agnr
+              WHERE agnr.id_lista_interna = li.id_interno
+              LIMIT 1
+            ) AS motivo,
+            CASE
+              WHEN EXISTS (
+                SELECT 1 FROM articulos_gampack_no_relacionados agnr
+                WHERE agnr.id_lista_interna = li.id_interno
+              ) THEN 1 ELSE 0
+            END AS es_pendiente,
             LOWER(li.nom_interno) AS nombre_lower
           FROM lista_interna li
-          LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
-          ${whereFallback.length ? 'WHERE ' + whereFallback.join(' AND ') : ''}
+          ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
           ORDER BY es_pendiente DESC,
-                   DATE(li.fecha) DESC,
+                   li.fecha DESC NULLS LAST,
                    li.id_interno DESC,
                    nombre_lower ASC
-          LIMIT $${paramsFallback.length + 1} OFFSET $${paramsFallback.length + 2}
+          LIMIT $${params.length + 1} OFFSET $${params.length + 2}
         `;
+        params.push(limit, offset);
 
-        const rows = await getDbRows(db, sqlFallback, [...paramsFallback, limit, offset]);
+        const rows = await getDbRows(db, sql, params);
         return res.json(normalizeRowsDates(rows, ['fecha']));
       }
     } catch (err) {
@@ -960,6 +961,20 @@ function createNoRelacionadosHandler(tipo) {
     }
   };
 }
+
+app.get('/api/debug/whoami', async (req, res) => {
+  try {
+    const db = req.ctx.db;
+    const sp = await getDbRow(db, 'SHOW search_path', []);
+    res.json({
+      tenant: req.ctx?.tenant || null,
+      search_path: sp?.search_path || null,
+    });
+  } catch (e) {
+    res.json({ tenant: req.ctx?.tenant || null, error: e?.message });
+  }
+});
+
 
 const handleNoRelacionadosExternos = createNoRelacionadosHandler('externos');
 const handleNoRelacionadosInternos = createNoRelacionadosHandler('internos');
