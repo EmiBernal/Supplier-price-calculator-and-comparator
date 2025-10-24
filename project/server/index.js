@@ -835,24 +835,20 @@ function createNoRelacionadosHandler(tipo) {
       const limit = parseLimitParam(req.query.limit);
       const offset = parseOffsetParam(req.query.offset);
 
-      const params = [];
-      const where = [];
-
       if (isExternos) {
-        where.push('ra.id IS NULL');
-        if (onlyPending) {
-          where.push('anr.id_lista_precios IS NOT NULL');
-        }
+        const paramsExt = [];
+        const whereExt = ['ra.id IS NULL'];
+        if (onlyPending) whereExt.push('anr.id_lista_precios IS NOT NULL');
         if (hasSearch) {
-          where.push(`(
+          whereExt.push(`(
             LOWER(lp.cod_externo) LIKE $1 OR
             LOWER(lp.nom_externo) LIKE $2 OR
             LOWER(lp.proveedor) LIKE $3
           )`);
-          params.push(searchTerm, searchTerm, searchTerm);
+          paramsExt.push(searchTerm, searchTerm, searchTerm);
         }
 
-        const sql = `
+        const sqlExt = `
           SELECT DISTINCT
             lp.id_externo AS id_externo,
             lp.cod_externo AS cod_externo,
@@ -868,33 +864,32 @@ function createNoRelacionadosHandler(tipo) {
           FROM lista_precios lp
           LEFT JOIN relacion_articulos ra ON ra.id_lista_precios = lp.id_externo
           LEFT JOIN articulos_no_relacionados anr ON anr.id_lista_precios = lp.id_externo
-          ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+          ${whereExt.length ? 'WHERE ' + whereExt.join(' AND ') : ''}
           ORDER BY es_pendiente DESC,
                    DATE(lp.fecha) DESC,
                    lp.id_externo DESC,
                    nombre_lower ASC
-          LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+          LIMIT $${paramsExt.length + 1} OFFSET $${paramsExt.length + 2}
         `;
-        params.push(limit, offset);
 
-        const rows = await getDbRows(db, sql, params);
+        const rows = await getDbRows(db, sqlExt, [...paramsExt, limit, offset]);
         return res.json(normalizeRowsDates(rows, ['fecha']));
       }
 
-      // internos
-      where.push('ra.id IS NULL');
-      if (onlyPending) {
-        where.push('agnr.id_lista_interna IS NOT NULL');
-      }
+      // === INTERNOS (Gampack) ===
+      // Construimos where/params independientes para evitar referencias a agnr en el fallback
+      const paramsInt = [];
+      const whereInt = ['ra.id IS NULL'];
+      if (onlyPending) whereInt.push('agnr.id_lista_interna IS NOT NULL');
       if (hasSearch) {
-        where.push(`(
+        whereInt.push(`(
           LOWER(li.cod_interno) LIKE $1 OR
           LOWER(li.nom_interno) LIKE $2
         )`);
-        params.push(searchTerm, searchTerm);
+        paramsInt.push(searchTerm, searchTerm);
       }
 
-      const sql = `
+      const sqlInt = `
         SELECT DISTINCT
           li.id_interno AS id_interno,
           li.cod_interno AS cod_interno,
@@ -909,17 +904,56 @@ function createNoRelacionadosHandler(tipo) {
         FROM lista_interna li
         LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
         LEFT JOIN articulos_gampack_no_relacionados agnr ON agnr.id_lista_interna = li.id_interno
-        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ${whereInt.length ? 'WHERE ' + whereInt.join(' AND ') : ''}
         ORDER BY es_pendiente DESC,
                  DATE(li.fecha) DESC,
                  li.id_interno DESC,
                  nombre_lower ASC
-        LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+        LIMIT $${paramsInt.length + 1} OFFSET $${paramsInt.length + 2}
       `;
-      params.push(limit, offset);
 
-      const rows = await getDbRows(db, sql, params);
-      return res.json(normalizeRowsDates(rows, ['fecha']));
+      try {
+        const rows = await getDbRows(db, sqlInt, [...paramsInt, limit, offset]);
+        return res.json(normalizeRowsDates(rows, ['fecha']));
+      } catch (e) {
+        // Si la tabla articulos_gampack_no_relacionados no existe, hacemos fallback sin ese JOIN
+        if (e?.code !== '42P01') throw e;
+
+        const paramsFallback = [];
+        const whereFallback = ['ra.id IS NULL'];
+        if (hasSearch) {
+          whereFallback.push(`(
+            LOWER(li.cod_interno) LIKE $1 OR
+            LOWER(li.nom_interno) LIKE $2
+          )`);
+          paramsFallback.push(searchTerm, searchTerm);
+        }
+
+        const sqlFallback = `
+          SELECT DISTINCT
+            li.id_interno AS id_interno,
+            li.cod_interno AS cod_interno,
+            li.cod_interno AS codigo,
+            li.nom_interno AS nom_interno,
+            li.precio_final AS precio_final,
+            li.fecha AS fecha,
+            li.mes_actualizacion AS mes_actualizacion,
+            NULL AS motivo,
+            1 AS es_pendiente, -- asumimos pendiente sin la tabla auxiliar
+            LOWER(li.nom_interno) AS nombre_lower
+          FROM lista_interna li
+          LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
+          ${whereFallback.length ? 'WHERE ' + whereFallback.join(' AND ') : ''}
+          ORDER BY es_pendiente DESC,
+                   DATE(li.fecha) DESC,
+                   li.id_interno DESC,
+                   nombre_lower ASC
+          LIMIT $${paramsFallback.length + 1} OFFSET $${paramsFallback.length + 2}
+        `;
+
+        const rows = await getDbRows(db, sqlFallback, [...paramsFallback, limit, offset]);
+        return res.json(normalizeRowsDates(rows, ['fecha']));
+      }
     } catch (err) {
       console.error('Error al obtener productos no relacionados:', err);
       return res.status(500).json({ error: 'db_error' });
@@ -1036,8 +1070,6 @@ app.post('/api/relacionar-manual', async (req, res) => {
 });
 
 // ---------- Alta producto (manual) ----------
-
-// ---------- Alta producto (manual) ----------
 app.post('/api/products', async (req, res) => {
   const db = req.ctx.db;
   const {
@@ -1094,16 +1126,12 @@ app.post('/api/products', async (req, res) => {
          LIMIT 1`,
         [normalizedCode]
       );
-      if (match) {
-        return { row: match, criterion: 'codigo' };
-      }
+      if (match) return { row: match, criterion: 'codigo' };
     }
 
     if (normalizedExactName) {
       const exactByName = await findInternalByExactName(db, normalizedExactName);
-      if (exactByName) {
-        return { row: exactByName, criterion: 'nombre_exact' };
-      }
+      if (exactByName) return { row: exactByName, criterion: 'nombre_exact' };
     }
 
     if (normalizedNameKey && nameLikePattern) {
@@ -1115,65 +1143,61 @@ app.post('/api/products', async (req, res) => {
          LIMIT 50`,
         [nameLikePattern]
       );
-      const best = pickBestNameMatch(productName, candidates, (candidate) => candidate.nom_interno);
-      if (best) {
-        return { row: best.row, criterion: 'name' };
-      }
+      const best = pickBestNameMatch(productName, candidates, (c) => c.nom_interno);
+      if (best) return { row: best.row, criterion: 'name' };
     }
-
     return null;
   };
 
   const findExternalAutoMatch = async () => {
     const useCompanyFilter = hasCompany && companyType === 'Proveedor';
-    const paramsByCode = [normalizedCode].filter(Boolean);
-    if (normalizedCode && paramsByCode.length) {
-      const sqlParts = [
+
+    if (normalizedCode) {
+      const paramsByCode = [normalizedCode];
+      const parts = [
         `SELECT * FROM lista_precios
          WHERE cod_externo IS NOT NULL
            AND LOWER(REGEXP_REPLACE(cod_externo, '[^a-z0-9]', '', 'g')) = $1`
       ];
       if (useCompanyFilter) {
-        sqlParts.push('AND LOWER(TRIM(proveedor)) = $2');
+        parts.push('AND LOWER(TRIM(proveedor)) = $2');
         paramsByCode.push(normalizedCompany);
       }
-      sqlParts.push('ORDER BY id_externo ASC LIMIT 1');
-      const match = await getDbRow(db, sqlParts.join('\n'), paramsByCode);
-      if (match) {
-        return { row: match, criterion: 'codigo' };
-      }
+      parts.push('ORDER BY id_externo ASC LIMIT 1');
+      const m = await getDbRow(db, parts.join('\n'), paramsByCode);
+      if (m) return { row: m, criterion: 'codigo' };
     }
 
     if (normalizedExactName) {
-      const exactByName = await findExternalByExactName(db, normalizedExactName, useCompanyFilter ? normalizedCompany : null);
-      if (exactByName) {
-        return { row: exactByName, criterion: 'nombre_exact' };
-      }
+      const exactByName = await findExternalByExactName(
+        db,
+        normalizedExactName,
+        useCompanyFilter ? normalizedCompany : null
+      );
+      if (exactByName) return { row: exactByName, criterion: 'nombre_exact' };
     }
 
     if (normalizedNameKey && nameLikePattern) {
       const params = [nameLikePattern];
-      const clauses = [
+      const parts = [
         `SELECT * FROM lista_precios
          WHERE nom_externo IS NOT NULL
            AND LOWER(nom_externo) LIKE $1`
       ];
       if (useCompanyFilter) {
-        clauses.push('AND LOWER(TRIM(proveedor)) = $2');
+        parts.push('AND LOWER(TRIM(proveedor)) = $2');
         params.push(normalizedCompany);
       }
-      clauses.push('LIMIT 50');
-      const candidates = await getDbRows(db, clauses.join('\n'), params);
-      const best = pickBestNameMatch(productName, candidates, (candidate) => candidate.nom_externo);
-      if (best) {
-        return { row: best.row, criterion: 'name' };
-      }
+      parts.push('LIMIT 50');
+      const candidates = await getDbRows(db, parts.join('\n'), params);
+      const best = pickBestNameMatch(productName, candidates, (c) => c.nom_externo);
+      if (best) return { row: best.row, criterion: 'name' };
     }
-
     return null;
   };
 
   try {
+    // -------- PROVEEDOR --------
     if (companyType === 'Proveedor') {
       const currentMonth = getCurrentYearMonth();
 
@@ -1217,21 +1241,13 @@ app.post('/api/products', async (req, res) => {
                  proveedor = $6,
                  mes_actualizacion = TO_CHAR(CURRENT_DATE, 'YYYY-MM')
              WHERE id_externo = $7`,
-            [
-              productCode || null,
-              productName,
-              finalPrice,
-              companyType,
-              normalizedDate,
-              company,
-              existing.id_externo,
-            ]
+            [productCode || null, productName, finalPrice, companyType, normalizedDate, company, existing.id_externo]
           );
         }
-
         return res.status(200).json({ success: true, updated: true, message: 'Producto actualizado' });
       }
 
+      // insertar nuevo externo
       let inserted;
       try {
         inserted = await getDbRow(
@@ -1249,7 +1265,7 @@ app.post('/api/products', async (req, res) => {
              WHERE cod_externo IS NOT NULL
                AND LOWER(TRIM(cod_externo)) = LOWER($1)
                AND LOWER(TRIM(proveedor)) = LOWER($2)
-            LIMIT 1`,
+             LIMIT 1`,
             [productCode, company]
           );
           if (conflict) {
@@ -1273,9 +1289,7 @@ app.post('/api/products', async (req, res) => {
       const newId = inserted?.id_externo;
 
       let internalMatch = null;
-      if (newId) {
-        internalMatch = await findInternalAutoMatch();
-      }
+      if (newId) internalMatch = await findInternalAutoMatch();
 
       let relationResult = null;
       if (internalMatch?.row && linkAsEquivalent !== false) {
@@ -1286,25 +1300,23 @@ app.post('/api/products', async (req, res) => {
       }
 
       const motivo = (() => {
-        if (!internalMatch?.row) {
-          return 'No se encontró coincidencia por código ni nombre';
-        }
-        if (relationResult?.reason === 'internal_already_related') {
-          return 'Coincidencia automática omitida: el producto interno ya está relacionado';
-        }
-        if (relationResult?.reason === 'external_already_related') {
-          return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
-        }
+        if (!internalMatch?.row) return 'No se encontró coincidencia por código ni nombre';
+        if (relationResult?.reason === 'internal_already_related') return 'Coincidencia automática omitida: el producto interno ya está relacionado';
+        if (relationResult?.reason === 'external_already_related') return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
         return 'Usuario rechazó sugerencia de relación';
       })();
 
-      await runDb(
-        db,
-        `INSERT INTO articulos_no_relacionados (id_lista_precios, motivo)
-         VALUES ($1, $2)
-         ON CONFLICT (id_lista_precios) DO NOTHING`,
-        [newId, motivo]
-      );
+      try {
+        await runDb(
+          db,
+          `INSERT INTO articulos_no_relacionados (id_lista_precios, motivo)
+           VALUES ($1, $2)
+           ON CONFLICT (id_lista_precios) DO NOTHING`,
+          [newId, motivo]
+        );
+      } catch (_) {
+        // si falta la tabla, ignoramos
+      }
 
       return res.status(201).json({
         success: true,
@@ -1313,88 +1325,74 @@ app.post('/api/products', async (req, res) => {
       });
     }
 
+    // -------- GAMPACK --------
     if (companyType === 'Gampack') {
-  const upsertResult = await upsertInternalProduct(db, {
-    productCode,
-    productName,
-    finalPrice,
-    normalizedDate,
-  });
+      const upsertResult = await upsertInternalProduct(db, {
+        productCode,
+        productName,
+        finalPrice,
+        normalizedDate,
+      });
 
-  if (!upsertResult?.id) {
-    return res.status(500).json({ error: 'No se pudo guardar el producto interno' });
-  }
-
-  const newId = upsertResult.id;
-  const wasInserted = Boolean(upsertResult.inserted);
-  const statusCode = wasInserted ? 201 : 200;
-
-  // SIEMPRE intentar auto-relacionar, incluso cuando fue una actualización
-  let externalMatch = null;
-  if (newId) {
-    externalMatch = await findExternalAutoMatch();
-  }
-
-  let relationResult = null;
-  if (externalMatch?.row && linkAsEquivalent !== false) {
-    relationResult = await createRelationAndClean(
-      db,
-      externalMatch.row.id_externo,
-      newId,
-      externalMatch.criterion
-    );
-  }
-
-  const related = Boolean(relationResult?.created);
-
-  // Si NO quedó relacionado, aseguramos que figure como "pendiente" en articulos_gampack_no_relacionados
-  if (!related) {
-    const motivo = (() => {
-      if (!externalMatch?.row) {
-        return 'No se encontró coincidencia por código ni nombre';
+      if (!upsertResult?.id) {
+        return res.status(500).json({ error: 'No se pudo guardar el producto interno' });
       }
-      if (relationResult?.reason === 'internal_already_related') {
-        return 'Coincidencia automática omitida: el producto interno ya está relacionado';
+
+      const newId = upsertResult.id;
+      const wasInserted = Boolean(upsertResult.inserted);
+      const statusCode = wasInserted ? 201 : 200;
+
+      // intentar auto-relacionar SIEMPRE
+      let externalMatch = null;
+      if (newId) externalMatch = await findExternalAutoMatch();
+
+      let relationResult = null;
+      if (externalMatch?.row && linkAsEquivalent !== false) {
+        relationResult = await createRelationAndClean(db, externalMatch.row.id_externo, newId, externalMatch.criterion);
       }
-      if (relationResult?.reason === 'external_already_related') {
-        return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
+
+      const related = Boolean(relationResult?.created);
+
+      if (!related) {
+        const motivo = (() => {
+          if (!externalMatch?.row) return 'No se encontró coincidencia por código ni nombre';
+          if (relationResult?.reason === 'internal_already_related') return 'Coincidencia automática omitida: el producto interno ya está relacionado';
+          if (relationResult?.reason === 'external_already_related') return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
+          return 'Usuario rechazó sugerencia de relación';
+        })();
+
+        try {
+          await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [newId]);
+          await runDb(
+            db,
+            `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
+             VALUES ($1, $2)
+             ON CONFLICT (id_lista_interna) DO NOTHING`,
+            [newId, motivo]
+          );
+        } catch (e) {
+          // si falta la tabla auxiliar, ignoramos (42P01)
+          if (e?.code !== '42P01') throw e;
+        }
       }
-      return 'Usuario rechazó sugerencia de relación';
-    })();
 
-    // Limpio cualquier marca previa y dejo marcada como pendiente
-    await runDb(
-      db,
-      `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`,
-      [newId]
-    );
-    await runDb(
-      db,
-      `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
-       VALUES ($1, $2)
-       ON CONFLICT (id_lista_interna) DO NOTHING`,
-      [newId, motivo]
-    );
-  }
+      if (related) {
+        return res.status(statusCode).json({
+          success: true,
+          message: `Producto ${wasInserted ? 'creado' : 'actualizado'} y relacionado`,
+          updated: !wasInserted,
+          related: true,
+        });
+      }
 
-  // Responder coherente según insert/update y si se relacionó o no
-  if (related) {
-    return res.status(statusCode).json({
-      success: true,
-      message: `Producto ${wasInserted ? 'creado' : 'actualizado'} y relacionado`,
-      updated: !wasInserted,
-      related: true,
-    });
-  }
-
-  return res.status(statusCode).json({
-    success: true,
-    message: wasInserted ? 'Producto creado - no relacionados' : 'Producto actualizado - no relacionados',
-    updated: !wasInserted,
-    related: false,
-    skippedRelationReason: relationResult?.reason ?? (externalMatch?.row ? 'user_declined' : 'no_match'),
-  });
-}
+      return res.status(statusCode).json({
+        success: true,
+        message: wasInserted ? 'Producto creado - no relacionados' : 'Producto actualizado - no relacionados',
+        updated: !wasInserted,
+        related: false,
+        skippedRelationReason: relationResult?.reason ?? (externalMatch?.row ? 'user_declined' : 'no_match'),
+      });
+    }
 
     return res.status(400).json({ error: 'Tipo de empresa no válido' });
   } catch (error) {
@@ -1800,9 +1798,7 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
           normalizedDate: today,
         });
 
-        if (!result?.id) {
-          return null;
-        }
+        if (!result?.id) return null;
 
         if (result.inserted) {
           inserted++;
@@ -1870,22 +1866,21 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
               }
 
               if (!relationResult?.created) {
-                await run(
-                  `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`,
-                  [idInterno]
-                );
-                await run(
-                  `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
-                   VALUES ($1, $2)
-                   ON CONFLICT (id_lista_interna) DO NOTHING`,
-                  [idInterno, 'Importado vía carga masiva']
-                );
+                try {
+                  await run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [idInterno]);
+                  await run(
+                    `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
+                     VALUES ($1, $2)
+                     ON CONFLICT (id_lista_interna) DO NOTHING`,
+                    [idInterno, 'Importado vía carga masiva']
+                  );
+                } catch (e) {
+                  if (e?.code !== '42P01') throw e; // ignorar si no existe la tabla
+                }
               }
             }
           } else {
-            const idExterno = await upsertListaPrecios({
-              nombre: nombreN, codigo, price, proveedorCanon, proveedorLower, today
-            });
+            const idExterno = await upsertListaPrecios({ nombre: nombreN, codigo, price, proveedorCanon, proveedorLower, today });
             if (idExterno) {
               let relationResult = null;
               if (nombreExactKey) {
@@ -1897,12 +1892,16 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
               }
 
               if (!relationResult?.created) {
-                await run(
-                  `INSERT INTO articulos_no_relacionados (id_lista_precios, motivo)
-                   VALUES ($1, $2)
-                   ON CONFLICT (id_lista_precios) DO NOTHING`,
-                  [idExterno, 'Importado vía carga masiva']
-                );
+                try {
+                  await run(
+                    `INSERT INTO articulos_no_relacionados (id_lista_precios, motivo)
+                     VALUES ($1, $2)
+                     ON CONFLICT (id_lista_precios) DO NOTHING`,
+                    [idExterno, 'Importado vía carga masiva']
+                  );
+                } catch (_) {
+                  // si falta la tabla, ignoramos
+                }
               }
             }
           }
