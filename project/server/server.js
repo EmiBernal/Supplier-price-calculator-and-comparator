@@ -1,3 +1,4 @@
+require('dotenv').config();
 const app = require('./index');
 const { ensureMesActualizacionColumn } = require('./utils/ensureMesActualizacion');
 

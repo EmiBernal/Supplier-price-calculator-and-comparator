@@ -407,7 +407,7 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                     disabled={deletingProvider === provider.name}
                     className="group relative overflow-hidden text-left rounded-3xl border border-gray-200/60 dark:border-white/10 bg-white/90 dark:bg-white/5 p-6 shadow-sm transition hover:shadow-xl hover:border-blue-200 dark:hover:border-blue-400/40 disabled:opacity-60 disabled:cursor-wait"
                   >
-                    <div className="absolute right-4 top-4 flex items-center gap-2">
+                    <div className="absolute right-4 top-2 flex items-center gap-2">
                       <button
                         type="button"
                         onClick={(event) => {
