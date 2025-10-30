@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import ThemeToggleButton from '../../components/ThemeToggleButton';
 import HomeScreen from './HomeScreen';
 import ManualEntryScreen from './ManualEntryScreen';
 import CompareScreen from './CompareScreen';
@@ -31,6 +32,7 @@ export default function CalculadoraVentaScreen({ onLogout }: Props) {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <ThemeToggleButton className="fixed right-4 top-4 z-40" />
       {/* SIN padding externo para mantener el mismo layout que Compra */}
       <main>
         <Current

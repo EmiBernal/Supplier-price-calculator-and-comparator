@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Navigation } from '../../components/Navigation';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
-import { Building2, CircleDot, Loader2, Search, X } from 'lucide-react';
+import { AlertCircle, Building2, CheckCircle2, CircleDot, Loader2, LockKeyhole, Search, Trash2, X } from 'lucide-react';
 
 type ActiveSuppliersScreenProps = {
   onNavigate: (screen: Screen) => void;
@@ -23,6 +23,11 @@ type ProviderProduct = {
   price: number;
   date?: string | null;
   isActive: boolean;
+};
+
+type ActionFeedback = {
+  type: 'success' | 'error';
+  message: string;
 };
 
 const currencyFormatter = new Intl.NumberFormat('es-AR', {
@@ -85,6 +90,12 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [productsError, setProductsError] = useState<string | null>(null);
   const [productSearch, setProductSearch] = useState('');
+  const [deletingProvider, setDeletingProvider] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkPassword, setBulkPassword] = useState('');
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchProviders = async () => {
@@ -120,6 +131,14 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
 
     fetchProviders();
   }, []);
+
+  useEffect(() => {
+    if (!actionFeedback) return;
+    const timeout = window.setTimeout(() => {
+      setActionFeedback(null);
+    }, 5000);
+    return () => window.clearTimeout(timeout);
+  }, [actionFeedback]);
 
   const filteredProviders = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -184,10 +203,134 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
     });
   }, [products, productSearch]);
 
+  const isDeletingSelectedProvider = selectedProvider
+    ? deletingProvider === selectedProvider.name
+    : false;
+
+  const handleDeleteProvider = async (provider: ProviderSummary) => {
+    if (deletingProvider === provider.name) return;
+    const confirmed = window.confirm(
+      `¿Eliminar la tabla del proveedor ${provider.name}? Esta acción no se puede deshacer.`
+    );
+    if (!confirmed) return;
+    setDeletingProvider(provider.name);
+    setActionFeedback(null);
+    try {
+      const response = await apiFetch(`/api/providers/active/${encodeURIComponent(provider.name)}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        throw new Error(await parseErrorResponse(response));
+      }
+      setProviders((current) => current.filter((item) => item.name !== provider.name));
+      if (selectedProvider?.name === provider.name) {
+        handleCloseModal();
+      }
+      setActionFeedback({
+        type: 'success',
+        message: `Se eliminó la tabla del proveedor ${provider.name}.`,
+      });
+    } catch (error) {
+      console.error('Error deleting provider table:', error);
+      setActionFeedback({
+        type: 'error',
+        message:
+          error instanceof Error && error.message
+            ? error.message
+            : 'No se pudo eliminar la tabla de este proveedor.',
+      });
+    } finally {
+      setDeletingProvider(null);
+    }
+  };
+
+  const openBulkDialog = () => {
+    setBulkError(null);
+    setBulkPassword('');
+    setBulkDialogOpen(true);
+  };
+
+  const closeBulkDialog = () => {
+    if (bulkDeleting) return;
+    setBulkDialogOpen(false);
+    setBulkPassword('');
+    setBulkError(null);
+  };
+
+  const handleBulkDelete: React.FormEventHandler<HTMLFormElement> = async (event) => {
+    event.preventDefault();
+    if (bulkPassword !== 'mariano123') {
+      setBulkError('Contraseña incorrecta. Intentalo nuevamente.');
+      return;
+    }
+    const confirmed = window.confirm(
+      'Esta acción eliminará todas las tablas de proveedores activos. ¿Confirmás que querés continuar?'
+    );
+    if (!confirmed) {
+      return;
+    }
+    setBulkDeleting(true);
+    setBulkError(null);
+    setActionFeedback(null);
+    try {
+      const response = await apiFetch('/api/providers/active/delete-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: bulkPassword }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseErrorResponse(response));
+      }
+      setProviders([]);
+      handleCloseModal();
+      setActionFeedback({
+        type: 'success',
+        message: 'Se eliminaron todas las tablas de proveedores activos.',
+      });
+      setBulkDialogOpen(false);
+      setBulkPassword('');
+    } catch (error) {
+      console.error('Error deleting all provider tables:', error);
+      setBulkError(
+        error instanceof Error && error.message
+          ? error.message
+          : 'No se pudieron eliminar las tablas. Intentalo nuevamente.'
+      );
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0b0f1a] p-6">
       <div className="max-w-6xl mx-auto space-y-6">
         <Navigation onBack={() => onNavigate('home')} title="Proveedores activos" />
+
+        {actionFeedback && (
+          <div
+            className={`flex items-start gap-3 rounded-3xl border p-4 text-sm shadow-sm transition ${
+              actionFeedback.type === 'success'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-100'
+                : 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-100'
+            }`}
+          >
+            <div className="mt-0.5">
+              {actionFeedback.type === 'success' ? (
+                <CheckCircle2 className="h-5 w-5" />
+              ) : (
+                <AlertCircle className="h-5 w-5" />
+              )}
+            </div>
+            <div className="flex-1">{actionFeedback.message}</div>
+            <button
+              type="button"
+              onClick={() => setActionFeedback(null)}
+              className="rounded-full px-2 py-1 text-xs font-medium transition hover:bg-black/5 dark:hover:bg-white/10"
+            >
+              Cerrar
+            </button>
+          </div>
+        )}
 
         <section className="rounded-3xl border border-gray-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-6 shadow-sm backdrop-blur supports-[backdrop-filter]:backdrop-blur">
           <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
@@ -197,7 +340,7 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                 Seleccioná un proveedor para ver el detalle completo de su lista de precios.
               </p>
             </div>
-            <div className="flex flex-wrap gap-3 text-sm">
+            <div className="flex flex-wrap items-center gap-3 text-sm">
               <div className="rounded-2xl bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-200 px-4 py-2 font-medium">
                 {providers.length} proveedores
               </div>
@@ -207,6 +350,13 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
               <div className="rounded-2xl bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-white/70 px-4 py-2 font-medium">
                 {totalProducts.toLocaleString('es-AR')} productos
               </div>
+              <button
+                type="button"
+                onClick={openBulkDialog}
+                className="inline-flex items-center gap-2 rounded-2xl border border-red-200/70 bg-red-100/70 px-4 py-2 font-medium text-red-700 transition hover:bg-red-200/70 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-100"
+              >
+                <Trash2 className="h-4 w-4" /> Eliminar todas
+              </button>
             </div>
           </div>
 
@@ -252,9 +402,31 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                 return (
                   <button
                     key={provider.name}
+                    type="button"
                     onClick={() => handleOpenProvider(provider)}
-                    className="group relative overflow-hidden text-left rounded-3xl border border-gray-200/60 dark:border-white/10 bg-white/90 dark:bg-white/5 p-6 shadow-sm transition hover:shadow-xl hover:border-blue-200 dark:hover:border-blue-400/40"
+                    disabled={deletingProvider === provider.name}
+                    className="group relative overflow-hidden text-left rounded-3xl border border-gray-200/60 dark:border-white/10 bg-white/90 dark:bg-white/5 p-6 shadow-sm transition hover:shadow-xl hover:border-blue-200 dark:hover:border-blue-400/40 disabled:opacity-60 disabled:cursor-wait"
                   >
+                    <div className="absolute right-4 top-4 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleDeleteProvider(provider);
+                        }}
+                        disabled={deletingProvider === provider.name}
+                        className="rounded-full border border-red-200/70 bg-red-100/80 p-2 text-red-600 transition hover:bg-red-200/80 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20"
+                        aria-label={`Eliminar tabla del proveedor ${provider.name}`}
+                        title={`Eliminar tabla del proveedor ${provider.name}`}
+                      >
+                        {deletingProvider === provider.name ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
                     <div className="flex items-start gap-4">
                       <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600/10 via-blue-500/20 to-emerald-500/10 text-blue-700 dark:text-blue-200 dark:from-blue-500/20 dark:via-blue-400/20 dark:to-emerald-400/20">
                         <span className="text-lg font-semibold tracking-wide">{initials}</span>
@@ -309,13 +481,28 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                   </p>
                 </div>
               </div>
-              <button
-                onClick={handleCloseModal}
-                className="rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400/40 dark:text-white/60 dark:hover:bg-white/10"
-                aria-label="Cerrar detalle de proveedor"
-              >
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDeleteProvider(selectedProvider)}
+                  disabled={isDeletingSelectedProvider}
+                  className="inline-flex items-center gap-2 rounded-full border border-red-200/70 bg-red-100/80 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-200/70 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20"
+                >
+                  {isDeletingSelectedProvider ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  <span>Eliminar tabla</span>
+                </button>
+                <button
+                  onClick={handleCloseModal}
+                  className="rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400/40 dark:text-white/60 dark:hover:bg-white/10"
+                  aria-label="Cerrar detalle de proveedor"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             <div className="px-6 py-4 border-b border-gray-200/60 dark:border-white/10 bg-gray-50/80 dark:bg-white/5">
@@ -403,6 +590,69 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                 Cerrar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {bulkDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-gray-200/60 bg-white text-gray-900 shadow-2xl dark:border-white/10 dark:bg-[#101729] dark:text-white">
+            <div className="flex items-center gap-3 border-b border-gray-200/60 bg-white/80 px-6 py-4 dark:border-white/10 dark:bg-[#101729]/80">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-200">
+                <Trash2 size={22} />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold">Eliminar todas las tablas</h3>
+                <p className="text-xs text-gray-500 dark:text-white/60">Esta acción no se puede deshacer.</p>
+              </div>
+            </div>
+            <form onSubmit={handleBulkDelete} className="space-y-5 px-6 py-5">
+              <p className="text-sm text-gray-600 dark:text-white/70">
+                Confirmá la eliminación ingresando la contraseña administrativa. Se borrarán todas las tablas registradas para los proveedores activos.
+              </p>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-white/80">
+                  Contraseña de confirmación
+                </label>
+                <div className="relative flex items-center rounded-2xl border border-gray-200/70 bg-white/90 px-3 py-2.5 text-sm dark:border-white/10 dark:bg-[#0f1624]">
+                  <LockKeyhole className="mr-2 h-4 w-4 text-gray-400 dark:text-white/60" />
+                  <input
+                    type="password"
+                    value={bulkPassword}
+                    onChange={(event) => setBulkPassword(event.target.value)}
+                    placeholder="Ingresá la contraseña"
+                    className="w-full bg-transparent text-gray-900 placeholder:text-gray-400 focus:outline-none dark:text-white"
+                    autoComplete="off"
+                    required
+                  />
+                </div>
+                <p className="mt-1 text-xs text-gray-500 dark:text-white/50">Contraseña requerida: <code className="rounded bg-gray-100 px-1 py-0.5 text-gray-700 dark:bg-white/10 dark:text-white">mariano123</code></p>
+              </div>
+              {bulkError && (
+                <div className="flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/15 dark:text-red-100">
+                  <AlertCircle className="mt-0.5 h-4 w-4" />
+                  <span>{bulkError}</span>
+                </div>
+              )}
+              <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeBulkDialog}
+                  className="inline-flex items-center justify-center rounded-full border border-gray-200/70 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 dark:border-white/10 dark:text-white dark:hover:bg-white/10"
+                  disabled={bulkDeleting}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={bulkDeleting}
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-red-500"
+                >
+                  {bulkDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  <span>{bulkDeleting ? 'Eliminando…' : 'Eliminar todo'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
