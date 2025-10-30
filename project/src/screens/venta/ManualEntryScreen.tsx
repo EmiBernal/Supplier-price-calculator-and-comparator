@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Navigation } from '../../components/Navigation';
 import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
@@ -6,7 +6,28 @@ import ImportarListaPrecios from '../../components/ImportarListaPrecios';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
 
-// ... (todas las funciones auxiliares previas se mantienen igual: normalizeProduct, ImportButton, etc.)
+type ImportButtonProps = {
+  onClick?: () => void;
+  className?: string;
+};
+
+const ImportButton: React.FC<ImportButtonProps> = ({ onClick, className }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`inline-flex items-center gap-2 rounded-xl border border-blue-500/70 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-blue-400/50 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20 ${
+      className || ''
+    }`}
+  >
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+      <path d="M12 12v6" />
+      <path d="M9 15h6" />
+    </svg>
+    Importar desde Excel
+  </button>
+);
 
 export const ManualEntryScreen: React.FC<{ onNavigate: (screen: Screen) => void }> = ({ onNavigate }) => {
   const [formData, setFormData] = useState({
@@ -24,6 +45,14 @@ export const ManualEntryScreen: React.FC<{ onNavigate: (screen: Screen) => void 
   const [wantsToUpdate, setWantsToUpdate] = useState<boolean | null>(null);
   const [crossSuggestedProduct, setCrossSuggestedProduct] = useState<any | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+
+  const handleImportStart = useCallback(() => setIsImporting(true), []);
+  const handleImportFinish = useCallback(() => setIsImporting(false), []);
+  const handleCloseImport = useCallback(() => {
+    setShowImport(false);
+    setIsImporting(false);
+  }, []);
 
   const inferCompanyType = (name: string): 'Gampack' | 'Proveedor' =>
     name.trim().toLowerCase() === 'gampack' ? 'Gampack' : 'Proveedor';
@@ -64,8 +93,49 @@ export const ManualEntryScreen: React.FC<{ onNavigate: (screen: Screen) => void 
         }),
       });
 
-      if (!response.ok) throw new Error(await response.text());
-      setSuccessMessage('Producto cargado de forma exitosa!');
+      const contentType = response.headers.get('content-type') || '';
+      const rawBody = await response.text();
+      let data: any = null;
+      if (rawBody && contentType.includes('application/json')) {
+        try {
+          data = JSON.parse(rawBody);
+        } catch {
+          data = null;
+        }
+      }
+
+      if (!response.ok) {
+        const errorMessage = data?.message || rawBody || 'Error al subir el producto.';
+        throw new Error(errorMessage);
+      }
+
+      const statusValue = (data?.status || data?.result || data?.action || '').toString().toLowerCase();
+      const alreadyExists = Boolean(
+        data?.alreadyExists ||
+          data?.already_exists ||
+          data?.exists ||
+          data?.duplicate ||
+          statusValue === 'exists' ||
+          statusValue === 'duplicate'
+      );
+      const priceChanged = Boolean(
+        data?.priceChanged ||
+          data?.price_changed ||
+          data?.updatedPrice ||
+          data?.updated_price ||
+          data?.wasUpdated ||
+          data?.updated ||
+          statusValue === 'updated'
+      );
+
+      if (alreadyExists && !priceChanged) {
+        setSuccessMessage('Producto ya existente');
+      } else if (priceChanged) {
+        setSuccessMessage('El producto fue actualizado');
+      } else {
+        setSuccessMessage(data?.message || 'Producto cargado de forma exitosa!');
+      }
+
       setFormData({
         company: '',
         productCode: '',
@@ -74,9 +144,10 @@ export const ManualEntryScreen: React.FC<{ onNavigate: (screen: Screen) => void 
         date: new Date().toISOString().split('T')[0],
       });
       setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error uploading product:', error);
-      setErrors({ general: 'Error al subir el producto. Intenta nuevamente.' });
+      const message = error instanceof Error ? error.message : 'Error al subir el producto. Intenta nuevamente.';
+      setErrors({ general: message || 'Error al subir el producto. Intenta nuevamente.' });
     } finally {
       setIsSubmitting(false);
     }
@@ -197,7 +268,7 @@ export const ManualEntryScreen: React.FC<{ onNavigate: (screen: Screen) => void 
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Importar lista de precios</h3>
                 <button
-                  onClick={() => setShowImport(false)}
+                  onClick={handleCloseImport}
                   className="inline-flex items-center justify-center rounded-xl p-2 hover:bg-gray-100 dark:hover:bg-white/10"
                   aria-label="Cerrar"
                   title="Cerrar"
@@ -210,8 +281,28 @@ export const ManualEntryScreen: React.FC<{ onNavigate: (screen: Screen) => void 
               </div>
             </div>
             <div className="p-4">
-              <div className="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-transparent">
-                <ImportarListaPrecios onClose={() => setShowImport(false)} />
+              <div className="relative rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-transparent">
+                <ImportarListaPrecios
+                  onClose={handleCloseImport}
+                  onImportStart={handleImportStart}
+                  onImportFinish={handleImportFinish}
+                />
+                {isImporting && (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center rounded-2xl bg-black/50 text-white">
+                    <svg
+                      className="mb-3 h-8 w-8 animate-spin"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                    <span className="text-lg font-semibold">Cargando...</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
