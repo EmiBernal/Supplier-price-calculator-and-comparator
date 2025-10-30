@@ -39,6 +39,8 @@ app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser(process.env.COOKIE_SECRET || 'change-me')); // firma cookies
 app.use(tenantMiddleware);
 
+const PROVIDERS_DELETE_PASSWORD = process.env.PROVIDERS_DELETE_PASSWORD || 'mariano123';
+
 // ===== Upload (para XLSX) =====
 const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024 }
@@ -814,6 +816,60 @@ app.get('/api/providers/products', async (req, res) => {
     });
   } catch (err) {
     console.error('Error /api/providers/products:', err);
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
+app.delete('/api/providers/active/:name', async (req, res) => {
+  try {
+    const db = req.ctx.db;
+    if (!db) {
+      return res.status(500).json({ error: 'db_not_available' });
+    }
+
+    const rawName = typeof req.params.name === 'string' ? req.params.name : '';
+    const normalizedName = normalizeNameForExactMatch(rawName);
+    if (!normalizedName) {
+      return res.status(400).json({ error: 'Proveedor requerido' });
+    }
+
+    const result = await runDb(
+      db,
+      `DELETE FROM lista_precios
+       WHERE proveedor IS NOT NULL
+         AND TRIM(proveedor) <> ''
+         AND LOWER(REGEXP_REPLACE(TRIM(proveedor), '\\s+', ' ', 'g')) = $1`,
+      [normalizedName]
+    );
+
+    return res.json({ ok: true, deleted: result.rowCount ?? 0 });
+  } catch (err) {
+    console.error('Error DELETE /api/providers/active/:name:', err);
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
+app.post('/api/providers/active/delete-all', async (req, res) => {
+  try {
+    const db = req.ctx.db;
+    if (!db) {
+      return res.status(500).json({ error: 'db_not_available' });
+    }
+
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (password !== PROVIDERS_DELETE_PASSWORD) {
+      return res.status(403).json({ error: 'Contraseña incorrecta' });
+    }
+
+    const result = await runDb(
+      db,
+      `DELETE FROM lista_precios
+       WHERE proveedor IS NOT NULL AND TRIM(proveedor) <> ''`
+    );
+
+    return res.json({ ok: true, deleted: result.rowCount ?? 0 });
+  } catch (err) {
+    console.error('Error POST /api/providers/active/delete-all:', err);
     res.status(500).json({ error: 'db_error' });
   }
 });

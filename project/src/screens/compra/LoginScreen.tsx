@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Eye, EyeOff, Lock, Mail, Loader2, Moon, Sun, ShieldCheck } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Eye, EyeOff, Lock, Mail, Loader2, ShieldCheck } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
+import ThemeToggleButton from '../../components/ThemeToggleButton';
 
 interface Props {
   onLoginSuccess: (role: 'compra' | 'venta') => void;
@@ -19,26 +20,6 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
       return false;
     }
   });
-
-  // ===== Theme (consistente con el resto de la app) =====
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    try {
-      const stored = localStorage.getItem('theme');
-      if (stored === 'dark' || stored === 'light') return stored;
-    } catch {}
-    // si el usuario no tiene preferencia guardada, respetamos media query
-    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return 'dark';
-    }
-    return 'light';
-  });
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'dark') root.classList.add('dark');
-    else root.classList.remove('dark');
-    try { localStorage.setItem('theme', theme); } catch {}
-  }, [theme]);
 
   // Autorrellenar username si el usuario eligió recordar
   useEffect(() => {
@@ -87,15 +68,7 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
       </div>
 
       {/* Toggle de tema */}
-      <button
-        type="button"
-        aria-label="Cambiar tema"
-        onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
-        className="group fixed right-4 top-4 inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white/90 px-3 py-2 text-sm font-medium shadow-sm backdrop-blur transition-all hover:shadow-md dark:border-gray-800 dark:bg-gray-900/80"
-      >
-        {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        <span className="hidden sm:inline">{theme === 'dark' ? 'Light' : 'Dark'} mode</span>
-      </button>
+      <ThemeToggleButton className="fixed right-4 top-4" labelVisible />
 
       {/* Contenedor principal */}
       <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-4">

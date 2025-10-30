@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import ThemeToggleButton from '../../components/ThemeToggleButton';
 import HomeScreen from './HomeScreen'; // reexport de la Home con el toggle dark/light
 import ManualEntryScreen from './ManualEntryScreen';
 import CompareScreen from './CompareScreen';
@@ -29,6 +30,7 @@ export default function CalculadoraCompraScreen({ onLogout }: Props) {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <ThemeToggleButton className="fixed right-4 top-4 z-40" />
       {/* SIN padding externo para que coincida con Venta */}
       <main>
         <Current

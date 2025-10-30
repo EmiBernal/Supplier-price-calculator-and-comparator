@@ -4,6 +4,7 @@ import CalculadoraVentaScreen from './screens/venta/CalculadoraVentaScreen';
 import LoginScreen from './screens/venta/LoginScreen';
 import RequireRole from './routes/RequireRole';
 import { AuthProvider, useAuth } from './context/auth';
+import { ThemeProvider } from './context/theme';
 
 type Role = 'compra' | 'venta';
 
@@ -57,10 +58,12 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
