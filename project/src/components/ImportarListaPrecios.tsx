@@ -62,7 +62,13 @@ function detectMappingRaw(headersRaw: any[]): { nom?: string; cod?: string; prec
   };
 }
 
-export default function ImportarListaPrecios({ onClose }: { onClose?: () => void }) {
+type ImportarListaPreciosProps = {
+  onClose?: () => void;
+  onImportStart?: () => void;
+  onImportFinish?: () => void;
+};
+
+export default function ImportarListaPrecios({ onClose, onImportStart, onImportFinish }: ImportarListaPreciosProps) {
   const [file, setFile] = useState<File | null>(null);
   const [sheetRows, setSheetRows] = useState<any[][]>([]);
   const [headerRowNumber, setHeaderRowNumber] = useState<number>(1);
@@ -147,6 +153,7 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
     fd.append('mapping', JSON.stringify(mapping));
 
     setSubmitting(true);
+    onImportStart?.();
     try {
       const res = await apiFetch('/api/imports/lista-precios', { method: 'POST', body: fd });
 
@@ -168,12 +175,14 @@ export default function ImportarListaPrecios({ onClose }: { onClose?: () => void
       setErrorMsg('Error de red al importar.');
     } finally {
       setSubmitting(false);
+      onImportFinish?.();
     }
   };
 
   const closeAll = () => {
     setResult(null);
     onClose && onClose();
+    onImportFinish?.();
   };
 
   return (
