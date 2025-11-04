@@ -33,7 +33,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_lp_cod_prov_not_null
 CREATE INDEX IF NOT EXISTS ix_lp_nom_prov
   ON lista_precios (LOWER(nom_externo), proveedor);
 
-CREATE TABLE IF NOT EXISTS lista_interna (
+CREATE TABLE IF NOT EXISTS productos_gampack (
   id_interno BIGSERIAL PRIMARY KEY,
   nom_interno TEXT NOT NULL,
   cod_interno TEXT,
@@ -45,38 +45,38 @@ CREATE TABLE IF NOT EXISTS lista_interna (
 
 ALTER TABLE lista_precios
   ADD COLUMN IF NOT EXISTS mes_actualizacion TEXT;
-ALTER TABLE lista_interna
+ALTER TABLE productos_gampack
   ADD COLUMN IF NOT EXISTS mes_actualizacion TEXT;
 
 UPDATE lista_precios
    SET mes_actualizacion = TO_CHAR(fecha, 'YYYY-MM')
  WHERE mes_actualizacion IS NULL;
-UPDATE lista_interna
+UPDATE productos_gampack
    SET mes_actualizacion = TO_CHAR(fecha, 'YYYY-MM')
  WHERE mes_actualizacion IS NULL;
 
 ALTER TABLE lista_precios
   ALTER COLUMN mes_actualizacion SET NOT NULL,
   ALTER COLUMN mes_actualizacion SET DEFAULT TO_CHAR(CURRENT_DATE, 'YYYY-MM');
-ALTER TABLE lista_interna
+ALTER TABLE productos_gampack
   ALTER COLUMN mes_actualizacion SET NOT NULL,
   ALTER COLUMN mes_actualizacion SET DEFAULT TO_CHAR(CURRENT_DATE, 'YYYY-MM');
 
-CREATE UNIQUE INDEX IF NOT EXISTS ux_li_cod_not_null
-  ON lista_interna (cod_interno)
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pg_cod_not_null
+  ON productos_gampack (cod_interno)
   WHERE cod_interno IS NOT NULL;
-CREATE INDEX IF NOT EXISTS ix_li_nom
-  ON lista_interna (LOWER(nom_interno));
+CREATE INDEX IF NOT EXISTS ix_pg_nom
+  ON productos_gampack (LOWER(nom_interno));
 
 CREATE TABLE IF NOT EXISTS relacion_articulos (
   id BIGSERIAL PRIMARY KEY,
   id_lista_precios BIGINT NOT NULL,
-  id_lista_interna BIGINT NOT NULL,
+  id_productos_gampack BIGINT NOT NULL,
   criterio_relacion TEXT NOT NULL,
   created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_rel_lp FOREIGN KEY (id_lista_precios) REFERENCES lista_precios (id_externo) ON DELETE CASCADE,
-  CONSTRAINT fk_rel_li FOREIGN KEY (id_lista_interna) REFERENCES lista_interna (id_interno) ON DELETE CASCADE,
-  UNIQUE (id_lista_precios)
+  CONSTRAINT fk_rel_pg FOREIGN KEY (id_productos_gampack) REFERENCES productos_gampack (id_interno) ON DELETE CASCADE,
+  CONSTRAINT uq_relacion_articulos_pair UNIQUE (id_lista_precios, id_productos_gampack)
 );
 CREATE INDEX IF NOT EXISTS ix_rel_created_at ON relacion_articulos (created_at);
 
@@ -90,10 +90,10 @@ CREATE TABLE IF NOT EXISTS articulos_no_relacionados (
 
 CREATE TABLE IF NOT EXISTS articulos_gampack_no_relacionados (
   id BIGSERIAL PRIMARY KEY,
-  id_lista_interna BIGINT NOT NULL,
+  id_productos_gampack BIGINT NOT NULL,
   motivo TEXT,
-  CONSTRAINT fk_agnr_li FOREIGN KEY (id_lista_interna) REFERENCES lista_interna (id_interno) ON DELETE CASCADE,
-  UNIQUE (id_lista_interna)
+  CONSTRAINT fk_agnr_pg FOREIGN KEY (id_productos_gampack) REFERENCES productos_gampack (id_interno) ON DELETE CASCADE,
+  UNIQUE (id_productos_gampack)
 );
 
 CREATE TABLE IF NOT EXISTS imports_log (
@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS rubros (
 );
 
 CREATE TABLE IF NOT EXISTS producto_rubro (
-  id_interno BIGINT NOT NULL REFERENCES lista_interna (id_interno) ON DELETE CASCADE,
+  id_interno BIGINT NOT NULL REFERENCES productos_gampack (id_interno) ON DELETE CASCADE,
   id_rubro BIGINT NOT NULL REFERENCES rubros (id) ON DELETE CASCADE,
   PRIMARY KEY (id_interno)
 );
@@ -163,7 +163,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_lp_cod_prov_not_null
 CREATE INDEX IF NOT EXISTS ix_lp_nom_prov
   ON lista_precios (LOWER(nom_externo), proveedor);
 
-CREATE TABLE IF NOT EXISTS lista_interna (
+CREATE TABLE IF NOT EXISTS productos_gampack (
   id_interno BIGSERIAL PRIMARY KEY,
   nom_interno TEXT NOT NULL,
   cod_interno TEXT,
@@ -175,38 +175,38 @@ CREATE TABLE IF NOT EXISTS lista_interna (
 
 ALTER TABLE lista_precios
   ADD COLUMN IF NOT EXISTS mes_actualizacion TEXT;
-ALTER TABLE lista_interna
+ALTER TABLE productos_gampack
   ADD COLUMN IF NOT EXISTS mes_actualizacion TEXT;
 
 UPDATE lista_precios
    SET mes_actualizacion = TO_CHAR(fecha, 'YYYY-MM')
  WHERE mes_actualizacion IS NULL;
-UPDATE lista_interna
+UPDATE productos_gampack
    SET mes_actualizacion = TO_CHAR(fecha, 'YYYY-MM')
  WHERE mes_actualizacion IS NULL;
 
 ALTER TABLE lista_precios
   ALTER COLUMN mes_actualizacion SET NOT NULL,
   ALTER COLUMN mes_actualizacion SET DEFAULT TO_CHAR(CURRENT_DATE, 'YYYY-MM');
-ALTER TABLE lista_interna
+ALTER TABLE productos_gampack
   ALTER COLUMN mes_actualizacion SET NOT NULL,
   ALTER COLUMN mes_actualizacion SET DEFAULT TO_CHAR(CURRENT_DATE, 'YYYY-MM');
 
-CREATE UNIQUE INDEX IF NOT EXISTS ux_li_cod_not_null
-  ON lista_interna (cod_interno)
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pg_cod_not_null
+  ON productos_gampack (cod_interno)
   WHERE cod_interno IS NOT NULL;
-CREATE INDEX IF NOT EXISTS ix_li_nom
-  ON lista_interna (LOWER(nom_interno));
+CREATE INDEX IF NOT EXISTS ix_pg_nom
+  ON productos_gampack (LOWER(nom_interno));
 
 CREATE TABLE IF NOT EXISTS relacion_articulos (
   id BIGSERIAL PRIMARY KEY,
   id_lista_precios BIGINT NOT NULL,
-  id_lista_interna BIGINT NOT NULL,
+  id_productos_gampack BIGINT NOT NULL,
   criterio_relacion TEXT NOT NULL,
   created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_rel_lp FOREIGN KEY (id_lista_precios) REFERENCES lista_precios (id_externo) ON DELETE CASCADE,
-  CONSTRAINT fk_rel_li FOREIGN KEY (id_lista_interna) REFERENCES lista_interna (id_interno) ON DELETE CASCADE,
-  UNIQUE (id_lista_precios)
+  CONSTRAINT fk_rel_pg FOREIGN KEY (id_productos_gampack) REFERENCES productos_gampack (id_interno) ON DELETE CASCADE,
+  CONSTRAINT uq_relacion_articulos_pair UNIQUE (id_lista_precios, id_productos_gampack)
 );
 CREATE INDEX IF NOT EXISTS ix_rel_created_at ON relacion_articulos (created_at);
 
@@ -220,10 +220,10 @@ CREATE TABLE IF NOT EXISTS articulos_no_relacionados (
 
 CREATE TABLE IF NOT EXISTS articulos_gampack_no_relacionados (
   id BIGSERIAL PRIMARY KEY,
-  id_lista_interna BIGINT NOT NULL,
+  id_productos_gampack BIGINT NOT NULL,
   motivo TEXT,
-  CONSTRAINT fk_agnr_li FOREIGN KEY (id_lista_interna) REFERENCES lista_interna (id_interno) ON DELETE CASCADE,
-  UNIQUE (id_lista_interna)
+  CONSTRAINT fk_agnr_pg FOREIGN KEY (id_productos_gampack) REFERENCES productos_gampack (id_interno) ON DELETE CASCADE,
+  UNIQUE (id_productos_gampack)
 );
 
 CREATE TABLE IF NOT EXISTS imports_log (
@@ -259,7 +259,7 @@ CREATE TABLE IF NOT EXISTS rubros (
 );
 
 CREATE TABLE IF NOT EXISTS producto_rubro (
-  id_interno BIGINT NOT NULL REFERENCES lista_interna (id_interno) ON DELETE CASCADE,
+  id_interno BIGINT NOT NULL REFERENCES productos_gampack (id_interno) ON DELETE CASCADE,
   id_rubro BIGINT NOT NULL REFERENCES rubros (id) ON DELETE CASCADE,
   PRIMARY KEY (id_interno)
 );

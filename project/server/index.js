@@ -188,7 +188,7 @@ async function findInternalByExactName(db, normalizedName) {
   if (!normalizedName) return null;
   return getDbRow(
     db,
-    `SELECT * FROM lista_interna
+    `SELECT * FROM productos_gampack
      WHERE nom_interno IS NOT NULL
        AND LOWER(REGEXP_REPLACE(TRIM(nom_interno), '\\s+', ' ', 'g')) = $1
      ORDER BY id_interno ASC
@@ -218,7 +218,7 @@ async function findInternalByNormalizedCode(db, normalizedCode) {
   if (!normalizedCode) return null;
   return getDbRow(
     db,
-    `SELECT * FROM lista_interna
+    `SELECT * FROM productos_gampack
      WHERE cod_interno IS NOT NULL
        AND LOWER(REGEXP_REPLACE(cod_interno, '[^a-z0-9]', '', 'g')) = $1
      ORDER BY id_interno ASC
@@ -265,7 +265,7 @@ async function upsertInternalProduct(db, { productCode, productName, finalPrice,
     if (needsUpdate) {
       await runDb(
         db,
-        `UPDATE lista_interna
+        `UPDATE productos_gampack
            SET cod_interno = $1,
                nom_interno = $2,
                precio_final = $3,
@@ -290,7 +290,7 @@ async function upsertInternalProduct(db, { productCode, productName, finalPrice,
   try {
     const insertedRow = await getDbRow(
       db,
-      `INSERT INTO lista_interna (cod_interno, nom_interno, precio_final, fecha, mes_actualizacion)
+      `INSERT INTO productos_gampack (cod_interno, nom_interno, precio_final, fecha, mes_actualizacion)
        VALUES ($1, $2, $3, $4, TO_CHAR(CURRENT_DATE, 'YYYY-MM'))
        RETURNING id_interno`,
       [productCode || null, productName, finalPrice, normalizedDate]
@@ -309,7 +309,7 @@ async function upsertInternalProduct(db, { productCode, productName, finalPrice,
     if (err?.code === '23505' && productCode) {
       const conflict = await getDbRow(
         db,
-        `SELECT * FROM lista_interna
+        `SELECT * FROM productos_gampack
           WHERE cod_interno IS NOT NULL
             AND TRIM(LOWER(cod_interno)) = TRIM(LOWER($1))
           LIMIT 1`,
@@ -319,7 +319,7 @@ async function upsertInternalProduct(db, { productCode, productName, finalPrice,
       if (conflict) {
         await runDb(
           db,
-          `UPDATE lista_interna
+          `UPDATE productos_gampack
              SET nom_interno = $1,
                  precio_final = $2,
                  fecha = $3,
@@ -342,25 +342,25 @@ async function upsertInternalProduct(db, { productCode, productName, finalPrice,
   }
 }
 
-async function createRelationAndClean(db, idListaPrecios, idListaInterna, criterio = 'automatic') {
-  if (!idListaPrecios || !idListaInterna) {
+async function createRelationAndClean(db, idListaPrecios, idProductosGampack, criterio = 'automatic') {
+  if (!idListaPrecios || !idProductosGampack) {
     return { created: false, reason: 'missing_ids' };
   }
 
   const existingPair = await getDbRow(
     db,
-    `SELECT id FROM relacion_articulos WHERE id_lista_precios = $1 AND id_lista_interna = $2`,
-    [idListaPrecios, idListaInterna]
+    `SELECT id FROM relacion_articulos WHERE id_lista_precios = $1 AND id_productos_gampack = $2`,
+    [idListaPrecios, idProductosGampack]
   );
   if (existingPair) {
     await runDb(db, `DELETE FROM articulos_no_relacionados WHERE id_lista_precios = $1`, [idListaPrecios]);
-    await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [idListaInterna]);
+    await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_productos_gampack = $1`, [idProductosGampack]);
     return { created: true, relationId: existingPair.id, alreadyExisted: true };
   }
 
   const existingForExternal = await getDbRow(
     db,
-    `SELECT id, id_lista_interna FROM relacion_articulos WHERE id_lista_precios = $1 LIMIT 1`,
+    `SELECT id, id_productos_gampack FROM relacion_articulos WHERE id_lista_precios = $1 LIMIT 1`,
     [idListaPrecios]
   );
   if (existingForExternal) {
@@ -368,34 +368,20 @@ async function createRelationAndClean(db, idListaPrecios, idListaInterna, criter
       created: false,
       reason: 'external_already_related',
       conflictingRelationId: existingForExternal.id,
-      conflictingInternalId: existingForExternal.id_lista_interna,
-    };
-  }
-
-  const existingForInternal = await getDbRow(
-    db,
-    `SELECT id, id_lista_precios FROM relacion_articulos WHERE id_lista_interna = $1 LIMIT 1`,
-    [idListaInterna]
-  );
-  if (existingForInternal) {
-    return {
-      created: false,
-      reason: 'internal_already_related',
-      conflictingRelationId: existingForInternal.id,
-      conflictingExternalId: existingForInternal.id_lista_precios,
+      conflictingInternalId: existingForExternal.id_productos_gampack,
     };
   }
 
   const insertedRelation = await getDbRow(
     db,
-    `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
+    `INSERT INTO relacion_articulos (id_lista_precios, id_productos_gampack, criterio_relacion)
      VALUES ($1, $2, $3)
      RETURNING id`,
-    [idListaPrecios, idListaInterna, criterio]
+    [idListaPrecios, idProductosGampack, criterio]
   );
 
   await runDb(db, `DELETE FROM articulos_no_relacionados WHERE id_lista_precios = $1`, [idListaPrecios]);
-  await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [idListaInterna]);
+  await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_productos_gampack = $1`, [idProductosGampack]);
 
   return { created: true, relationId: insertedRelation?.id ?? null, alreadyExisted: false };
 }
@@ -549,7 +535,7 @@ app.get('/api/equivalencias', async (req, res) => {
     SELECT
       ra.id,
       ra.id_lista_precios,
-      ra.id_lista_interna,
+      ra.id_productos_gampack,
       ra.criterio_relacion,
       ra.created_at AS relation_created_at,
       lp.cod_externo,
@@ -561,7 +547,7 @@ app.get('/api/equivalencias', async (req, res) => {
       li.fecha AS fecha_interno
     FROM relacion_articulos ra
     LEFT JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
-    LEFT JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
+    LEFT JOIN productos_gampack li ON ra.id_productos_gampack = li.id_interno
   `;
 
     if (search) {
@@ -583,7 +569,7 @@ app.get('/api/equivalencias', async (req, res) => {
     const result = rows.map((row) => ({
       id: row.id,
       id_lista_precios: row.id_lista_precios,
-      id_lista_interna: row.id_lista_interna,
+      id_productos_gampack: row.id_productos_gampack,
       supplier: row.proveedor,
       externalCode: row.cod_externo,
       externalName: row.nom_externo,
@@ -610,12 +596,12 @@ app.put('/api/relacion/:id', async (req, res) => {
   }
 
   const relationId = Number(req.params.id);
-  const { matchingCriteria, lista_precios, lista_interna } = req.body || {};
+  const { matchingCriteria, lista_precios, productos_gampack } = req.body || {};
 
   if (!Number.isFinite(relationId)) {
     return res.status(400).json({ success: false, message: 'id de relación inválido' });
   }
-  if (!lista_precios?.id_externo || !lista_interna?.id_interno) {
+  if (!lista_precios?.id_externo || !productos_gampack?.id_interno) {
     return res.status(400).json({ success: false, message: 'Faltan id_externo o id_interno' });
   }
 
@@ -627,10 +613,10 @@ app.put('/api/relacion/:id', async (req, res) => {
     fecha: toYMD(lista_precios.fecha)
   };
   const li = {
-    id_interno: Number(lista_interna.id_interno),
-    cod_interno: lista_interna.cod_interno ?? null,
-    nom_interno: lista_interna.nom_interno ?? null,
-    fecha: toYMD(lista_interna.fecha)
+    id_interno: Number(productos_gampack.id_interno),
+    cod_interno: productos_gampack.cod_interno ?? null,
+    nom_interno: productos_gampack.nom_interno ?? null,
+    fecha: toYMD(productos_gampack.fecha)
   };
   const criterio = matchingCriteria ?? null;
 
@@ -638,7 +624,7 @@ app.put('/api/relacion/:id', async (req, res) => {
   try {
     const rel = await getDbRow(
       db,
-      `SELECT id, id_lista_precios, id_lista_interna
+      `SELECT id, id_lista_precios, id_productos_gampack
          FROM relacion_articulos
         WHERE id = $1`,
       [relationId]
@@ -649,7 +635,7 @@ app.put('/api/relacion/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Relación no encontrada' });
     }
 
-    if (rel.id_lista_precios !== lp.id_externo || rel.id_lista_interna !== li.id_interno) {
+    if (rel.id_lista_precios !== lp.id_externo || rel.id_productos_gampack !== li.id_interno) {
       await runDb(db, 'ROLLBACK');
       return res.status(400).json({ success: false, message: 'IDs no coinciden con la relación' });
     }
@@ -668,7 +654,7 @@ app.put('/api/relacion/:id', async (req, res) => {
 
     await runDb(
       db,
-      `UPDATE lista_interna
+      `UPDATE productos_gampack
           SET cod_interno = $1,
               nom_interno = COALESCE($2, nom_interno),
               fecha = COALESCE($3, fecha),
@@ -980,13 +966,13 @@ function createNoRelacionadosHandler(tipo) {
 
       where.push(`NOT EXISTS (
         SELECT 1 FROM relacion_articulos ra
-        WHERE ra.id_lista_interna = li.id_interno
+        WHERE ra.id_productos_gampack = li.id_interno
       )`);
 
       if (onlyPending) {
         where.push(`EXISTS (
           SELECT 1 FROM articulos_gampack_no_relacionados agnr
-          WHERE agnr.id_lista_interna = li.id_interno
+          WHERE agnr.id_productos_gampack = li.id_interno
         )`);
       }
 
@@ -1011,17 +997,17 @@ function createNoRelacionadosHandler(tipo) {
           (
             SELECT motivo
             FROM articulos_gampack_no_relacionados agnr
-            WHERE agnr.id_lista_interna = li.id_interno
+            WHERE agnr.id_productos_gampack = li.id_interno
             LIMIT 1
           ) AS motivo,
           CASE
             WHEN EXISTS (
               SELECT 1 FROM articulos_gampack_no_relacionados agnr
-              WHERE agnr.id_lista_interna = li.id_interno
+              WHERE agnr.id_productos_gampack = li.id_interno
             ) THEN 1 ELSE 0
           END AS es_pendiente,
           LOWER(li.nom_interno) AS nombre_lower
-        FROM lista_interna li
+        FROM productos_gampack li
         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
         ORDER BY es_pendiente DESC,
                  li.fecha DESC NULLS LAST,
@@ -1078,7 +1064,7 @@ app.post('/api/check-product', async (req, res) => {
     sql = `SELECT * FROM lista_precios WHERE cod_externo = $1`;
     params = [productCode];
   } else if (companyType === 'Gampack') {
-    sql = `SELECT * FROM lista_interna WHERE cod_interno = $1`;
+    sql = `SELECT * FROM productos_gampack WHERE cod_interno = $1`;
     params = [productCode];
   } else {
     return res.status(400).json({ error: 'Tipo de empresa no válido' });
@@ -1109,7 +1095,7 @@ app.get('/api/relaciones', async (req, res) => {
               li.cod_interno, li.nom_interno
        FROM relacion_articulos r
        LEFT JOIN lista_precios lp ON r.id_lista_precios = lp.id_externo
-       LEFT JOIN lista_interna li ON r.id_lista_interna = li.id_interno
+       LEFT JOIN productos_gampack li ON r.id_productos_gampack = li.id_interno
        ORDER BY r.created_at DESC`,
       []
     );
@@ -1123,21 +1109,35 @@ app.get('/api/relaciones', async (req, res) => {
 // ---------- RELACIONAR MANUAL ----------
 app.post('/api/relacionar-manual', async (req, res) => {
   const db = req.ctx.db;
-  const { id_lista_interna, ids_lista_precios, criterio } = req.body;
+  const { id_productos_gampack, ids_lista_precios, criterio } = req.body;
 
-  if (!id_lista_interna || !Array.isArray(ids_lista_precios) || ids_lista_precios.length === 0) {
+  if (!id_productos_gampack || !Array.isArray(ids_lista_precios) || ids_lista_precios.length === 0) {
     return res.status(400).json({ error: 'Datos incompletos o inválidos' });
   }
 
   try {
     await runDb(db, 'BEGIN');
     for (const id of ids_lista_precios) {
+      const existing = await getDbRow(
+        db,
+        `SELECT id, id_productos_gampack FROM relacion_articulos WHERE id_lista_precios = $1 LIMIT 1`,
+        [id]
+      );
+      if (existing && existing.id_productos_gampack !== id_productos_gampack) {
+        await runDb(db, 'ROLLBACK');
+        return res.status(409).json({
+          error: 'external_already_related',
+          conflictingRelationId: existing.id,
+          conflictingInternalId: existing.id_productos_gampack,
+        });
+      }
+
       await runDb(
         db,
-        `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
+        `INSERT INTO relacion_articulos (id_lista_precios, id_productos_gampack, criterio_relacion)
          VALUES ($1, $2, $3)
-         ON CONFLICT DO NOTHING`,
-        [id, id_lista_interna, criterio]
+         ON CONFLICT (id_lista_precios, id_productos_gampack) DO NOTHING`,
+        [id, id_productos_gampack, criterio]
       );
 
       await runDb(
@@ -1149,8 +1149,8 @@ app.post('/api/relacionar-manual', async (req, res) => {
 
     await runDb(
       db,
-      `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`,
-      [id_lista_interna]
+      `DELETE FROM articulos_gampack_no_relacionados WHERE id_productos_gampack = $1`,
+      [id_productos_gampack]
     );
 
     await runDb(db, 'COMMIT');
@@ -1212,7 +1212,7 @@ app.post('/api/products', async (req, res) => {
     if (normalizedCode) {
       const match = await getDbRow(
         db,
-        `SELECT * FROM lista_interna
+        `SELECT * FROM productos_gampack
          WHERE cod_interno IS NOT NULL
            AND LOWER(REGEXP_REPLACE(cod_interno, '[^a-z0-9]', '', 'g')) = $1
          ORDER BY id_interno ASC
@@ -1230,7 +1230,7 @@ app.post('/api/products', async (req, res) => {
     if (normalizedNameKey && nameLikePattern) {
       const candidates = await getDbRows(
         db,
-        `SELECT * FROM lista_interna
+        `SELECT * FROM productos_gampack
          WHERE nom_interno IS NOT NULL
            AND LOWER(nom_interno) LIKE $1
          LIMIT 50`,
@@ -1394,7 +1394,6 @@ app.post('/api/products', async (req, res) => {
 
       const motivo = (() => {
         if (!internalMatch?.row) return 'No se encontró coincidencia por código ni nombre';
-        if (relationResult?.reason === 'internal_already_related') return 'Coincidencia automática omitida: el producto interno ya está relacionado';
         if (relationResult?.reason === 'external_already_related') return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
         return 'Usuario rechazó sugerencia de relación';
       })();
@@ -1449,18 +1448,17 @@ app.post('/api/products', async (req, res) => {
       if (!related) {
         const motivo = (() => {
           if (!externalMatch?.row) return 'No se encontró coincidencia por código ni nombre';
-          if (relationResult?.reason === 'internal_already_related') return 'Coincidencia automática omitida: el producto interno ya está relacionado';
           if (relationResult?.reason === 'external_already_related') return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
           return 'Usuario rechazó sugerencia de relación';
         })();
 
         try {
-          await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [newId]);
+          await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_productos_gampack = $1`, [newId]);
           await runDb(
             db,
-            `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
+            `INSERT INTO articulos_gampack_no_relacionados (id_productos_gampack, motivo)
              VALUES ($1, $2)
-             ON CONFLICT (id_lista_interna) DO NOTHING`,
+             ON CONFLICT (id_productos_gampack) DO NOTHING`,
             [newId, motivo]
           );
         } catch (e) {
@@ -1503,7 +1501,7 @@ app.delete('/api/relacion/:id', async (req, res) => {
   try {
     const rel = await getDbRow(
       db,
-      `SELECT id_lista_precios, id_lista_interna
+      `SELECT id_lista_precios, id_productos_gampack
        FROM relacion_articulos
        WHERE id = $1`,
       [id]
@@ -1514,10 +1512,9 @@ app.delete('/api/relacion/:id', async (req, res) => {
     await runDb(db, 'BEGIN');
     await runDb(db, `DELETE FROM relacion_articulos WHERE id = $1`, [id]);
     await runDb(db, `DELETE FROM lista_precios WHERE id_externo = $1`, [rel.id_lista_precios]);
-    await runDb(db, `DELETE FROM lista_interna WHERE id_interno = $1`, [rel.id_lista_interna]);
     await runDb(db, 'COMMIT');
 
-    return res.status(200).json({ success: true, message: 'Relación y productos eliminados correctamente' });
+    return res.status(200).json({ success: true, message: 'Relación eliminada correctamente' });
   } catch (err) {
     await runDb(db, 'ROLLBACK').catch(() => {});
     console.error('Error eliminando relación y productos:', err);
@@ -1611,7 +1608,7 @@ app.get('/api/price-comparisons', async (req, res) => {
         ? `DATE(ra.created_at)`
         : `COALESCE(DATE(li.fecha), DATE(lp.fecha))`} AS sortDate
     FROM relacion_articulos ra
-    JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
+    JOIN productos_gampack li ON ra.id_productos_gampack = li.id_interno
     JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
     WHERE ${wherePairs.join(' AND ')}
   `;
@@ -1645,12 +1642,12 @@ app.get('/api/price-comparisons', async (req, res) => {
       NULL AS saleConditions,
       NULL AS relationDate,
       DATE(li.fecha) AS sortDate
-    FROM lista_interna li
-    LEFT JOIN relacion_articulos ra ON ra.id_lista_interna = li.id_interno
+    FROM productos_gampack li
+    LEFT JOIN relacion_articulos ra ON ra.id_productos_gampack = li.id_interno
     WHERE ${whereInternal.join(' AND ')}
   `;
 
-  const whereExternal = ['ra.id_lista_interna IS NULL', applySearch(['lp.nom_externo', 'lp.proveedor'])];
+  const whereExternal = ['ra.id_productos_gampack IS NULL', applySearch(['lp.nom_externo', 'lp.proveedor'])];
   const paramsExternal = search ? [like, like] : [];
   if (hasFamilia) {
     whereExternal.push(applyFamilia(['lp.familia']));
@@ -1751,7 +1748,7 @@ app.get('/api/gampack/:codigo/relacionados', async (req, res) => {
       lp.fecha AS externalDate,
       li.precio_final AS internalPrice
     FROM relacion_articulos ra
-    JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
+    JOIN productos_gampack li ON ra.id_productos_gampack = li.id_interno
     JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
     WHERE li.cod_interno = $1
   `;
@@ -1960,11 +1957,11 @@ app.post('/api/imports/lista-precios', upload.single('file'), (req, res) => {
 
               if (!relationResult?.created) {
                 try {
-                  await run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [idInterno]);
+                  await run(`DELETE FROM articulos_gampack_no_relacionados WHERE id_productos_gampack = $1`, [idInterno]);
                   await run(
-                    `INSERT INTO articulos_gampack_no_relacionados (id_lista_interna, motivo)
+                    `INSERT INTO articulos_gampack_no_relacionados (id_productos_gampack, motivo)
                      VALUES ($1, $2)
-                     ON CONFLICT (id_lista_interna) DO NOTHING`,
+                     ON CONFLICT (id_productos_gampack) DO NOTHING`,
                     [idInterno, 'Importado vía carga masiva']
                   );
                 } catch (e) {
@@ -2079,7 +2076,7 @@ app.get('/api/stats', async (req, res) => {
 
   try {
     const q = {
-      internalCount: `SELECT COUNT(*)::int AS c FROM lista_interna`,
+      internalCount: `SELECT COUNT(*)::int AS c FROM productos_gampack`,
       externalCount: `SELECT COUNT(*)::int AS c FROM lista_precios`,
       activeSuppliers: `SELECT COUNT(DISTINCT proveedor)::int AS c FROM lista_precios`,
       suppliersWithNewPriceToday: `SELECT COUNT(DISTINCT proveedor)::int AS c FROM lista_precios WHERE fecha = $1`,
@@ -2156,7 +2153,7 @@ app.post('/api/imports/familias', upload.single('file'), async (req, res) => {
       let idInterno = null;
       if (codigo) {
         const rr = await get(
-          `SELECT id_interno FROM lista_interna
+          `SELECT id_interno FROM productos_gampack
            WHERE TRIM(LOWER(cod_interno)) = TRIM(LOWER($1)) LIMIT 1`,
           [codigo]
         );
@@ -2164,7 +2161,7 @@ app.post('/api/imports/familias', upload.single('file'), async (req, res) => {
       }
       if (!idInterno && nombre) {
         const rr = await get(
-          `SELECT id_interno FROM lista_interna
+          `SELECT id_interno FROM productos_gampack
            WHERE TRIM(LOWER(nom_interno)) = TRIM(LOWER($1)) LIMIT 1`,
           [nombre]
         );
@@ -2249,8 +2246,8 @@ app.delete('/api/no-relacionados/internos/:id', async (req, res) => {
 
   try {
     await runDb(db, 'BEGIN');
-    await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna = $1`, [id]);
-    const del = await runDb(db, `DELETE FROM lista_interna WHERE id_interno = $1`, [id]);
+    await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_productos_gampack = $1`, [id]);
+    const del = await runDb(db, `DELETE FROM productos_gampack WHERE id_interno = $1`, [id]);
     await runDb(db, 'COMMIT');
     return res.json({ ok: true, deleted: del.rowCount ?? 1 });
   } catch (e) {
@@ -2268,8 +2265,8 @@ app.post('/api/no-relacionados/internos/delete', async (req, res) => {
   const ph = ids.map((_, i) => `$${i+1}`).join(',');
   try {
     await runDb(db, 'BEGIN');
-    await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_lista_interna IN (${ph})`, ids);
-    const del = await runDb(db, `DELETE FROM lista_interna WHERE id_interno IN (${ph})`, ids);
+    await runDb(db, `DELETE FROM articulos_gampack_no_relacionados WHERE id_productos_gampack IN (${ph})`, ids);
+    const del = await runDb(db, `DELETE FROM productos_gampack WHERE id_interno IN (${ph})`, ids);
     await runDb(db, 'COMMIT');
     return res.json({ ok: true, deleted: del.rowCount ?? 0 });
   } catch (e) {
@@ -2294,7 +2291,7 @@ app.get('/api/debug/relaciones', async (req, res) => {
         li.precio_final AS precio_interno,
         lp.precio_final AS precio_externo
       FROM relacion_articulos ra
-      LEFT JOIN lista_interna li ON ra.id_lista_interna = li.id_interno
+      LEFT JOIN productos_gampack li ON ra.id_productos_gampack = li.id_interno
       LEFT JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
       ORDER BY ra.created_at DESC
       LIMIT 20
