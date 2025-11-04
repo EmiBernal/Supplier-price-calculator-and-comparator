@@ -19,7 +19,7 @@ async function runSchema() {
   } catch (err) {
     console.error("❌ Error al ejecutar schema.sql:", err);
   } finally {
-    await pool.end();
+    await pool.end();   //Cambios
   }
 }
 
