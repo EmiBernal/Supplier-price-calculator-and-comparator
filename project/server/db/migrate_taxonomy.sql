@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS rubros (
 );
 
 CREATE TABLE IF NOT EXISTS producto_rubro (
-  id_interno BIGINT NOT NULL REFERENCES lista_interna(id_interno) ON DELETE CASCADE,
+  id_interno BIGINT NOT NULL REFERENCES productos_gampack(id_interno) ON DELETE CASCADE,
   id_rubro   BIGINT NOT NULL REFERENCES rubros(id) ON DELETE CASCADE,
   PRIMARY KEY (id_interno)
 );

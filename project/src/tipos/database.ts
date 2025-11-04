@@ -16,6 +16,8 @@ export interface PriceComparison {
 
 export interface ProductEquivalence {
   id: number;
+  id_lista_precios: number;
+  id_productos_gampack: number;
   supplier?: string | null;
   externalCode: string;
   externalName: string;

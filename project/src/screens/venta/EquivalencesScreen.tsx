@@ -181,11 +181,11 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
       const externalId =
         (editRow as any).id_lista_precios ?? (editRow as any).idListaPrecios;
       const internalId =
-        (editRow as any).id_lista_interna ?? (editRow as any).idListaInterna;
+        (editRow as any).id_productos_gampack ?? (editRow as any).idListaInterna;
 
       if (!externalId || !internalId) {
         alert(
-          'Faltan IDs para actualizar (id_lista_precios / id_lista_interna). ' +
+          'Faltan IDs para actualizar (id_lista_precios / id_productos_gampack). ' +
           'Asegurate de que /api/equivalencias los devuelva.'
         );
         setSaving(false);
@@ -202,7 +202,7 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
           nom_externo: editForm.externalName || null,
           fecha: editForm.externalDate || null,
         },
-        lista_interna: {
+        productos_gampack: {
           id_interno: Number(internalId),
           cod_interno: editForm.internalCode || null,
           nom_interno: editForm.internalName || null,
@@ -230,9 +230,9 @@ export const EquivalencesScreen: React.FC<EquivalencesScreenProps> = ({ onNaviga
                 externalCode: payload.lista_precios.cod_externo,
                 externalName: payload.lista_precios.nom_externo,
                 externalDate: payload.lista_precios.fecha,
-                internalCode: payload.lista_interna.cod_interno,
-                internalName: payload.lista_interna.nom_interno,
-                internalDate: payload.lista_interna.fecha,
+                internalCode: payload.productos_gampack.cod_interno,
+                internalName: payload.productos_gampack.nom_interno,
+                internalDate: payload.productos_gampack.fecha,
                 matchingCriteria: payload.matchingCriteria,
               } as any)
             : eq

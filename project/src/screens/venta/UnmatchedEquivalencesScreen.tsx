@@ -266,7 +266,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     try {
       const res = await apiFetch('/api/relacionar-manual', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_lista_interna: s.internal.id_interno, ids_lista_precios: [s.external.id_externo], criterio: 'manual' }),
+        body: JSON.stringify({ id_productos_gampack: s.internal.id_interno, ids_lista_precios: [s.external.id_externo], criterio: 'manual' }),
       });
       if (res.ok) removeFromStateAfterLink(s.internal, s.external);
       else alert(`Error: ${(await res.json().catch(() => ({} as any)))?.message || 'No se pudo vincular'}`);
@@ -292,7 +292,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       for (const { internal, extIds } of byInternal.values()) {
         const res = await apiFetch('/api/relacionar-manual', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id_lista_interna: internal.id_interno, ids_lista_precios: extIds, criterio: 'manual' }),
+          body: JSON.stringify({ id_productos_gampack: internal.id_interno, ids_lista_precios: extIds, criterio: 'manual' }),
         });
         if (!res.ok) throw new Error('No se pudo vincular en lote');
         setExternals(prev => prev.filter(e => !extIds.includes(e.id_externo)));
@@ -434,7 +434,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       const res = await apiFetch('/api/relacionar-manual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_lista_interna: selectedInternal.id_interno, ids_lista_precios: selectedExternals.map(e => e.id_externo), criterio: 'manual' }),
+        body: JSON.stringify({ id_productos_gampack: selectedInternal.id_interno, ids_lista_precios: selectedExternals.map(e => e.id_externo), criterio: 'manual' }),
       });
       if (res.ok) {
         setExternals(prev => prev.filter(e => !selectedExternals.some(se => se.id_externo === e.id_externo)));
