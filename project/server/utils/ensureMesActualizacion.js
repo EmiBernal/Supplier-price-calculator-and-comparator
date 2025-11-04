@@ -9,6 +9,7 @@ async function ensureMesActualizacionColumn() {
   try {
     await client.query('BEGIN');
     for (const schema of TARGET_SCHEMAS) {
+      await client.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
       const qualified = `${schema}.lista_precios`;
       await client.query(`ALTER TABLE IF EXISTS ${qualified} ADD COLUMN IF NOT EXISTS ${COLUMN_NAME} TEXT`);
       await client.query(`ALTER TABLE ${qualified} ALTER COLUMN ${COLUMN_NAME} SET DEFAULT ${CURRENT_MONTH_EXPR}`);
