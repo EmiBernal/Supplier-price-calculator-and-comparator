@@ -372,20 +372,6 @@ async function createRelationAndClean(db, idListaPrecios, idListaInterna, criter
     };
   }
 
-  const existingForInternal = await getDbRow(
-    db,
-    `SELECT id, id_lista_precios FROM relacion_articulos WHERE id_lista_interna = $1 LIMIT 1`,
-    [idListaInterna]
-  );
-  if (existingForInternal) {
-    return {
-      created: false,
-      reason: 'internal_already_related',
-      conflictingRelationId: existingForInternal.id,
-      conflictingExternalId: existingForInternal.id_lista_precios,
-    };
-  }
-
   const insertedRelation = await getDbRow(
     db,
     `INSERT INTO relacion_articulos (id_lista_precios, id_lista_interna, criterio_relacion)
@@ -1394,7 +1380,6 @@ app.post('/api/products', async (req, res) => {
 
       const motivo = (() => {
         if (!internalMatch?.row) return 'No se encontró coincidencia por código ni nombre';
-        if (relationResult?.reason === 'internal_already_related') return 'Coincidencia automática omitida: el producto interno ya está relacionado';
         if (relationResult?.reason === 'external_already_related') return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
         return 'Usuario rechazó sugerencia de relación';
       })();
@@ -1449,7 +1434,6 @@ app.post('/api/products', async (req, res) => {
       if (!related) {
         const motivo = (() => {
           if (!externalMatch?.row) return 'No se encontró coincidencia por código ni nombre';
-          if (relationResult?.reason === 'internal_already_related') return 'Coincidencia automática omitida: el producto interno ya está relacionado';
           if (relationResult?.reason === 'external_already_related') return 'Coincidencia automática omitida: el producto del proveedor ya está relacionado';
           return 'Usuario rechazó sugerencia de relación';
         })();
