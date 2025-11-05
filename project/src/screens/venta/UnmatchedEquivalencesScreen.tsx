@@ -258,12 +258,12 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
 
   /* ---------- Aceptar / Rechazar sugerencias ---------- */
   const removeFromStateAfterLink = (i: InternalItem, e: ExternalItem) => {
-    setExternals(prev => prev.filter(x => x.id_externo !== e.id_externo));
-    setInternals(prev => prev.filter(x => x.id_interno !== i.id_interno));
-    setSelectedExternals(prev => prev.filter(x => x.id_externo !== e.id_externo));
-    setSelectedInternal(prev => (prev?.id_interno === i.id_interno ? null : prev));
-    setSuggestions(prev => prev.filter(s => s.internal.id_interno !== i.id_interno && s.external.id_externo !== e.id_externo));
-  };
+  setExternals(prev => prev.filter(x => x.id_externo !== e.id_externo)); // solo quitamos el externo
+  // ✅ no quitamos el producto Gampack del estado
+  setSelectedExternals(prev => prev.filter(x => x.id_externo !== e.id_externo));
+  setSelectedInternal(prev => (prev?.id_interno === i.id_interno ? null : prev));
+  setSuggestions(prev => prev.filter(s => s.internal.id_interno !== i.id_interno && s.external.id_externo !== e.id_externo));
+};
 
   const acceptSuggestion = async (s: Suggestion) => {
     try {
@@ -441,7 +441,6 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       });
       if (res.ok) {
         setExternals(prev => prev.filter(e => !selectedExternals.some(se => se.id_externo === e.id_externo)));
-        setInternals(prev => prev.filter(i => i.id_interno !== selectedInternal.id_interno));
         setSelectedExternals([]); setSelectedInternal(null);
         setSuggestions(prev => prev.filter(s => s.internal.id_interno !== selectedInternal.id_interno && !selectedExternals.some(se => se.id_externo === s.external.id_externo)));
         toast('✔ Vinculación manual realizada');
