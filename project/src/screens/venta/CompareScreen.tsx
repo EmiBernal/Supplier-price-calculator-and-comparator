@@ -3,13 +3,19 @@ import { Navigation } from '../../components/Navigation';
 import { Input } from '../../components/Input';
 import { Table } from '../../components/Table';
 import { PriceComparison } from '../../tipos/database';
-import { Search, List, LayoutGrid, CalendarDays, XCircle } from 'lucide-react';
+import { Search, List, LayoutGrid, CalendarDays, XCircle, Loader2 } from 'lucide-react';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
 
 interface CompareScreenProps {
   onNavigate: (screen: Screen) => void;
 }
+
+type ProviderFilter = {
+  name: string;
+  normalized: string;
+  products: number;
+};
 
 export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   const [comparisons, setComparisons] = useState<PriceComparison[]>([]);
@@ -25,6 +31,12 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   // NUEVO: selects guiados
   const [famGenSel, setFamGenSel] = useState('');
   const [famEspSel, setFamEspSel] = useState('');
+
+  // Proveedores relacionados
+  const [relatedProviders, setRelatedProviders] = useState<ProviderFilter[]>([]);
+  const [selectedProviders, setSelectedProviders] = useState<string[] | null>(null);
+  const [providerFilterError, setProviderFilterError] = useState<string | null>(null);
+  const [loadingProviders, setLoadingProviders] = useState(false);
 
   // ===== Helpers de fecha =====
   // Convierte Date -> 'YYYY-MM-DD' usando la zona local (sin desfase)
@@ -79,12 +91,73 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
+    const loadProviders = async () => {
+      setLoadingProviders(true);
+      setProviderFilterError(null);
+      try {
+        const response = await apiFetch('/api/providers/related');
+        if (!response.ok) {
+          throw new Error('No se pudo cargar la lista de proveedores relacionados.');
+        }
+        const data = await response.json();
+        if (!isMounted) return;
+
+        const unique = new Map<string, ProviderFilter>();
+        if (Array.isArray(data)) {
+          data.forEach((item: any) => {
+            const normalized = String(item?.normalized ?? '').trim();
+            const name = String(item?.name ?? '').trim();
+            if (!normalized || !name) return;
+            const products = Number(item?.products ?? 0);
+            if (!unique.has(normalized)) {
+              unique.set(normalized, {
+                normalized,
+                name,
+                products: Number.isFinite(products) ? products : 0,
+              });
+            }
+          });
+        }
+
+        const sorted = Array.from(unique.values()).sort((a, b) =>
+          a.name.localeCompare(b.name, 'es')
+        );
+
+        setRelatedProviders(sorted);
+        setSelectedProviders(sorted.map((provider) => provider.normalized));
+      } catch (error) {
+        console.error('Error loading related providers:', error);
+        if (!isMounted) return;
+        setRelatedProviders([]);
+        setSelectedProviders(null);
+        setProviderFilterError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'No se pudieron cargar los proveedores relacionados.'
+        );
+      } finally {
+        if (isMounted) {
+          setLoadingProviders(false);
+        }
+      }
+    };
+
+    loadProviders();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const delay = setTimeout(() => {
       if (dateRangeInvalid) return;
       loadComparisons(searchTerm);
     }, 300);
     return () => clearTimeout(delay);
-  }, [searchTerm, dateFrom, dateTo, famGenSel, famEspSel, dateRangeInvalid]);
+  }, [searchTerm, dateFrom, dateTo, famGenSel, famEspSel, dateRangeInvalid, selectedProviders]);
 
   // Construye el valor que mandamos como `familia` al backend
   const buildFamiliaQuery = () => {
@@ -94,6 +167,12 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   };
 
   const loadComparisons = async (search = '') => {
+    if (selectedProviders && selectedProviders.length === 0) {
+      setComparisons([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -107,6 +186,12 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
       // 🔒 clave: solo pares presentes en relacion_articulos
       params.append('onlyRelated', '1');
 
+      if (selectedProviders && selectedProviders.length > 0) {
+        selectedProviders.forEach((provider) => {
+          params.append('provider', provider);
+        });
+      }
+
       const url = `/api/price-comparisons?${params.toString()}`;
       const res = await apiFetch(url);
       const data = await res.json();
@@ -117,6 +202,39 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const getAllProviderKeys = () =>
+    relatedProviders.map((provider) => provider.normalized);
+
+  const buildOrderedSelection = (values: Iterable<string>) => {
+    const allowed = new Set(values);
+    if (allowed.size === 0) return [] as string[];
+    return relatedProviders
+      .map((provider) => provider.normalized)
+      .filter((value) => allowed.has(value));
+  };
+
+  const toggleProviderSelection = (normalized: string, checked: boolean) => {
+    setSelectedProviders((current) => {
+      const baseValues = current === null ? getAllProviderKeys() : current;
+      const selection = new Set(baseValues);
+      if (checked) {
+        selection.add(normalized);
+      } else {
+        selection.delete(normalized);
+      }
+      if (selection.size === 0) return [];
+      return buildOrderedSelection(selection);
+    });
+  };
+
+  const selectAllProviders = () => {
+    setSelectedProviders(getAllProviderKeys());
+  };
+
+  const clearProviderSelection = () => {
+    setSelectedProviders([]);
   };
 
   const handleLayoutChange = () => {
@@ -183,6 +301,9 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     setDateTo('');
     setFamGenSel('');
     setFamEspSel('');
+    setSelectedProviders(
+      relatedProviders.length > 0 ? getAllProviderKeys() : null
+    );
   };
 
   return (
@@ -214,6 +335,76 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
           <div>
             <label className="block text-xs text-gray-600 dark:text-white/80 mb-1">Hasta</label>
             <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full dark:bg-white/10 dark:text-white dark:placeholder-white/60 dark:border-white/10 dark:focus:border-white/30 dark:focus:ring-white/20" />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-xs text-gray-600 dark:text-white/80 mb-1">
+              Proveedores relacionados
+            </label>
+            <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-white/5">
+              {loadingProviders ? (
+                <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-white/70">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Cargando proveedores...
+                </div>
+              ) : relatedProviders.length === 0 ? (
+                <p className="text-xs text-gray-500 dark:text-white/60">
+                  {providerFilterError ?? 'No hay proveedores relacionados disponibles.'}
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {relatedProviders.map((provider) => {
+                    const isChecked =
+                      selectedProviders === null
+                        ? true
+                        : selectedProviders.includes(provider.normalized);
+                    return (
+                      <label
+                        key={provider.normalized}
+                        className={[
+                          'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition',
+                          isChecked
+                            ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200'
+                            : 'border-gray-200 bg-gray-50 text-gray-600 hover:border-blue-200 hover:text-blue-700 dark:border-white/10 dark:bg-white/10 dark:text-white/70 dark:hover:border-blue-500/40 dark:hover:text-white',
+                        ].join(' ')}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-white/20 dark:bg-transparent"
+                          checked={isChecked}
+                          onChange={(event) =>
+                            toggleProviderSelection(provider.normalized, event.target.checked)
+                          }
+                        />
+                        <span>{provider.name}</span>
+                        <span className="text-[10px] text-gray-400 dark:text-white/40">
+                          {provider.products.toLocaleString('es-AR')}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {providerFilterError && relatedProviders.length > 0 && (
+                <p className="mt-2 text-xs text-red-600 dark:text-red-400">{providerFilterError}</p>
+              )}
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={selectAllProviders}
+                  className="rounded-full border border-gray-200 px-3 py-1 text-gray-600 transition hover:border-blue-200 hover:text-blue-700 dark:border-white/10 dark:text-white/70 dark:hover:border-white/20 dark:hover:text-white"
+                >
+                  Seleccionar todos
+                </button>
+                <button
+                  type="button"
+                  onClick={clearProviderSelection}
+                  className="rounded-full border border-gray-200 px-3 py-1 text-gray-600 transition hover:border-blue-200 hover:text-blue-700 dark:border-white/10 dark:text-white/70 dark:hover:border-white/20 dark:hover:text-white"
+                >
+                  Limpiar
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="flex items-end">

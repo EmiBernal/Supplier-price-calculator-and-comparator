@@ -4,12 +4,12 @@ import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
 import {
   AlertCircle,
-  Building2,
   CheckCircle2,
   CircleDot,
   Loader2,
-  LockKeyhole,
+  RotateCcw,
   Search,
+  Save,
   Trash2,
   X,
 } from 'lucide-react';
@@ -32,6 +32,8 @@ type ProviderProduct = {
   code?: string | null;
   price: number;
   date?: string | null;
+  companyType?: string | null;
+  family?: string | null;
   isActive: boolean;
 };
 
@@ -40,11 +42,13 @@ type ActionFeedback = {
   message: string;
 };
 
-const currencyFormatter = new Intl.NumberFormat('es-AR', {
-  style: 'currency',
-  currency: 'ARS',
-  minimumFractionDigits: 2,
-});
+type ProductDraft = {
+  name?: string;
+  price?: string;
+  date?: string;
+  companyType?: string;
+  family?: string;
+};
 
 const formatDate = (value?: string | null) => {
   if (!value) return '—';
@@ -91,7 +95,6 @@ const statusBadgeClass = (isActive: boolean) =>
 
 const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigate }) => {
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
-  const [loadingProviders, setLoadingProviders] = useState(false);
   const [providersError, setProvidersError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
@@ -100,6 +103,9 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [productsError, setProductsError] = useState<string | null>(null);
   const [productSearch, setProductSearch] = useState('');
+  const [productDrafts, setProductDrafts] = useState<Record<string, ProductDraft>>({});
+  const [savingProducts, setSavingProducts] = useState<Record<string, boolean>>({});
+  const [productErrors, setProductErrors] = useState<Record<string, string | null>>({});
   const [deletingProvider, setDeletingProvider] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
@@ -109,7 +115,6 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
 
   useEffect(() => {
     const fetchProviders = async () => {
-      setLoadingProviders(true);
       setProvidersError(null);
       try {
         const response = await apiFetch('/api/providers/active');
@@ -135,7 +140,7 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
             : 'No se pudieron cargar los proveedores activos. Intentalo nuevamente.'
         );
       } finally {
-        setLoadingProviders(false);
+        // no-op
       }
     };
 
@@ -177,6 +182,9 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
     setProductsError(null);
     setProducts([]);
     setProductSearch('');
+    setProductDrafts({});
+    setSavingProducts({});
+    setProductErrors({});
     try {
       const response = await apiFetch(
         `/api/providers/products?name=${encodeURIComponent(provider.name)}`
@@ -197,6 +205,9 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
             code: product?.code ?? product?.cod_externo ?? null,
             price: Number(product?.price ?? product?.precio_final ?? 0),
             date: product?.date ?? product?.fecha ?? null,
+            companyType:
+              product?.companyType ?? product?.tipo_empresa ?? null,
+            family: product?.family ?? product?.familia ?? null,
             isActive: Boolean(product?.isActive ?? product?.is_active ?? false),
           }))
         : [];
@@ -218,6 +229,9 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
     setProducts([]);
     setProductSearch('');
     setProductsError(null);
+    setProductDrafts({});
+    setSavingProducts({});
+    setProductErrors({});
   };
 
   const displayedProducts = useMemo(() => {
@@ -225,11 +239,209 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
     if (!query) return products;
     return products.filter((product) => {
       const code = product.code?.toLowerCase() ?? '';
+      const companyType = product.companyType?.toLowerCase() ?? '';
+      const family = product.family?.toLowerCase() ?? '';
       return (
-        product.name.toLowerCase().includes(query) || code.includes(query)
+        product.name.toLowerCase().includes(query) ||
+        code.includes(query) ||
+        companyType.includes(query) ||
+        family.includes(query)
       );
     });
   }, [products, productSearch]);
+
+  const getOriginalComparableValue = (
+    product: ProviderProduct,
+    field: keyof ProductDraft
+  ) => {
+    switch (field) {
+      case 'price':
+        return Number.isFinite(product.price)
+          ? Number(product.price.toFixed(4))
+          : null;
+      case 'date':
+        return product.date ? product.date.slice(0, 10) : '';
+      case 'companyType':
+        return (product.companyType ?? '').trim();
+      case 'family':
+        return (product.family ?? '').trim();
+      case 'name':
+      default:
+        return product.name.trim();
+    }
+  };
+
+  const normalizeComparableValue = (
+    field: keyof ProductDraft,
+    value: string
+  ) => {
+    if (field === 'price') {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      const parsed = Number.parseFloat(trimmed.replace(',', '.'));
+      return Number.isFinite(parsed) ? Number(parsed.toFixed(4)) : trimmed;
+    }
+    if (field === 'date') {
+      return value || '';
+    }
+    return value.trim();
+  };
+
+  const updateDraftValue = (
+    product: ProviderProduct,
+    field: keyof ProductDraft,
+    rawValue: string
+  ) => {
+    const key = String(product.id);
+    setProductDrafts((current) => {
+      const currentDraft = current[key] ?? {};
+      const originalComparable = getOriginalComparableValue(product, field);
+      const newComparable = normalizeComparableValue(field, rawValue);
+
+      let shouldRemove = false;
+      if (field === 'price') {
+        if (
+          typeof newComparable === 'number' &&
+          typeof originalComparable === 'number'
+        ) {
+          shouldRemove = Math.abs(newComparable - originalComparable) < 0.0001;
+        } else if (newComparable == null && originalComparable == null) {
+          shouldRemove = true;
+        }
+      } else {
+        shouldRemove = String(newComparable ?? '') === String(originalComparable ?? '');
+      }
+
+      if (shouldRemove) {
+        if (!Object.prototype.hasOwnProperty.call(currentDraft, field)) {
+          return current;
+        }
+        const { [field]: _removed, ...rest } = currentDraft;
+        if (Object.keys(rest).length === 0) {
+          const { [key]: _omit, ...restDrafts } = current;
+          return restDrafts;
+        }
+        return { ...current, [key]: rest };
+      }
+
+      return { ...current, [key]: { ...currentDraft, [field]: rawValue } };
+    });
+
+    setProductErrors((current) => {
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const handleResetProduct = (product: ProviderProduct) => {
+    const key = String(product.id);
+    setProductDrafts((current) => {
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    setProductErrors((current) => {
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const handleSaveProduct = async (product: ProviderProduct) => {
+    const key = String(product.id);
+    const draft = productDrafts[key];
+    if (!draft || Object.keys(draft).length === 0) return;
+
+    const payload: Record<string, unknown> = {};
+    if (Object.prototype.hasOwnProperty.call(draft, 'name')) {
+      payload.name = draft.name?.trim() ?? '';
+    }
+    if (Object.prototype.hasOwnProperty.call(draft, 'price')) {
+      payload.price = draft.price;
+    }
+    if (Object.prototype.hasOwnProperty.call(draft, 'date')) {
+      payload.date = draft.date;
+    }
+    if (Object.prototype.hasOwnProperty.call(draft, 'companyType')) {
+      payload.companyType = draft.companyType?.trim() ?? '';
+    }
+    if (Object.prototype.hasOwnProperty.call(draft, 'family')) {
+      payload.family = draft.family?.trim() ?? '';
+    }
+
+    setSavingProducts((current) => ({ ...current, [key]: true }));
+    setProductErrors((current) => ({ ...current, [key]: null }));
+
+    try {
+      const response = await apiFetch(`/api/providers/products/${product.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const message = await parseErrorResponse(response);
+        setProductErrors((current) => ({ ...current, [key]: message }));
+        return;
+      }
+
+      const updated = await response.json();
+      setProducts((current) =>
+        current.map((item) =>
+          item.id === product.id
+            ? {
+                ...item,
+                name: String(updated?.name ?? item.name),
+                price: Number(updated?.price ?? item.price ?? 0),
+                date: updated?.date ?? item.date ?? null,
+                companyType:
+                  updated?.companyType ?? item.companyType ?? null,
+                family: updated?.family ?? item.family ?? null,
+              }
+            : item
+        )
+      );
+
+      setProductDrafts((current) => {
+        if (!current[key]) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+
+      setProductErrors((current) => {
+        if (!current[key]) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+
+      setActionFeedback({
+        type: 'success',
+        message: `Se actualizó el producto "${product.name}".`,
+      });
+    } catch (error) {
+      console.error('Error updating provider product:', error);
+      setProductErrors((current) => ({
+        ...current,
+        [key]: 'No se pudo actualizar el producto. Intentalo nuevamente.',
+      }));
+    } finally {
+      setSavingProducts((current) => {
+        if (!current[key]) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+    }
+  };
+
+  const baseInputClasses =
+    'w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/10 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-500/30';
 
   const handleDeleteProvider = async (provider: ProviderSummary) => {
     if (deletingProvider === provider.name) return;
@@ -455,6 +667,247 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
             })}
           </div>
         </section>
+
+        {selectedProvider && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-sm">
+            <div
+              className="relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#10172a]"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="provider-products-title"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-200 bg-gray-50 px-6 py-5 dark:border-white/10 dark:bg-white/5">
+                <div className="space-y-1">
+                  <h2
+                    id="provider-products-title"
+                    className="text-xl font-semibold text-gray-900 dark:text-white"
+                  >
+                    {selectedProvider.name}
+                  </h2>
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-white/70">
+                    <span>
+                      {selectedProvider.products.toLocaleString('es-AR')} productos cargados
+                    </span>
+                    <span className="hidden text-gray-400 dark:text-white/40 md:inline">•</span>
+                    <span>Última actualización {formatDate(selectedProvider.last_update)}</span>
+                    {typeof selectedProvider.recent_products === 'number' && (
+                      <span className="hidden text-gray-400 dark:text-white/40 md:inline">•</span>
+                    )}
+                    {typeof selectedProvider.recent_products === 'number' && (
+                      <span>
+                        {selectedProvider.recent_products > 0
+                          ? `${selectedProvider.recent_products} precios recientes`
+                          : 'Sin actualizaciones recientes'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={statusBadgeClass(selectedProvider.is_active)}>
+                    {selectedProvider.is_active ? 'Activo' : 'Inactivo'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCloseModal}
+                    className="rounded-full border border-gray-200 bg-white p-2 text-gray-500 transition hover:border-gray-300 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:border-white/10 dark:bg-white/10 dark:text-white/70 dark:hover:text-white"
+                    aria-label="Cerrar"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex max-h-[calc(90vh-140px)] flex-col gap-4 overflow-y-auto px-6 py-5">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div className="relative w-full md:max-w-sm">
+                    <input
+                      type="text"
+                      value={productSearch}
+                      onChange={(event) => setProductSearch(event.target.value)}
+                      placeholder="Buscar por nombre, código, tipo o familia"
+                      className={[baseInputClasses, 'pl-10'].join(' ')}
+                    />
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-white/60" />
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-white/70">
+                    {displayedProducts.length.toLocaleString('es-AR')} de {products.length.toLocaleString('es-AR')} productos
+                  </div>
+                </div>
+
+                {productsError && (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+                    {productsError}
+                  </div>
+                )}
+
+                {loadingProducts ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-white/70">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Cargando productos del proveedor...
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-4">
+                      {displayedProducts.map((product) => {
+                        const key = String(product.id);
+                        const draft = productDrafts[key] ?? {};
+                        const hasDraft = draft && Object.keys(draft).length > 0;
+                        const isSaving = Boolean(savingProducts[key]);
+                        const errorMessage = productErrors[key] ?? null;
+                        const nameValue = draft.name ?? product.name;
+                        const priceValue = draft.price ?? (Number.isFinite(product.price) ? product.price.toString() : '');
+                        const dateValue = draft.date ?? (product.date ? product.date.slice(0, 10) : '');
+                        const companyTypeValue = draft.companyType ?? product.companyType ?? '';
+                        const familyValue = draft.family ?? product.family ?? '';
+
+                        const containerClasses = [
+                          'rounded-3xl border border-gray-200 bg-white p-5 shadow-sm transition dark:border-white/10 dark:bg-white/5',
+                          hasDraft ? 'ring-2 ring-blue-200 dark:ring-blue-500/40' : '',
+                          isSaving ? 'opacity-90' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ');
+
+                        return (
+                          <div key={key} className={containerClasses}>
+                            <div className="grid gap-4 lg:grid-cols-6">
+                              <div className="lg:col-span-2">
+                                <label className="text-xs font-medium text-gray-500 dark:text-white/60">
+                                  Nombre del producto
+                                </label>
+                                <input
+                                  type="text"
+                                  value={nameValue}
+                                  onChange={(event) =>
+                                    updateDraftValue(product, 'name', event.target.value)
+                                  }
+                                  className={baseInputClasses}
+                                  disabled={isSaving}
+                                />
+                                <div className="mt-2 text-xs text-gray-500 dark:text-white/60">
+                                  Código externo: <span className="font-medium text-gray-700 dark:text-white">{product.code ?? '—'}</span>
+                                </div>
+                              </div>
+
+                              <div className="lg:col-span-1">
+                                <label className="text-xs font-medium text-gray-500 dark:text-white/60">
+                                  Precio final (ARS)
+                                </label>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={priceValue}
+                                  onChange={(event) =>
+                                    updateDraftValue(product, 'price', event.target.value)
+                                  }
+                                  className={[baseInputClasses, 'text-right'].join(' ')}
+                                  disabled={isSaving}
+                                />
+                              </div>
+
+                              <div className="lg:col-span-1">
+                                <label className="text-xs font-medium text-gray-500 dark:text-white/60">
+                                  Fecha
+                                </label>
+                                <input
+                                  type="date"
+                                  value={dateValue}
+                                  onChange={(event) =>
+                                    updateDraftValue(product, 'date', event.target.value)
+                                  }
+                                  className={baseInputClasses}
+                                  disabled={isSaving}
+                                />
+                              </div>
+
+                              <div className="lg:col-span-1">
+                                <label className="text-xs font-medium text-gray-500 dark:text-white/60">
+                                  Tipo de empresa
+                                </label>
+                                <input
+                                  type="text"
+                                  value={companyTypeValue}
+                                  onChange={(event) =>
+                                    updateDraftValue(product, 'companyType', event.target.value)
+                                  }
+                                  className={baseInputClasses}
+                                  disabled={isSaving}
+                                />
+                              </div>
+
+                              <div className="lg:col-span-1">
+                                <label className="text-xs font-medium text-gray-500 dark:text-white/60">
+                                  Familia
+                                </label>
+                                <input
+                                  type="text"
+                                  value={familyValue}
+                                  onChange={(event) =>
+                                    updateDraftValue(product, 'family', event.target.value)
+                                  }
+                                  className={baseInputClasses}
+                                  disabled={isSaving}
+                                />
+                              </div>
+
+                              <div className="lg:col-span-6 flex flex-col gap-3 border-t border-gray-100 pt-3 dark:border-white/10">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                  <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-white/70">
+                                    <span className={statusBadgeClass(product.isActive)}>
+                                      {product.isActive ? 'Precio reciente' : 'Sin actualización reciente'}
+                                    </span>
+                                    <span>
+                                      Actualizado el {product.date ? formatDate(product.date) : '—'}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResetProduct(product)}
+                                      disabled={!hasDraft || isSaving}
+                                      className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition hover:border-gray-300 hover:text-gray-900 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 dark:border-white/10 dark:bg-transparent dark:text-white/70 dark:hover:border-white/20 dark:hover:text-white"
+                                    >
+                                      <RotateCcw className="h-4 w-4" />
+                                      Restablecer
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveProduct(product)}
+                                      disabled={!hasDraft || isSaving}
+                                      className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-400/60 dark:bg-blue-500 dark:hover:bg-blue-400"
+                                    >
+                                      {isSaving ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <Save className="h-4 w-4" />
+                                      )}
+                                      Guardar cambios
+                                    </button>
+                                  </div>
+                                </div>
+                                {errorMessage && (
+                                  <p className="text-sm text-red-600 dark:text-red-400">
+                                    {errorMessage}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {displayedProducts.length === 0 && (
+                      <div className="rounded-3xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500 dark:border-white/10 dark:text-white/60">
+                        No se encontraron productos para el criterio de búsqueda actual.
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

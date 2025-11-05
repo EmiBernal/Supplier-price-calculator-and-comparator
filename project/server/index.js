@@ -767,7 +767,10 @@ app.get('/api/providers/products', async (req, res) => {
       return res.status(400).json({ error: 'Proveedor requerido' });
     }
 
-    const normalizedName = rawName.toLowerCase();
+    const normalizedName = normalizeNameForExactMatch(rawName);
+    if (!normalizedName) {
+      return res.status(400).json({ error: 'Proveedor requerido' });
+    }
     const rows = await getDbRows(
       db,
       `
@@ -778,9 +781,11 @@ app.get('/api/providers/products', async (req, res) => {
           precio_final,
           fecha,
           proveedor,
+          tipo_empresa,
+          familia,
           CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
         FROM lista_precios
-        WHERE TRIM(LOWER(proveedor)) = $1
+        WHERE LOWER(REGEXP_REPLACE(TRIM(proveedor), '\\s+', ' ', 'g')) = $1
         ORDER BY LOWER(nom_externo) ASC, cod_externo ASC NULLS LAST
       `,
       [normalizedName]
@@ -793,6 +798,8 @@ app.get('/api/providers/products', async (req, res) => {
       price: Number(row.precio_final ?? 0),
       date: row.fecha ?? null,
       provider: row.proveedor,
+      companyType: row.tipo_empresa ?? null,
+      family: row.familia ?? null,
       is_active: Boolean(row.is_active),
     }));
 
@@ -802,6 +809,157 @@ app.get('/api/providers/products', async (req, res) => {
     });
   } catch (err) {
     console.error('Error /api/providers/products:', err);
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
+app.patch('/api/providers/products/:id', async (req, res) => {
+  try {
+    const db = req.ctx.db;
+    if (!db) {
+      return res.status(500).json({ error: 'db_not_available' });
+    }
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const updates = [];
+    const params = [];
+    let dateParamIndex = null;
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'name')) {
+      const value = normalizeWhitespace(payload.name ?? '');
+      if (!value) {
+        return res.status(400).json({ error: 'El nombre es obligatorio' });
+      }
+      params.push(value);
+      updates.push(`nom_externo = $${params.length}`);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'code')) {
+      const rawCode = payload.code;
+      const value = normalizeWhitespace(rawCode ?? '');
+      if (value) {
+        params.push(value);
+      } else {
+        params.push(null);
+      }
+      updates.push(`cod_externo = $${params.length}`);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'price')) {
+      const parsedPrice = parseNumberAR(payload.price);
+      if (parsedPrice == null) {
+        return res.status(400).json({ error: 'Precio inválido' });
+      }
+      params.push(parsedPrice);
+      updates.push(`precio_final = $${params.length}`);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'date')) {
+      const normalizedDate = ensureYMD(payload.date);
+      if (!normalizedDate) {
+        return res.status(400).json({ error: 'Fecha inválida' });
+      }
+      params.push(normalizedDate);
+      dateParamIndex = params.length;
+      updates.push(`fecha = $${dateParamIndex}`);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'companyType')) {
+      const value = normalizeWhitespace(payload.companyType ?? '');
+      if (!value) {
+        return res.status(400).json({ error: 'El tipo de empresa es obligatorio' });
+      }
+      params.push(value);
+      updates.push(`tipo_empresa = $${params.length}`);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'family')) {
+      const rawFamily = payload.family;
+      const value = normalizeWhitespace(rawFamily ?? '');
+      if (value) {
+        params.push(value);
+      } else {
+        params.push(null);
+      }
+      updates.push(`familia = $${params.length}`);
+    }
+
+    if (dateParamIndex) {
+      updates.push(`mes_actualizacion = TO_CHAR($${dateParamIndex}::date, 'YYYY-MM')`);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'Sin cambios para aplicar' });
+    }
+
+    params.push(id);
+    const updated = await getDbRow(
+      db,
+      `UPDATE lista_precios
+         SET ${updates.join(', ')}
+       WHERE id_externo = $${params.length}
+       RETURNING id_externo, nom_externo, cod_externo, precio_final, fecha, proveedor, tipo_empresa, familia`,
+      params,
+    );
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    const [normalizedRow] = normalizeRowsDates([updated], ['fecha']);
+
+    return res.json({
+      id: updated.id_externo,
+      name: updated.nom_externo,
+      code: updated.cod_externo,
+      price: Number(updated.precio_final ?? 0),
+      date: normalizedRow?.fecha ?? null,
+      provider: updated.proveedor,
+      companyType: updated.tipo_empresa ?? null,
+      family: updated.familia ?? null,
+    });
+  } catch (err) {
+    console.error('Error PATCH /api/providers/products/:id:', err);
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
+app.get('/api/providers/related', async (req, res) => {
+  try {
+    const db = req.ctx.db;
+    if (!db) {
+      return res.status(500).json({ error: 'db_not_available' });
+    }
+
+    const rows = await getDbRows(
+      db,
+      `
+        SELECT
+          LOWER(REGEXP_REPLACE(TRIM(lp.proveedor), '\\s+', ' ', 'g')) AS normalized_name,
+          MIN(REGEXP_REPLACE(TRIM(lp.proveedor), '\\s+', ' ', 'g')) AS display_name,
+          COUNT(*)::int AS products
+        FROM relacion_articulos ra
+        JOIN lista_precios lp ON ra.id_lista_precios = lp.id_externo
+        WHERE lp.proveedor IS NOT NULL AND TRIM(lp.proveedor) <> ''
+        GROUP BY normalized_name
+        ORDER BY display_name ASC
+      `,
+    );
+
+    const providers = rows.map((row) => ({
+      normalized: row.normalized_name,
+      name: row.display_name ?? row.normalized_name,
+      products: Number(row.products ?? 0),
+    }));
+
+    res.json(providers);
+  } catch (err) {
+    console.error('Error /api/providers/related:', err);
     res.status(500).json({ error: 'db_error' });
   }
 });
@@ -1570,6 +1728,17 @@ app.get('/api/price-comparisons', async (req, res) => {
   const familia = (req.query.familia || '').toString().toLowerCase();
   const onlyRelated = String(req.query.onlyRelated || '0') === '1';
 
+  const providerParam = req.query.provider;
+  const providerFiltersRaw = Array.isArray(providerParam)
+    ? providerParam
+    : providerParam != null
+      ? [providerParam]
+      : [];
+  const providerFilters = providerFiltersRaw
+    .map((value) => normalizeNameForExactMatch(value))
+    .filter((value) => !!value);
+  const hasProviderFilter = providerFilters.length > 0;
+
   let dateMode = (req.query.dateMode || 'relation').toString(); // 'product' | 'relation'
   if (onlyRelated) dateMode = 'relation';
 
@@ -1579,6 +1748,7 @@ app.get('/api/price-comparisons', async (req, res) => {
 
   const like = `%${search}%`;
   const familiaLike = `%${familia}%`;
+  const normalizedProviderExpr = "LOWER(REGEXP_REPLACE(TRIM(lp.proveedor), '\\s+', ' ', 'g'))";
 
   // helpers que devuelven cláusulas con '?' para que prepareSql() las numere
   const applySearch = (cols) =>
@@ -1599,6 +1769,11 @@ app.get('/api/price-comparisons', async (req, res) => {
 
   const wherePairs = [applySearch(['li.nom_interno', 'lp.nom_externo', 'lp.proveedor'])];
   const paramsPairs = search ? [like, like, like] : [];
+
+  if (hasProviderFilter) {
+    wherePairs.push(`${normalizedProviderExpr} = ANY(?)`);
+    paramsPairs.push(providerFilters);
+  }
 
   if (hasFamilia) {
     wherePairs.push(applyFamilia(['li.familia', 'lp.familia']));
@@ -1692,6 +1867,10 @@ app.get('/api/price-comparisons', async (req, res) => {
     whereExternal.push(applyFamilia(['lp.familia']));
     paramsExternal.push(familiaLike);
   }
+  if (hasProviderFilter) {
+    whereExternal.push(`${normalizedProviderExpr} = ANY(?)`);
+    paramsExternal.push(providerFilters);
+  }
   if (dateMode === 'product') {
     const dr = buildDateRange('DATE(lp.fecha)');
     if (dr) {
@@ -1720,6 +1899,7 @@ app.get('/api/price-comparisons', async (req, res) => {
     WHERE ${whereExternal.join(' AND ')}
   `;
 
+  const includeInternalOnly = !onlyRelated && !hasProviderFilter;
   let sql, params;
   if (onlyRelated) {
     sql = `
@@ -1731,14 +1911,15 @@ app.get('/api/price-comparisons', async (req, res) => {
   } else {
     sql = `
       ${sqlPairs}
-      UNION ALL
-      ${sqlInternalOnly}
+      ${includeInternalOnly ? `UNION ALL\n      ${sqlInternalOnly}` : ''}
       UNION ALL
       ${sqlExternalOnly}
       ORDER BY sortDate DESC NULLS LAST
       LIMIT 1000
     `;
-    params = [...paramsPairs, ...paramsInternal, ...paramsExternal];
+    params = includeInternalOnly
+      ? [...paramsPairs, ...paramsInternal, ...paramsExternal]
+      : [...paramsPairs, ...paramsExternal];
   }
 
   try {
