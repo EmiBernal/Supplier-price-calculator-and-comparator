@@ -46,14 +46,24 @@ type ProductDraft = {
   name?: string;
   price?: string;
   date?: string;
-  companyType?: string;
-  family?: string;
 };
 
 const formatDate = (value?: string | null) => {
   if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
+  const trimmedValue = value.trim();
+
+  const date = (() => {
+    const simpleDateMatch = trimmedValue.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/);
+    if (simpleDateMatch) {
+      const [, year, month, day] = simpleDateMatch;
+      return new Date(Number(year), Number(month) - 1, Number(day));
+    }
+    const parsed = new Date(trimmedValue);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  })();
+
+  if (!date) return '—';
+
   return new Intl.DateTimeFormat('es-AR', {
     day: '2-digit',
     month: 'short',
@@ -261,10 +271,6 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
           : null;
       case 'date':
         return product.date ? product.date.slice(0, 10) : '';
-      case 'companyType':
-        return (product.companyType ?? '').trim();
-      case 'family':
-        return (product.family ?? '').trim();
       case 'name':
       default:
         return product.name.trim();
@@ -366,13 +372,6 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
     if (Object.prototype.hasOwnProperty.call(draft, 'date')) {
       payload.date = draft.date;
     }
-    if (Object.prototype.hasOwnProperty.call(draft, 'companyType')) {
-      payload.companyType = draft.companyType?.trim() ?? '';
-    }
-    if (Object.prototype.hasOwnProperty.call(draft, 'family')) {
-      payload.family = draft.family?.trim() ?? '';
-    }
-
     setSavingProducts((current) => ({ ...current, [key]: true }));
     setProductErrors((current) => ({ ...current, [key]: null }));
 
@@ -757,9 +756,6 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                         const nameValue = draft.name ?? product.name;
                         const priceValue = draft.price ?? (Number.isFinite(product.price) ? product.price.toString() : '');
                         const dateValue = draft.date ?? (product.date ? product.date.slice(0, 10) : '');
-                        const companyTypeValue = draft.companyType ?? product.companyType ?? '';
-                        const familyValue = draft.family ?? product.family ?? '';
-
                         const containerClasses = [
                           'rounded-3xl border border-gray-200 bg-white p-5 shadow-sm transition dark:border-white/10 dark:bg-white/5',
                           hasDraft ? 'ring-2 ring-blue-200 dark:ring-blue-500/40' : '',
@@ -770,7 +766,7 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
 
                         return (
                           <div key={key} className={containerClasses}>
-                            <div className="grid gap-4 lg:grid-cols-6">
+                            <div className="grid gap-4 lg:grid-cols-4">
                               <div className="lg:col-span-2">
                                 <label className="text-xs font-medium text-gray-500 dark:text-white/60">
                                   Nombre del producto
@@ -820,37 +816,7 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                                 />
                               </div>
 
-                              <div className="lg:col-span-1">
-                                <label className="text-xs font-medium text-gray-500 dark:text-white/60">
-                                  Tipo de empresa
-                                </label>
-                                <input
-                                  type="text"
-                                  value={companyTypeValue}
-                                  onChange={(event) =>
-                                    updateDraftValue(product, 'companyType', event.target.value)
-                                  }
-                                  className={baseInputClasses}
-                                  disabled={isSaving}
-                                />
-                              </div>
-
-                              <div className="lg:col-span-1">
-                                <label className="text-xs font-medium text-gray-500 dark:text-white/60">
-                                  Familia
-                                </label>
-                                <input
-                                  type="text"
-                                  value={familyValue}
-                                  onChange={(event) =>
-                                    updateDraftValue(product, 'family', event.target.value)
-                                  }
-                                  className={baseInputClasses}
-                                  disabled={isSaving}
-                                />
-                              </div>
-
-                              <div className="lg:col-span-6 flex flex-col gap-3 border-t border-gray-100 pt-3 dark:border-white/10">
+                              <div className="lg:col-span-4 flex flex-col gap-3 border-t border-gray-100 pt-3 dark:border-white/10">
                                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                   <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-white/70">
                                     <span className={statusBadgeClass(product.isActive)}>
@@ -860,6 +826,26 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                                       Actualizado el {product.date ? formatDate(product.date) : '—'}
                                     </span>
                                   </div>
+                                  {(product.companyType || product.family) && (
+                                    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-white/60">
+                                      {product.companyType && (
+                                        <span>
+                                          Tipo de empresa:{' '}
+                                          <span className="font-medium text-gray-700 dark:text-white">
+                                            {product.companyType}
+                                          </span>
+                                        </span>
+                                      )}
+                                      {product.family && (
+                                        <span>
+                                          Familia:{' '}
+                                          <span className="font-medium text-gray-700 dark:text-white">
+                                            {product.family}
+                                          </span>
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
                                   <div className="flex flex-wrap items-center gap-2">
                                     <button
                                       type="button"
