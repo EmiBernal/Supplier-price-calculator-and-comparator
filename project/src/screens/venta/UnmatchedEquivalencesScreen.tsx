@@ -214,47 +214,81 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     return { items, inv };
   }, [externals]);
 
-  /* ---------- Auto-relación por nombre ---------- */
-  const generateAutoMatches = useCallback(async () => {
-    if (internals.length === 0 || extIndexed.items.length === 0) { setSuggestions([]); setReviewOpen(true); return; }
-    setLoadingAuto(true);
-    const acc: Suggestion[] = [];
-    const seen = new Set<string>();
+/* ---------- Auto-relación por nombre ---------- */
+const generateAutoMatches = useCallback(async () => {
+  if (internals.length === 0 || extIndexed.items.length === 0) {
+    setSuggestions([]);
+    setReviewOpen(true);
+    return;
+  }
 
-    for (let start = 0; start < internals.length; start += BATCH_SIZE) {
-      const end = Math.min(start + BATCH_SIZE, internals.length);
-      for (let k = start; k < end; k++) {
-        const i = internals[k];
-        const iName = i.nom_interno ?? '';
-        if (!iName.trim()) continue;
+  setLoadingAuto(true);
+  const acc: Suggestion[] = [];
+  const seen = new Set<string>();
 
-        const iTri = buildTrigramFreq(sanitizeText(iName));
-        const iToks = Array.from(new Set(tokenizeName(iName)));
-        if (iToks.length === 0) continue;
+  for (let start = 0; start < internals.length; start += BATCH_SIZE) {
+    const end = Math.min(start + BATCH_SIZE, internals.length);
 
-        const candidateIdx = new Map<number, number>();
-        iToks.forEach(t => { const arr = extIndexed.inv.get(t); if (arr) arr.forEach(idx => candidateIdx.set(idx, (candidateIdx.get(idx) || 0) + 1)); });
+    for (let k = start; k < end; k++) {
+      const i = internals[k];
 
-        const ranked = [...candidateIdx.entries()].sort((a, b) => b[1] - a[1]).slice(0, 50).map(([idx]) => extIndexed.items[idx]);
+      // ✅ Ignorar productos Gampack ya relacionados
+      if ((i as any).tiene_relacion === true) continue;
 
-        let local: Suggestion[] = [];
-        for (const eIdx of ranked) {
-          const id = `${i.id_interno}|${eIdx.item.id_externo}`;
-          if (ignoredPairs.has(id) || seen.has(id)) continue;
-          const score = cosineByTri(iTri, eIdx.tri);
-          if (score >= threshold) local.push({ internal: i, external: eIdx.item, reason: `Nombre similar (${score.toFixed(2)})`, score, id });
-        }
-        local.sort((a, b) => b.score - a.score);
-        local.slice(0, MAX_CANDIDATES_PER_INTERNAL).forEach(s => { seen.add(s.id); acc.push(s); });
+      const iName = i.nom_interno ?? '';
+      if (!iName.trim()) continue;
+
+      const iTri = buildTrigramFreq(sanitizeText(iName));
+      const iToks = Array.from(new Set(tokenizeName(iName)));
+      if (iToks.length === 0) continue;
+
+      const candidateIdx = new Map<number, number>();
+      iToks.forEach(t => {
+        const arr = extIndexed.inv.get(t);
+        if (arr)
+          arr.forEach(idx => candidateIdx.set(idx, (candidateIdx.get(idx) || 0) + 1));
+      });
+
+      const ranked = [...candidateIdx.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 50)
+        .map(([idx]) => extIndexed.items[idx]);
+
+      let local: Suggestion[] = [];
+      for (const eIdx of ranked) {
+        const id = `${i.id_interno}|${eIdx.item.id_externo}`;
+        if (ignoredPairs.has(id) || seen.has(id)) continue;
+
+        const score = cosineByTri(iTri, eIdx.tri);
+        if (score >= threshold)
+          local.push({
+            internal: i,
+            external: eIdx.item,
+            reason: `Nombre similar (${score.toFixed(2)})`,
+            score,
+            id,
+          });
       }
-      await new Promise(r => setTimeout(r, 0));
+
+      local.sort((a, b) => b.score - a.score);
+      local
+        .slice(0, MAX_CANDIDATES_PER_INTERNAL)
+        .forEach(s => {
+          seen.add(s.id);
+          acc.push(s);
+        });
     }
 
-    acc.sort((a, b) => b.score - a.score);
-    setSuggestions(acc);
-    setReviewOpen(true);
-    setLoadingAuto(false);
-  }, [internals, extIndexed, ignoredPairs, threshold]);
+    // Evita congelar la UI durante los lotes grandes
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  acc.sort((a, b) => b.score - a.score);
+  setSuggestions(acc);
+  setReviewOpen(true);
+  setLoadingAuto(false);
+}, [internals, extIndexed, ignoredPairs, threshold]);
+
 
   /* ---------- Aceptar / Rechazar sugerencias ---------- */
   const removeFromStateAfterLink = (i: InternalItem, e: ExternalItem) => {
