@@ -15,6 +15,18 @@ ON CONFLICT (username) DO NOTHING;
 
 SET search_path TO venta, public;
 
+DO $$
+DECLARE
+  schema_name TEXT;
+BEGIN
+  FOR schema_name IN SELECT unnest(ARRAY['venta', 'compra']) LOOP
+    EXECUTE format('ALTER TABLE IF EXISTS %I.relacion_articulos DROP CONSTRAINT IF EXISTS relacion_articulos_id_lista_interna_key', schema_name);
+    EXECUTE format('ALTER TABLE IF EXISTS %I.relacion_articulos DROP CONSTRAINT IF EXISTS relacion_articulos_id_lista_interna_idx', schema_name);
+    EXECUTE format('DROP INDEX IF EXISTS %I.relacion_articulos_id_lista_interna_idx', schema_name);
+    EXECUTE format('DROP INDEX IF EXISTS %I.relacion_articulos_id_lista_interna_key', schema_name);
+  END LOOP;
+END $$;
+
 CREATE TABLE IF NOT EXISTS lista_precios (
   id_externo BIGSERIAL PRIMARY KEY,
   nom_externo TEXT NOT NULL,
@@ -79,6 +91,7 @@ CREATE TABLE IF NOT EXISTS relacion_articulos (
   UNIQUE (id_lista_precios)
 );
 CREATE INDEX IF NOT EXISTS ix_rel_created_at ON relacion_articulos (created_at);
+CREATE INDEX IF NOT EXISTS ix_rel_id_lista_interna ON relacion_articulos (id_lista_interna);
 
 CREATE TABLE IF NOT EXISTS articulos_no_relacionados (
   id BIGSERIAL PRIMARY KEY,
@@ -209,6 +222,7 @@ CREATE TABLE IF NOT EXISTS relacion_articulos (
   UNIQUE (id_lista_precios)
 );
 CREATE INDEX IF NOT EXISTS ix_rel_created_at ON relacion_articulos (created_at);
+CREATE INDEX IF NOT EXISTS ix_rel_id_lista_interna ON relacion_articulos (id_lista_interna);
 
 CREATE TABLE IF NOT EXISTS articulos_no_relacionados (
   id BIGSERIAL PRIMARY KEY,
