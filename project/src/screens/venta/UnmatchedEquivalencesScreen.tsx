@@ -84,8 +84,7 @@ function cosineByTri(
 
   // --- Combinación ponderada ---
   // 0.6 trigram, 0.25 Levenshtein, 0.15 fonético
-  const score = cosine * 0.6 + levSim * 0.25 + phonSim * 0.15;
-
+  const score = cosine * 0.45 + levSim * 0.35 + phonSim * 0.20;
   return Math.min(1, Math.max(0, score));
 }
 
@@ -126,7 +125,7 @@ type Suggestion = {
   id: string;
 };
 
-const DEFAULT_SIMILARITY_THRESHOLD = 0.60;
+const DEFAULT_SIMILARITY_THRESHOLD = 0.40;
 const MAX_CANDIDATES_PER_INTERNAL = Infinity;
 const BATCH_SIZE = 200;
 
@@ -290,7 +289,8 @@ const generateAutoMatches = useCallback(async () => {
     setReviewOpen(true);
     return;
   }
-
+  
+  console.log('🧠 Generando auto-matches con threshold:', threshold);
   setLoadingAuto(true);
   const acc: Suggestion[] = [];
   const seen = new Set<string>();
@@ -304,6 +304,7 @@ const generateAutoMatches = useCallback(async () => {
       // ✅ Ignorar productos Gampack ya relacionados
       if ((i as any).tiene_relacion === true) continue;
 
+      console.log(i.nom_interno);
       const iName = i.nom_interno ?? '';
       if (!iName.trim()) continue;
 
@@ -329,6 +330,7 @@ const generateAutoMatches = useCallback(async () => {
         if (ignoredPairs.has(id) || seen.has(id)) continue;
 
         const score = cosineByTri(iTri, eIdx.tri, sanitizeText(i.nom_interno ?? ''), sanitizeText(eIdx.item.nom_externo ?? ''));
+        console.log(`Comparando "${i.nom_interno}" con "${eIdx.item.nom_externo}" → score:`, score.toFixed(3));
         if (score >= threshold)
           local.push({
             internal: i,
