@@ -2306,4 +2306,47 @@ app.get('/api/debug/relaciones', async (req, res) => {
   }
 });
 
+// ---------- PRODUCTOS GAMPACK (todos los productos de lista_interna) ----------
+app.get('/api/gampack', async (req, res) => {
+  const db = req.ctx.db;
+  if (!db) {
+    return res.status(500).json({ error: 'db_not_available' });
+  }
+
+  try {
+    const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+    const params = [];
+    let where = '';
+
+    if (searchRaw) {
+      params.push(`%${searchRaw}%`, `%${searchRaw}%`);
+      where = `
+        WHERE LOWER(li.cod_interno) LIKE $1
+           OR LOWER(li.nom_interno) LIKE $2
+      `;
+    }
+
+    const sql = `
+      SELECT
+        li.id_interno,
+        li.cod_interno,
+        li.nom_interno,
+        li.precio_final,
+        li.fecha,
+        TO_CHAR(li.fecha, 'YYYY-MM') AS mes_actualizacion
+      FROM lista_interna li
+      ${where}
+      ORDER BY li.fecha DESC NULLS LAST, li.nom_interno ASC
+      LIMIT 1000
+    `;
+
+    const rows = await getDbRows(db, sql, params);
+    return res.json(normalizeRowsDates(rows, ['fecha']));
+  } catch (err) {
+    console.error('Error al obtener productos Gampack:', err);
+    return res.status(500).json({ error: 'Error al obtener productos Gampack' });
+  }
+});
+
+
 module.exports = app;

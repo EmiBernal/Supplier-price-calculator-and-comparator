@@ -1,0 +1,163 @@
+                                         Listado de relaciones
+      Esquema       |              Nombre               |    Tipo     |             Dueño              
+--------------------+-----------------------------------+-------------+--------------------------------
+ compra             | articulos_gampack_no_relacionados | tabla       | dbcalculadoragampack_se1t_user
+ compra             | articulos_no_relacionados         | tabla       | dbcalculadoragampack_se1t_user
+ compra             | column_mappings                   | tabla       | dbcalculadoragampack_se1t_user
+ compra             | familias                          | tabla       | dbcalculadoragampack_se1t_user
+ compra             | imports_log                       | tabla       | dbcalculadoragampack_se1t_user
+ compra             | lista_interna                     | tabla       | dbcalculadoragampack_se1t_user
+ compra             | lista_precios                     | tabla       | dbcalculadoragampack_se1t_user
+ compra             | producto_externo_rubro            | tabla       | dbcalculadoragampack_se1t_user
+ compra             | producto_rubro                    | tabla       | dbcalculadoragampack_se1t_user
+ compra             | productos_gampack                 | tabla       | dbcalculadoragampack_se1t_user
+ compra             | relacion_articulos                | tabla       | dbcalculadoragampack_se1t_user
+ compra             | rubros                            | tabla       | dbcalculadoragampack_se1t_user
+ compra             | subfamilias                       | tabla       | dbcalculadoragampack_se1t_user
+ information_schema | sql_features                      | tabla       | postgres
+ information_schema | sql_implementation_info           | tabla       | postgres
+ information_schema | sql_parts                         | tabla       | postgres
+ information_schema | sql_sizing                        | tabla       | postgres
+ pg_catalog         | pg_aggregate                      | tabla       | postgres
+ pg_catalog         | pg_am                             | tabla       | postgres
+ pg_catalog         | pg_amop                           | tabla       | postgres
+ pg_catalog         | pg_amproc                         | tabla       | postgres
+ pg_catalog         | pg_attrdef                        | tabla       | postgres
+ pg_catalog         | pg_attribute                      | tabla       | postgres
+ pg_catalog         | pg_auth_members                   | tabla       | postgres
+ pg_catalog         | pg_authid                         | tabla       | postgres
+ pg_catalog         | pg_cast                           | tabla       | postgres
+ pg_catalog         | pg_class                          | tabla       | postgres
+ pg_catalog         | pg_collation                      | tabla       | postgres
+ pg_catalog         | pg_constraint                     | tabla       | postgres
+ pg_catalog         | pg_conversion                     | tabla       | postgres
+ pg_catalog         | pg_database                       | tabla       | postgres
+ pg_catalog         | pg_db_role_setting                | tabla       | postgres
+ pg_catalog         | pg_default_acl                    | tabla       | postgres
+ pg_catalog         | pg_depend                         | tabla       | postgres
+ pg_catalog         | pg_description                    | tabla       | postgres
+ pg_catalog         | pg_enum                           | tabla       | postgres
+ pg_catalog         | pg_event_trigger                  | tabla       | postgres
+ pg_catalog         | pg_extension                      | tabla       | postgres
+ pg_catalog         | pg_foreign_data_wrapper           | tabla       | postgres
+ pg_catalog         | pg_foreign_server                 | tabla       | postgres
+ pg_catalog         | pg_foreign_table                  | tabla       | postgres
+ pg_catalog         | pg_index                          | tabla       | postgres
+ pg_catalog         | pg_inherits                       | tabla       | postgres
+ pg_catalog         | pg_init_privs                     | tabla       | postgres
+ pg_catalog         | pg_language                       | tabla       | postgres
+ pg_catalog         | pg_largeobject                    | tabla       | postgres
+ pg_catalog         | pg_largeobject_metadata           | tabla       | postgres
+ pg_catalog         | pg_namespace                      | tabla       | postgres
+ pg_catalog         | pg_opclass                        | tabla       | postgres
+ pg_catalog         | pg_operator                       | tabla       | postgres
+ pg_catalog         | pg_opfamily                       | tabla       | postgres
+ pg_catalog         | pg_parameter_acl                  | tabla       | postgres
+ pg_catalog         | pg_partitioned_table              | tabla       | postgres
+ pg_catalog         | pg_policy                         | tabla       | postgres
+ pg_catalog         | pg_proc                           | tabla       | postgres
+ pg_catalog         | pg_publication                    | tabla       | postgres
+ pg_catalog         | pg_publication_namespace          | tabla       | postgres
+ pg_catalog         | pg_publication_rel                | tabla       | postgres
+ pg_catalog         | pg_range                          | tabla       | postgres
+ pg_catalog         | pg_replication_origin             | tabla       | postgres
+ pg_catalog         | pg_rewrite                        | tabla       | postgres
+ pg_catalog         | pg_seclabel                       | tabla       | postgres
+ pg_catalog         | pg_sequence                       | tabla       | postgres
+ pg_catalog         | pg_shdepend                       | tabla       | postgres
+ pg_catalog         | pg_shdescription                  | tabla       | postgres
+ pg_catalog         | pg_shseclabel                     | tabla       | postgres
+ pg_catalog         | pg_statistic                      | tabla       | postgres
+ pg_catalog         | pg_statistic_ext                  | tabla       | postgres
+ pg_catalog         | pg_statistic_ext_data             | tabla       | postgres
+ pg_catalog         | pg_subscription                   | tabla       | postgres
+ pg_catalog         | pg_subscription_rel               | tabla       | postgres
+ pg_catalog         | pg_tablespace                     | tabla       | postgres
+ pg_catalog         | pg_transform                      | tabla       | postgres
+ pg_catalog         | pg_trigger                        | tabla       | postgres
+ pg_catalog         | pg_ts_config                      | tabla       | postgres
+ pg_catalog         | pg_ts_config_map                  | tabla       | postgres
+ pg_catalog         | pg_ts_dict                        | tabla       | postgres
+ pg_catalog         | pg_ts_parser                      | tabla       | postgres
+ pg_catalog         | pg_ts_template                    | tabla       | postgres
+ pg_catalog         | pg_type                           | tabla       | postgres
+ pg_catalog         | pg_user_mapping                   | tabla       | postgres
+ pg_toast           | pg_toast_1213                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_1247                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_1255                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_1260                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_1262                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_13402                    | Tabla TOAST | postgres
+ pg_toast           | pg_toast_13407                    | Tabla TOAST | postgres
+ pg_toast           | pg_toast_13412                    | Tabla TOAST | postgres
+ pg_toast           | pg_toast_13417                    | Tabla TOAST | postgres
+ pg_toast           | pg_toast_1417                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_1418                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_16404                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16416                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16427                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16440                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16463                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16479                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16495                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16505                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16517                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16528                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16544                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16592                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16603                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16616                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16639                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16655                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16671                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16681                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16693                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16704                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_16720                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_17027                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_17039                    | Tabla TOAST | dbcalculadoragampack_se1t_user
+ pg_toast           | pg_toast_2328                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_2396                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_2600                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_2604                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_2606                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_2609                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_2612                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_2615                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_2618                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_2619                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_2620                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_2964                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3079                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3118                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3256                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3350                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3381                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3394                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3429                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3456                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3466                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3592                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3596                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_3600                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_6000                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_6100                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_6106                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_6243                     | Tabla TOAST | postgres
+ pg_toast           | pg_toast_826                      | Tabla TOAST | postgres
+ public             | users                             | tabla       | dbcalculadoragampack_se1t_user
+ venta              | articulos_gampack_no_relacionados | tabla       | dbcalculadoragampack_se1t_user
+ venta              | articulos_no_relacionados         | tabla       | dbcalculadoragampack_se1t_user
+ venta              | column_mappings                   | tabla       | dbcalculadoragampack_se1t_user
+ venta              | familias                          | tabla       | dbcalculadoragampack_se1t_user
+ venta              | imports_log                       | tabla       | dbcalculadoragampack_se1t_user
+ venta              | lista_interna                     | tabla       | dbcalculadoragampack_se1t_user
+ venta              | lista_precios                     | tabla       | dbcalculadoragampack_se1t_user
+ venta              | producto_externo_rubro            | tabla       | dbcalculadoragampack_se1t_user
+ venta              | producto_rubro                    | tabla       | dbcalculadoragampack_se1t_user
+ venta              | productos_gampack                 | tabla       | dbcalculadoragampack_se1t_user
+ venta              | relacion_articulos                | tabla       | dbcalculadoragampack_se1t_user
+ venta              | rubros                            | tabla       | dbcalculadoragampack_se1t_user
+ venta              | subfamilias                       | tabla       | dbcalculadoragampack_se1t_user
+(158 filas)
+

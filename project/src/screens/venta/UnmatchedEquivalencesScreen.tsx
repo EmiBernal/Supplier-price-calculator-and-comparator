@@ -143,7 +143,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const [showTop, setShowTop] = useState(false);
 
   useEffect(() => {
-    apiFetch('/api/no-relacionados/proveedores')
+    apiFetch('/api/gampack')
       .then(r => r.json())
       .then(d => {
         if (!Array.isArray(d)) { setExternals([]); return; }
