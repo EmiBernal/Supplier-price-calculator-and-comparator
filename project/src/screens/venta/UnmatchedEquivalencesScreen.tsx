@@ -16,13 +16,44 @@ function buildTrigramFreq(s: string) {
   return t;
 }
 //Comentario
-function cosineByTri(a: Record<string, number>, b: Record<string, number>) {
+// Similaridad combinada: trigramas + Levenshtein
+function cosineByTri(a: Record<string, number>, b: Record<string, number>, sA?: string, sB?: string) {
   let dot = 0, nA = 0, nB = 0;
   for (const k in a) { nA += a[k] * a[k]; if (b[k]) dot += a[k] * b[k]; }
   for (const k in b) nB += b[k] * b[k];
   const d = Math.sqrt(nA) * Math.sqrt(nB);
-  return d ? dot / d : 0;
+  const cosine = d ? dot / d : 0;
+
+  // 🚀 Agregamos un ajuste basado en distancia de edición (Levenshtein)
+  if (sA && sB) {
+    const lev = levenshteinDistance(sA, sB);
+    const maxLen = Math.max(sA.length, sB.length);
+    const levScore = 1 - lev / maxLen; // 1 = iguales, 0 = muy distintos
+    // Combinamos ambos scores con más peso al trigram
+    return (cosine * 0.7 + levScore * 0.3);
+  }
+  return cosine;
 }
+
+// Simple Levenshtein distance
+function levenshteinDistance(a: string, b: string) {
+  const dp = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[a.length][b.length];
+}
+
 function tokenizeName(s: string) {
   return sanitizeText(s).split(/\s+/).filter(w => w.length >= 3);
 }
@@ -259,7 +290,7 @@ const generateAutoMatches = useCallback(async () => {
         const id = `${i.id_interno}|${eIdx.item.id_externo}`;
         if (ignoredPairs.has(id) || seen.has(id)) continue;
 
-        const score = cosineByTri(iTri, eIdx.tri);
+        const score = cosineByTri(iTri, eIdx.tri, sanitizeText(i.nom_interno ?? ''), sanitizeText(eIdx.item.nom_externo ?? ''));
         if (score >= threshold)
           local.push({
             internal: i,
