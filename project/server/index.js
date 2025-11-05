@@ -1048,6 +1048,58 @@ app.get('/api/no-relacionados/proveedores', handleNoRelacionadosExternos);
 app.get('/api/no-relacionados/internos', handleNoRelacionadosInternos);
 app.get('/api/no-relacionados/gampack', handleNoRelacionadosInternos);
 
+// ---------- LISTA GAMPACK (TODOS) ----------
+app.get('/api/gampack', async (req, res) => {
+  const db = req.ctx.db;
+  const searchRaw = typeof req.query.search === 'string' ? req.query.search : '';
+  const search = searchRaw.trim().toLowerCase();
+  const limit = parseLimitParam(req.query.limit);
+  const offset = parseOffsetParam(req.query.offset);
+
+  const params = [];
+  const where = [];
+
+  if (search) {
+    const likeParam = `%${search}%`;
+    where.push(`(
+      LOWER(li.cod_interno) LIKE $${params.length + 1} OR
+      LOWER(li.nom_interno) LIKE $${params.length + 2}
+    )`);
+    params.push(likeParam, likeParam);
+  }
+
+  const sql = `
+    SELECT
+      li.id_interno,
+      li.cod_interno,
+      li.nom_interno,
+      li.precio_final,
+      li.fecha,
+      TO_CHAR(li.fecha, 'YYYY-MM') AS mes_actualizacion,
+      EXISTS (
+        SELECT 1
+        FROM venta.relacion_articulos ra
+        WHERE ra.id_lista_interna = li.id_interno
+      ) AS tiene_relacion
+    FROM venta.lista_interna li
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY li.fecha DESC NULLS LAST,
+             li.nom_interno ASC
+    LIMIT $${params.length + 1}
+    OFFSET $${params.length + 2}
+  `;
+
+  params.push(limit, offset);
+
+  try {
+    const rows = await getDbRows(db, sql, params);
+    return res.json(normalizeRowsDates(rows, ['fecha']));
+  } catch (err) {
+    console.error('Error al obtener productos Gampack:', err);
+    return res.status(500).json({ error: 'Error al obtener productos Gampack' });
+  }
+});
+
 // ---------- CHECK PRODUCT ----------
 app.post('/api/check-product', async (req, res) => {
   const db = req.ctx.db;
