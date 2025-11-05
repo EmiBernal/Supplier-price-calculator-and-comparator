@@ -613,7 +613,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
             {/* INTERNOS */}
             <div>
               <div className="flex items-end justify-between gap-3 mb-3">
-                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Productos Gampack no relacionados</h2>
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Productos Gampack</h2>
                 <div className="flex items-center gap-2">
                   <Button variant={deleteModeInt ? 'primary' : 'secondary'} onClick={() => { setDeleteModeInt(v => !v); if (deleteModeInt) setIntDeleteIds(new Set()); }}>
                     {deleteModeInt ? 'Salir de modo eliminar' : 'Modo eliminar'}
