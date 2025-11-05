@@ -6,36 +6,30 @@ import { apiFetch } from '../../lib/api';
 import { Trash2 } from 'lucide-react';
 import { formatYMD, compareYMD, formatYearMonth, compareYearMonth } from '../../utils/date';
 
-/* ---------- Similaridad por trigramas + coseno (solo nombres) ---------- */
+
+/* ---------- Similaridad mejorada: trigramas + Levenshtein + fonética ---------- */
+
+// Limpia texto: minúsculas, sin acentos, sin caracteres raros
 function sanitizeText(s: string) {
-  return `  ${s.toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N} ]/gu, ' ')} `;
+  return s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N} ]/gu, " ")
+    .trim();
 }
+
+// Convierte texto en trigramas (para similitud semántica)
 function buildTrigramFreq(s: string) {
   const t: Record<string, number> = {};
-  for (let i = 0; i < s.length - 2; i++) t[s.slice(i, i + 3)] = (t[s.slice(i, i + 3)] || 0) + 1;
+  const str = `  ${s}  `;
+  for (let i = 0; i < str.length - 2; i++) {
+    const tri = str.slice(i, i + 3);
+    t[tri] = (t[tri] || 0) + 1;
+  }
   return t;
 }
-//Comentario
-// Similaridad combinada: trigramas + Levenshtein
-function cosineByTri(a: Record<string, number>, b: Record<string, number>, sA?: string, sB?: string) {
-  let dot = 0, nA = 0, nB = 0;
-  for (const k in a) { nA += a[k] * a[k]; if (b[k]) dot += a[k] * b[k]; }
-  for (const k in b) nB += b[k] * b[k];
-  const d = Math.sqrt(nA) * Math.sqrt(nB);
-  const cosine = d ? dot / d : 0;
 
-  // 🚀 Agregamos un ajuste basado en distancia de edición (Levenshtein)
-  if (sA && sB) {
-    const lev = levenshteinDistance(sA, sB);
-    const maxLen = Math.max(sA.length, sB.length);
-    const levScore = 1 - lev / maxLen; // 1 = iguales, 0 = muy distintos
-    // Combinamos ambos scores con más peso al trigram
-    return (cosine * 0.7 + levScore * 0.3);
-  }
-  return cosine;
-}
-
-// Simple Levenshtein distance
+// Distancia Levenshtein simple
 function levenshteinDistance(a: string, b: string) {
   const dp = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
   for (let i = 0; i <= a.length; i++) dp[i][0] = i;
@@ -54,10 +48,53 @@ function levenshteinDistance(a: string, b: string) {
   return dp[a.length][b.length];
 }
 
+// Similitud combinada: trigramas + Levenshtein + fonética
+function cosineByTri(
+  a: Record<string, number>,
+  b: Record<string, number>,
+  sA?: string,
+  sB?: string
+) {
+  // --- trigram cosine ---
+  let dot = 0, nA = 0, nB = 0;
+  for (const k in a) { nA += a[k] * a[k]; if (b[k]) dot += a[k] * b[k]; }
+  for (const k in b) nB += b[k] * b[k];
+  const cosine = Math.sqrt(nA * nB) ? dot / Math.sqrt(nA * nB) : 0;
+
+  if (!sA || !sB) return cosine;
+
+  // --- Levenshtein similarity ---
+  const lev = levenshteinDistance(sA, sB);
+  const maxLen = Math.max(sA.length, sB.length);
+  const levSim = 1 - lev / maxLen;
+
+  // --- Fonética básica: comparar simplificación de consonantes y vocales ---
+  const normalizeSound = (txt: string) =>
+    txt
+      .replace(/[aeiou]/g, "a")
+      .replace(/(ll|y)/g, "y")
+      .replace(/(c|z|s)/g, "s")
+      .replace(/(b|v)/g, "b")
+      .replace(/h/g, "")
+      .replace(/([rsntd]+)$/g, ""); // quita sufijos leves
+  const phonA = normalizeSound(sA);
+  const phonB = normalizeSound(sB);
+  const phonLev = levenshteinDistance(phonA, phonB);
+  const phonSim = 1 - phonLev / Math.max(phonA.length, phonB.length);
+
+  // --- Combinación ponderada ---
+  // 0.6 trigram, 0.25 Levenshtein, 0.15 fonético
+  const score = cosine * 0.6 + levSim * 0.25 + phonSim * 0.15;
+
+  return Math.min(1, Math.max(0, score));
+}
+
+// Tokeniza nombre (solo palabras útiles)
 function tokenizeName(s: string) {
   return sanitizeText(s).split(/\s+/).filter(w => w.length >= 3);
 }
 
+/* ---------- Tipos y helpers ---------- */
 type SortDir = 'asc' | 'desc';
 type SortKeyExternal = 'cod_externo' | 'nom_externo' | 'proveedor' | 'fecha' | 'mes_actualizacion';
 type SortKeyInternal = 'cod_interno' | 'nom_interno' | 'fecha' | 'mes_actualizacion';
@@ -111,6 +148,7 @@ const formatMonthLabel = (value: unknown) => {
   const [year, month] = normalized.split('-');
   return `${month}/${year}`;
 };
+
 
 /* ---------- Input de búsqueda ---------- */
 const SearchInput: React.FC<{ value: string; onChange: (v: string) => void; placeholder: string; }> =
