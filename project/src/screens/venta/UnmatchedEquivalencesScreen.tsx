@@ -143,7 +143,8 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const [showTop, setShowTop] = useState(false);
 
   useEffect(() => {
-    apiFetch('/api/gampack')
+    // ✅ Proveedores no relacionados
+    apiFetch('/api/no-relacionados/proveedores')
       .then(r => r.json())
       .then(d => {
         if (!Array.isArray(d)) { setExternals([]); return; }
@@ -159,7 +160,8 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       })
       .catch(() => setExternals([]));
 
-    apiFetch('/api/no-relacionados/gampack')
+    // ✅ Productos Gampack (todos, no solo los no relacionados)
+    apiFetch('/api/gampack')
       .then(r => r.json())
       .then(d => {
         if (!Array.isArray(d)) { setInternals([]); return; }
@@ -175,6 +177,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       })
       .catch(() => setInternals([]));
   }, []);
+
 
   // accesos rápidos teclado
   useEffect(() => {
