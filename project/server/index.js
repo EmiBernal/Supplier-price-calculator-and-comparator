@@ -1297,19 +1297,71 @@ app.post('/api/check-product', async (req, res) => {
 app.get('/api/relaciones', async (req, res) => {
   try {
     const db = req.ctx.db;
-    const rows = await getDbRows(
-      db,
-      `SELECT r.*,
-              r.created_at AS relation_created_at,
-              lp.cod_externo, lp.nom_externo, 
-              li.cod_interno, li.nom_interno
-       FROM relacion_articulos r
-       LEFT JOIN lista_precios lp ON r.id_lista_precios = lp.id_externo
-       LEFT JOIN lista_interna li ON r.id_lista_interna = li.id_interno
-       ORDER BY r.created_at DESC`,
-      []
+
+    const collectIds = (raw) => {
+      if (!raw) return [];
+      const values = Array.isArray(raw) ? raw : [raw];
+      const ids = new Set();
+      values.forEach((value) => {
+        if (typeof value !== 'string') return;
+        value
+          .split(',')
+          .map((chunk) => Number.parseInt(chunk.trim(), 10))
+          .filter((num) => Number.isFinite(num) && num > 0)
+          .forEach((num) => ids.add(num));
+      });
+      return Array.from(ids);
+    };
+
+    const gampackIds = collectIds(req.query.gampack)
+      .concat(collectIds(req.query.id_lista_interna))
+      .concat(collectIds(req.query.idListaInterna));
+
+    const uniqueIds = Array.from(new Set(gampackIds));
+    const params = [];
+    let whereClause = '';
+
+    if (uniqueIds.length > 0) {
+      params.push(uniqueIds);
+      whereClause = 'WHERE r.id_lista_interna = ANY($1::bigint[])';
+    }
+
+    const sql = `
+      SELECT
+        r.id,
+        r.id_lista_precios,
+        r.id_lista_interna,
+        r.criterio_relacion,
+        r.created_at AS relation_created_at,
+        lp.id_externo,
+        lp.cod_externo,
+        lp.nom_externo,
+        lp.precio_final AS precio_externo,
+        lp.fecha AS fecha_externa,
+        lp.proveedor,
+        lp.mes_actualizacion AS proveedor_mes_actualizacion,
+        lp.familia AS proveedor_familia,
+        li.id_interno,
+        li.cod_interno,
+        li.nom_interno,
+        li.precio_final AS precio_interno,
+        li.fecha AS fecha_interna,
+        li.mes_actualizacion AS gampack_mes_actualizacion,
+        li.familia AS gampack_familia
+      FROM relacion_articulos r
+      LEFT JOIN lista_precios lp ON r.id_lista_precios = lp.id_externo
+      LEFT JOIN lista_interna li ON r.id_lista_interna = li.id_interno
+      ${whereClause}
+      ORDER BY
+        lp.proveedor ASC NULLS LAST,
+        lp.nom_externo ASC NULLS LAST,
+        r.created_at DESC
+    `;
+
+    const rows = await getDbRows(db, sql, params);
+    return res.json(
+      normalizeRowsDates(rows, ['fecha_externa', 'fecha_interna', 'relation_created_at'])
     );
-    res.json(rows);
   } catch (err) {
     console.error('Error al obtener relaciones:', err);
     return res.status(500).json({ error: 'Error al obtener relaciones' });
