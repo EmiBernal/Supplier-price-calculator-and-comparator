@@ -12,6 +12,15 @@ type GampackProduct = {
   precio_final: number | null;
   fecha: string | null;
   mes_actualizacion?: string | null;
+  tiene_relacion?: boolean | number | string | null;
+  relatedCount?: number | null;
+  relationsCount?: number | null;
+  related_count?: number | null;
+  relations_count?: number | null;
+  relations?: unknown;
+  related?: unknown;
+  relatedProducts?: unknown;
+  related_products?: unknown;
 };
 
 type RawRelation = {
@@ -140,6 +149,70 @@ const differenceLabel = (difference: number | null): string => {
   return `Diferencia: ${formatted} ⚪`;
 };
 
+const normalizeBooleanLike = (value: unknown): boolean | null => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value > 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+    if (['true', 't', '1', 'si', 'sí', 'yes', 'y'].includes(normalized)) {
+      return true;
+    }
+    if (['false', 'f', '0', 'no', 'n'].includes(normalized)) {
+      return false;
+    }
+    const parsed = Number.parseFloat(normalized);
+    if (Number.isFinite(parsed)) {
+      return parsed > 0;
+    }
+  }
+  return null;
+};
+
+const normalizeNumberLike = (value: unknown): number | null => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number.parseFloat(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const hasActiveRelations = (product: GampackProduct): boolean => {
+  const booleanLike = normalizeBooleanLike(product.tiene_relacion);
+  if (booleanLike != null) {
+    return booleanLike;
+  }
+
+  const numericCandidates = [
+    normalizeNumberLike(product.relatedCount),
+    normalizeNumberLike(product.relationsCount),
+    normalizeNumberLike(product.related_count),
+    normalizeNumberLike(product.relations_count),
+  ];
+
+  if (numericCandidates.some((value) => value != null && value > 0)) {
+    return true;
+  }
+
+  const arrayCandidates = [
+    product.relations,
+    product.related,
+    product.relatedProducts,
+    product.related_products,
+  ];
+
+  if (arrayCandidates.some((value) => Array.isArray(value) && value.length > 0)) {
+    return true;
+  }
+
+  return false;
+};
+
 export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> = ({
   className,
 }) => {
@@ -266,16 +339,21 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
     };
   }, [selectedProducts]);
 
+  const gampackItemsWithRelations = useMemo(
+    () => gampackItems.filter((item) => hasActiveRelations(item)),
+    [gampackItems]
+  );
+
   const filteredGampackItems = useMemo(() => {
-    if (!gampackSearch.trim()) return gampackItems;
+    if (!gampackSearch.trim()) return gampackItemsWithRelations;
     const search = gampackSearch.trim().toLowerCase();
-    return gampackItems.filter((item) => {
+    return gampackItemsWithRelations.filter((item) => {
       const haystack = [item.nom_interno, item.cod_interno]
         .map((value) => value?.toString().toLowerCase() ?? '')
         .join(' ');
       return haystack.includes(search);
     });
-  }, [gampackItems, gampackSearch]);
+  }, [gampackItemsWithRelations, gampackSearch]);
 
   const selectedDetails = useMemo<SelectedSummary[]>(() => {
     const map = new Map(gampackItems.map((item) => [item.id_interno, item] as const));
@@ -343,7 +421,7 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
         <header className="mb-4">
           <h2 className="text-lg font-semibold text-white">Productos Gampack</h2>
           <p className="text-sm text-gray-400">
-            Seleccioná uno o varios productos para descubrir sus relaciones con proveedores.
+            Seleccioná uno o varios productos Gampack con relaciones activas para ver detalles.
           </p>
         </header>
 
@@ -381,45 +459,51 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
             </div>
           )}
 
-          <ul className="max-h-[70vh] divide-y divide-gray-800 overflow-y-auto">
-            {filteredGampackItems.length === 0 && !loadingGampack ? (
-              <li className="px-4 py-6 text-center text-sm text-gray-500">
-                No encontramos resultados con ese criterio.
-              </li>
-            ) : (
-              filteredGampackItems.map((product) => {
-                const isSelected = selectedProducts.includes(product.id_interno);
-                return (
-                  <li
-                    key={product.id_interno}
-                    onClick={() => toggleProductSelection(product.id_interno)}
-                    className={[
-                      'cursor-pointer px-4 py-3 transition-all',
-                      'hover:bg-green-600/20',
-                      isSelected
-                        ? 'bg-green-600/30 text-white'
-                        : 'text-gray-200',
-                    ].join(' ')}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-semibold">{product.nom_interno ?? 'Sin nombre'}</p>
-                        <p className="text-xs text-gray-400">Código: {product.cod_interno ?? '—'}</p>
+          {!loadingGampack && gampackItemsWithRelations.length === 0 ? (
+            <div className="text-center text-gray-500 dark:text-white/60 p-4">
+              No hay productos Gampack con relaciones registradas.
+            </div>
+          ) : (
+            <ul className="max-h-[70vh] divide-y divide-gray-800 overflow-y-auto">
+              {filteredGampackItems.length === 0 && !loadingGampack ? (
+                <li className="px-4 py-6 text-center text-sm text-gray-500">
+                  No encontramos resultados con ese criterio.
+                </li>
+              ) : (
+                filteredGampackItems.map((product) => {
+                  const isSelected = selectedProducts.includes(product.id_interno);
+                  return (
+                    <li
+                      key={product.id_interno}
+                      onClick={() => toggleProductSelection(product.id_interno)}
+                      className={[
+                        'cursor-pointer px-4 py-3 transition-all',
+                        'hover:bg-green-600/20',
+                        isSelected
+                          ? 'bg-green-600/30 text-white'
+                          : 'text-gray-200',
+                      ].join(' ')}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-semibold">{product.nom_interno ?? 'Sin nombre'}</p>
+                          <p className="text-xs text-gray-400">Código: {product.cod_interno ?? '—'}</p>
+                        </div>
+                        {isSelected && (
+                          <CheckCircle2 className="h-5 w-5 text-green-400" aria-hidden="true" />
+                        )}
                       </div>
-                      {isSelected && (
-                        <CheckCircle2 className="h-5 w-5 text-green-400" aria-hidden="true" />
+                      {product.precio_final != null && (
+                        <p className="mt-2 text-sm text-gray-300">
+                          Precio final: {formatCurrency(product.precio_final)}
+                        </p>
                       )}
-                    </div>
-                    {product.precio_final != null && (
-                      <p className="mt-2 text-sm text-gray-300">
-                        Precio final: {formatCurrency(product.precio_final)}
-                      </p>
-                    )}
-                  </li>
-                );
-              })
-            )}
-          </ul>
+                    </li>
+                  );
+                })
+              )}
+            </ul>
+          )}
         </div>
       </section>
 
