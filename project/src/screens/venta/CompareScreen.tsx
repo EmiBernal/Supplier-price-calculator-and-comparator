@@ -6,6 +6,7 @@ import { PriceComparison } from '../../tipos/database';
 import { Search, List, LayoutGrid, CalendarDays, XCircle, Loader2 } from 'lucide-react';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
+import { GampackRelationsView } from '../../components/GampackRelationsView';
 
 interface CompareScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -22,6 +23,7 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState<'table' | 'detailed'>('detailed');
+  const [isAlternateView, setIsAlternateView] = useState(false);
 
   // Filtros
   const [dateFrom, setDateFrom] = useState(''); // YYYY-MM-DD
@@ -152,12 +154,22 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
   }, []);
 
   useEffect(() => {
+    if (isAlternateView) return;
     const delay = setTimeout(() => {
       if (dateRangeInvalid) return;
       loadComparisons(searchTerm);
     }, 300);
     return () => clearTimeout(delay);
-  }, [searchTerm, dateFrom, dateTo, famGenSel, famEspSel, dateRangeInvalid, selectedProviders]);
+  }, [
+    searchTerm,
+    dateFrom,
+    dateTo,
+    famGenSel,
+    famEspSel,
+    dateRangeInvalid,
+    selectedProviders,
+    isAlternateView
+  ]);
 
   // Construye el valor que mandamos como `familia` al backend
   const buildFamiliaQuery = () => {
@@ -237,8 +249,8 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
     setSelectedProviders([]);
   };
 
-  const handleLayoutChange = () => {
-    setLayout((prev) => (prev === 'detailed' ? 'table' : 'detailed'));
+  const toggleAlternateView = () => {
+    setIsAlternateView((prev) => !prev);
   };
 
   // Helpers diferencia
@@ -311,8 +323,10 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
       <div className="max-w-7xl mx-auto">
         <Navigation onBack={() => onNavigate('home')} title="Comparar Gampacks" />
 
-        {/* Filtros */}
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-2">
+        {!isAlternateView && (
+          <>
+            {/* Filtros */}
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-2">
           <div className="md:col-span-2">
             <label className="block text-xs text-gray-600 dark:text-white/80 mb-1">Buscar</label>
             <div className="relative">
@@ -438,155 +452,198 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
           </div>
         )}
 
-        <div className="flex justify-between items-center mb-4">
-          <p className="text-sm text-gray-700 dark:text-white">
-            Total productos: <strong className="dark:text-white">{comparisons.length}</strong>
-            {(dateFrom || dateTo) && (
-              <span className="ml-2 text-gray-600 dark:text-white/70">
-                {dateFrom ? `Desde ${dateFrom}` : ''}{dateFrom && dateTo ? ' · ' : ''}{dateTo ? `Hasta ${dateTo}` : ''}
-              </span>
-            )}
-          </p>
+          </>
+        )}
 
-          {/* Botón Cambiar vista */}
-          <button
-            onClick={() => handleLayoutChange()}
-            aria-pressed={layout === 'table'}
-            className={[
-              'group inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 shadow-sm ring-1',
-              'bg-white text-gray-900 ring-gray-200 hover:bg-gray-50 hover:ring-gray-300 active:bg-gray-100',
-              'dark:bg-white/10 dark:text-white dark:ring-white/15 dark:hover:bg-white/15 dark:hover:ring-white/20 dark:active:bg-white/20',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-900 dark:focus-visible:ring-white dark:focus-visible:ring-offset-0',
-              'backdrop-blur supports-[backdrop-filter]:backdrop-blur',
-            ].join(' ')}
-            title="Cambiar vista"
-          >
-            <span className="inline-flex items-center">
-              {layout === 'detailed' ? (
-                <List size={18} className="transition-transform duration-200 group-active:scale-95" />
-              ) : (
-                <LayoutGrid size={18} className="transition-transform duration-200 group-active:scale-95" />
+        <div className="flex flex-col gap-3 mb-4 md:flex-row md:items-center md:justify-between">
+          {!isAlternateView ? (
+            <p className="text-sm text-gray-700 dark:text-white">
+              Total productos: <strong className="dark:text-white">{comparisons.length}</strong>
+              {(dateFrom || dateTo) && (
+                <span className="ml-2 text-gray-600 dark:text-white/70">
+                  {dateFrom ? `Desde ${dateFrom}` : ''}{dateFrom && dateTo ? ' · ' : ''}{dateTo ? `Hasta ${dateTo}` : ''}
+                </span>
               )}
-            </span>
-            <span className="transition-colors">Cambiar vista</span>
-          </button>
+            </p>
+          ) : (
+            <p className="text-sm text-gray-700 dark:text-white">
+              Explorá las relaciones entre productos Gampack y proveedores externos.
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {!isAlternateView && (
+              <div className="inline-flex rounded-full border border-gray-200 bg-white p-1 text-sm shadow-sm dark:border-white/10 dark:bg-white/5">
+                <button
+                  type="button"
+                  onClick={() => setLayout('detailed')}
+                  className={[
+                    'inline-flex items-center gap-1 rounded-full px-3 py-1 font-medium transition',
+                    layout === 'detailed'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:text-blue-600 dark:text-white/70 dark:hover:text-white'
+                  ].join(' ')}
+                >
+                  <LayoutGrid size={16} /> Tarjetas
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLayout('table')}
+                  className={[
+                    'inline-flex items-center gap-1 rounded-full px-3 py-1 font-medium transition',
+                    layout === 'table'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:text-blue-600 dark:text-white/70 dark:hover:text-white'
+                  ].join(' ')}
+                >
+                  <List size={16} /> Tabla
+                </button>
+              </div>
+            )}
+
+            <button
+              onClick={toggleAlternateView}
+              aria-pressed={isAlternateView}
+              className={[
+                'group inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 shadow-sm ring-1',
+                'bg-white text-gray-900 ring-gray-200 hover:bg-gray-50 hover:ring-gray-300 active:bg-gray-100',
+                'dark:bg-white/10 dark:text-white dark:ring-white/15 dark:hover:bg-white/15 dark:hover:ring-white/20 dark:active:bg-white/20',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-900 dark:focus-visible:ring-white dark:focus-visible:ring-offset-0',
+                'backdrop-blur supports-[backdrop-filter]:backdrop-blur',
+              ].join(' ')}
+              title="Cambiar vista"
+            >
+              <span className="inline-flex items-center">
+                {isAlternateView ? (
+                  <List size={18} className="transition-transform duration-200 group-active:scale-95" />
+                ) : (
+                  <LayoutGrid size={18} className="transition-transform duration-200 group-active:scale-95" />
+                )}
+              </span>
+              <span className="transition-colors">Cambiar vista</span>
+            </button>
+          </div>
         </div>
 
-        {layout === 'table' ? (
-          <Table
-            columns={[
-              { key: 'internalProduct', label: 'Producto Interno', sortable: true, render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
-              { key: 'externalProduct', label: 'Producto Proveedor', sortable: true, render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
-              { key: 'internalFinalPrice', label: 'Final Interno', sortable: true, render: (v: any) => <span className="dark:text-white">{typeof v === 'number' ? `$${v.toFixed(2)}` : '—'}</span> },
-              { key: 'externalFinalPrice', label: 'Final Proveedor', sortable: true, render: (v: any) => <span className="dark:text-white">{typeof v === 'number' ? `$${v.toFixed(2)}` : '—'}</span> },
-              { key: 'internalDate', label: 'Fecha Interna', render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
-              { key: 'externalDate', label: 'Fecha Proveedor', render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
-              { key: 'supplier', label: 'Proveedor', render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
-              {
-                key: 'priceDifference',
-                label: 'Diferencia',
-                render: (_v: any, row: any) => {
-                  const pct = getDifferencePct(row.internalFinalPrice as number | null, row.externalFinalPrice as number | null);
-                  const amt = getDifferenceAmt(row.internalFinalPrice as number | null, row.externalFinalPrice as number | null);
-                  if (pct == null || amt == null) return <span className="dark:text-white">N/A</span>;
-                  return (
-                    <span className="inline-flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-white/10 dark:text-white">{pct}%</span>
-                      <span className="text-sm text-gray-700 dark:text-white/80">{formatSignedMoney(amt)}</span>
-                    </span>
-                  );
+        {!isAlternateView ? (
+          layout === 'table' ? (
+            <Table
+              columns={[
+                { key: 'internalProduct', label: 'Producto Interno', sortable: true, render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
+                { key: 'externalProduct', label: 'Producto Proveedor', sortable: true, render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
+                { key: 'internalFinalPrice', label: 'Final Interno', sortable: true, render: (v: any) => <span className="dark:text-white">{typeof v === 'number' ? `$${v.toFixed(2)}` : '—'}</span> },
+                { key: 'externalFinalPrice', label: 'Final Proveedor', sortable: true, render: (v: any) => <span className="dark:text-white">{typeof v === 'number' ? `$${v.toFixed(2)}` : '—'}</span> },
+                { key: 'internalDate', label: 'Fecha Interna', render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
+                { key: 'externalDate', label: 'Fecha Proveedor', render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
+                { key: 'supplier', label: 'Proveedor', render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
+                {
+                  key: 'priceDifference',
+                  label: 'Diferencia',
+                  render: (_v: any, row: any) => {
+                    const pct = getDifferencePct(row.internalFinalPrice as number | null, row.externalFinalPrice as number | null);
+                    const amt = getDifferenceAmt(row.internalFinalPrice as number | null, row.externalFinalPrice as number | null);
+                    if (pct == null || amt == null) return <span className="dark:text-white">N/A</span>;
+                    return (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-white/10 dark:text-white">{pct}%</span>
+                        <span className="text-sm text-gray-700 dark:text-white/80">{formatSignedMoney(amt)}</span>
+                      </span>
+                    );
+                  },
                 },
-              },
-              {
-                key: 'conclusion',
-                label: 'Conclusión',
-                render: (_v: any, row: any) => {
-                  const internal = typeof row.internalFinalPrice === 'number' ? row.internalFinalPrice : null;
-                  const external = typeof row.externalFinalPrice === 'number' ? row.externalFinalPrice : null;
-                  const verdict = getVerdict(internal, external);
-                  return (
-                    <span
+                {
+                  key: 'conclusion',
+                  label: 'Conclusión',
+                  render: (_v: any, row: any) => {
+                    const internal = typeof row.internalFinalPrice === 'number' ? row.internalFinalPrice : null;
+                    const external = typeof row.externalFinalPrice === 'number' ? row.externalFinalPrice : null;
+                    const verdict = getVerdict(internal, external);
+                    return (
+                      <span
+                        className={[
+                          'inline-flex items-center px-2.5 py-1 rounded text-xs font-medium border',
+                          verdict.classes
+                        ].join(' ')}
+                      >
+                        {verdict.text}
+                      </span>
+                    );
+                  }
+                }
+              ]}
+              data={comparisons}
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {loading && <div className="text-sm text-gray-600 dark:text-white/70">Cargando...</div>}
+              {!loading && comparisons.map((item, i) => {
+                const internal = typeof item.internalFinalPrice === 'number' ? item.internalFinalPrice : null;
+                const external = typeof item.externalFinalPrice === 'number' ? item.externalFinalPrice : null;
+                const pct = getDifferencePct(internal, external);
+                const amt = getDifferenceAmt(internal, external);
+                const verdict = getVerdict(internal, external);
+
+                return (
+                  <div key={i} className="border rounded-xl p-4 shadow-sm bg-white dark:bg-white/5 border-gray-200 dark:border-white/10 hover:shadow-md transition duration-300">
+                    <div className="grid grid-cols-2 gap-4 text-xs text-gray-700 dark:text-white/80 mb-2">
+                      <div>
+                        <p className="text-gray-500 dark:text-white/60">Fecha Interna</p>
+                        <p className="font-medium dark:text-white">{item.internalDate ?? '—'}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-500 dark:text-white/60">Fecha Proveedor</p>
+                        <p className="font-medium dark:text-white">{item.externalDate ?? '—'}</p>
+                        <p className="text-gray-500 dark:text-white/60 mt-1">
+                          Proveedor: <span className="font-semibold text-gray-900 dark:text-white">{item.supplier ?? '—'}</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4 items-end">
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-white/60">Producto Gampack</p>
+                        <p className="text-base font-semibold text-gray-900 dark:text-white">{item.internalProduct ?? '—'}</p>
+                        <p className="text-xs text-gray-500 dark:text-white/60 mt-1">Precio Interno</p>
+                        <p className="text-lg font-bold text-green-600">{internal != null ? `$${internal.toFixed(2)}` : '—'}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 dark:text-white/60">Diferencia</p>
+                        {pct == null || amt == null ? (
+                          <p className="text-sm dark:text-white/80">N/A</p>
+                        ) : (
+                          <div className="inline-flex flex-col items-center gap-1">
+                            <span className="px-2 py-0.5 rounded text-sm font-semibold bg-gray-100 text-gray-800 dark:bg-white/10 dark:text-white">{pct}%</span>
+                            <span className="text-sm text-gray-700 dark:text-white/80">{formatSignedMoney(amt)}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-500 dark:text-white/60">Producto Proveedor</p>
+                        <p className="text-base font-semibold text-gray-900 dark:text-white">{item.externalProduct ?? '—'}</p>
+                        <p className="text-xs text-gray-500 dark:text-white/60 mt-1">Precio Externo</p>
+                        <p className="text-lg font-bold text-blue-600">{external != null ? `$${external.toFixed(2)}` : '—'}</p>
+                      </div>
+                    </div>
+
+                    {/* Veredicto textual */}
+                    <div
                       className={[
-                        'inline-flex items-center px-2.5 py-1 rounded text-xs font-medium border',
+                        'mt-3 px-3 py-2 rounded-lg border text-sm font-medium',
                         verdict.classes
                       ].join(' ')}
                     >
                       {verdict.text}
-                    </span>
-                  );
-                }
-              }
-            ]}
-            data={comparisons}
-          />
+                    </div>
+                  </div>
+                );
+              })}
+              {!loading && comparisons.length === 0 && (
+                <div className="text-sm text-gray-600 dark:text-white/70">No hay resultados para los filtros seleccionados.</div>
+              )}
+            </div>
+          )
         ) : (
-          <div className="grid grid-cols-1 gap-4">
-            {loading && <div className="text-sm text-gray-600 dark:text-white/70">Cargando...</div>}
-            {!loading && comparisons.map((item, i) => {
-              const internal = typeof item.internalFinalPrice === 'number' ? item.internalFinalPrice : null;
-              const external = typeof item.externalFinalPrice === 'number' ? item.externalFinalPrice : null;
-              const pct = getDifferencePct(internal, external);
-              const amt = getDifferenceAmt(internal, external);
-              const verdict = getVerdict(internal, external);
-
-              return (
-                <div key={i} className="border rounded-xl p-4 shadow-sm bg-white dark:bg-white/5 border-gray-200 dark:border-white/10 hover:shadow-md transition duration-300">
-                  <div className="grid grid-cols-2 gap-4 text-xs text-gray-700 dark:text-white/80 mb-2">
-                    <div>
-                      <p className="text-gray-500 dark:text-white/60">Fecha Interna</p>
-                      <p className="font-medium dark:text-white">{item.internalDate ?? '—'}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-gray-500 dark:text-white/60">Fecha Proveedor</p>
-                      <p className="font-medium dark:text-white">{item.externalDate ?? '—'}</p>
-                      <p className="text-gray-500 dark:text-white/60 mt-1">
-                        Proveedor: <span className="font-semibold text-gray-900 dark:text-white">{item.supplier ?? '—'}</span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4 items-end">
-                    <div>
-                      <p className="text-xs text-gray-500 dark:text-white/60">Producto Gampack</p>
-                      <p className="text-base font-semibold text-gray-900 dark:text-white">{item.internalProduct ?? '—'}</p>
-                      <p className="text-xs text-gray-500 dark:text-white/60 mt-1">Precio Interno</p>
-                      <p className="text-lg font-bold text-green-600">{internal != null ? `$${internal.toFixed(2)}` : '—'}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xs text-gray-500 dark:text-white/60">Diferencia</p>
-                      {pct == null || amt == null ? (
-                        <p className="text-sm dark:text-white/80">N/A</p>
-                      ) : (
-                        <div className="inline-flex flex-col items-center gap-1">
-                          <span className="px-2 py-0.5 rounded text-sm font-semibold bg-gray-100 text-gray-800 dark:bg-white/10 dark:text-white">{pct}%</span>
-                          <span className="text-sm text-gray-700 dark:text-white/80">{formatSignedMoney(amt)}</span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-500 dark:text-white/60">Producto Proveedor</p>
-                      <p className="text-base font-semibold text-gray-900 dark:text-white">{item.externalProduct ?? '—'}</p>
-                      <p className="text-xs text-gray-500 dark:text-white/60 mt-1">Precio Externo</p>
-                      <p className="text-lg font-bold text-blue-600">{external != null ? `$${external.toFixed(2)}` : '—'}</p>
-                    </div>
-                  </div>
-
-                  {/* Veredicto textual */}
-                  <div
-                    className={[
-                      'mt-3 px-3 py-2 rounded-lg border text-sm font-medium',
-                      verdict.classes
-                    ].join(' ')}
-                  >
-                    {verdict.text}
-                  </div>
-                </div>
-              );
-            })}
-            {!loading && comparisons.length === 0 && (
-              <div className="text-sm text-gray-600 dark:text-white/70">No hay resultados para los filtros seleccionados.</div>
-            )}
-          </div>
+          <GampackRelationsView />
         )}
       </div>
     </div>
