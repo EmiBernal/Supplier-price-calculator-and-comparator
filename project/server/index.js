@@ -10,6 +10,38 @@ const { prepareSql } = require('./utils/sql');
 
 const app = express();
 
+const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value);
+
+const toFiniteNumber = (value) => {
+  if (isFiniteNumber(value)) {
+    return value;
+  }
+
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const safeToFixed = (value, decimals = 2, fallback = null) => {
+  const num = toFiniteNumber(value);
+  if (num == null) {
+    return fallback;
+  }
+  return num.toFixed(decimals);
+};
+
 // ===== Middlewares base =====
 const envOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
@@ -2020,13 +2052,14 @@ app.get('/api/price-comparisons', async (req, res) => {
   try {
     const rows = await getDbRows(db, sql, params);
     const results = rows.map(row => {
-      const internal = row.internalfinalprice ?? row.internalfinalprice === 0 ? Number(row.internalfinalprice) : row.internalfinalprice;
-      const external = row.externalfinalprice ?? row.externalfinalprice === 0 ? Number(row.externalfinalprice) : row.externalfinalprice;
+      const internal = toFiniteNumber(row.internalfinalprice);
+      const external = toFiniteNumber(row.externalfinalprice);
 
-      const priceDifference =
-        external && external !== 0 && internal != null
-          ? parseFloat((((internal - external) / external) * 100).toFixed(2))
-          : null;
+      let priceDifference = null;
+      if (external != null && external !== 0 && internal != null) {
+        const diff = safeToFixed(((internal - external) / external) * 100, 2);
+        priceDifference = diff == null ? null : parseFloat(diff);
+      }
 
       return {
         internalProduct: row.internalproduct || null,
@@ -2070,16 +2103,25 @@ app.get('/api/gampack/:codigo/relacionados', async (req, res) => {
 
   try {
     const rows = await getDbRows(db, sql, [codInterno]);
-    const data = rows.map(row => ({
-      name: row.name,
-      price: row.price,
-      supplier: row.supplier,
-      externalDate: ensureYMD(row.externaldate),
-      priceDifference: (row.price ?? 0) - (row.internalprice ?? 0),
-      percentageDifference: row.internalprice
-        ? (((row.price ?? 0) - row.internalprice) / row.internalprice * 100).toFixed(2)
-        : '0.00'
-    }));
+    const data = rows.map(row => {
+      const price = toFiniteNumber(row.price);
+      const internalPrice = toFiniteNumber(row.internalprice);
+      const safePrice = price ?? 0;
+      const safeInternalPrice = internalPrice ?? 0;
+      const percentage =
+        internalPrice != null && internalPrice !== 0
+          ? safeToFixed(((safePrice - internalPrice) / internalPrice) * 100, 2, '0.00')
+          : '0.00';
+
+      return {
+        name: row.name,
+        price: row.price,
+        supplier: row.supplier,
+        externalDate: ensureYMD(row.externaldate),
+        priceDifference: safePrice - safeInternalPrice,
+        percentageDifference: percentage,
+      };
+    });
     res.json(data);
   } catch (err) {
     console.error('Error al obtener productos relacionados:', err);

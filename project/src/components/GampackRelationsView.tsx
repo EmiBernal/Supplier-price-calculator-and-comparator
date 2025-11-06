@@ -3,6 +3,7 @@ import { Loader2, CheckCircle2 } from 'lucide-react';
 
 import { apiFetch } from '../lib/api';
 import { Input } from './Input';
+import { isFiniteNumber, safeToFixed } from '../utils/number';
 
 type GampackProduct = {
   id_interno: number;
@@ -72,8 +73,8 @@ const parseIdsFromQuery = (raw: unknown): number[] => {
 };
 
 const formatCurrency = (value: number | null): string => {
-  if (value == null || Number.isNaN(value)) return '—';
-  return `$${value.toFixed(2)}`;
+  const formatted = safeToFixed(value, 2);
+  return formatted === '—' ? '—' : `$${formatted}`;
 };
 
 const buildSimplifiedRelations = (rows: RawRelation[]): SimplifiedRelation[] => {
@@ -121,15 +122,15 @@ const buildSimplifiedRelations = (rows: RawRelation[]): SimplifiedRelation[] => 
 };
 
 const differenceColor = (difference: number | null): string => {
-  if (difference == null) return 'text-gray-400';
+  if (!isFiniteNumber(difference)) return 'text-gray-400';
   if (difference < 0) return 'text-green-400';
   if (difference > 0) return 'text-red-400';
   return 'text-gray-400';
 };
 
 const differenceLabel = (difference: number | null): string => {
-  if (difference == null) return 'Diferencia: sin datos ⚪';
-  const formatted = `${difference > 0 ? '+' : ''}${difference.toFixed(1)}%`;
+  if (!isFiniteNumber(difference)) return 'Diferencia: sin datos ⚪';
+  const formatted = `${difference > 0 ? '+' : ''}${safeToFixed(difference, 1)}%`;
   if (difference < 0) {
     return `Diferencia: ${formatted} 🟢`;
   }
