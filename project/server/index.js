@@ -40,6 +40,8 @@ app.use(cookieParser(process.env.COOKIE_SECRET || 'change-me')); // firma cookie
 app.use(tenantMiddleware);
 
 const PROVIDERS_DELETE_PASSWORD = process.env.PROVIDERS_DELETE_PASSWORD || 'mariano123';
+const DATABASE_RESET_PASSWORD = process.env.DATABASE_RESET_PASSWORD || 'mariano1275';
+const DATABASE_RESET_PHRASE = 'Quiero borrar la base de datos';
 
 // ===== Upload (para XLSX) =====
 const upload = multer({
@@ -1015,6 +1017,47 @@ app.post('/api/providers/active/delete-all', async (req, res) => {
   } catch (err) {
     console.error('Error POST /api/providers/active/delete-all:', err);
     res.status(500).json({ error: 'db_error' });
+  }
+});
+
+app.delete('/api/products/reset', async (req, res) => {
+  try {
+    const db = req.ctx.db;
+    if (!db) {
+      return res.status(500).json({ error: 'db_not_available' });
+    }
+
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const confirmation = typeof req.body?.confirmation === 'string' ? req.body.confirmation : '';
+
+    if (password !== DATABASE_RESET_PASSWORD || confirmation !== DATABASE_RESET_PHRASE) {
+      return res.status(403).json({ error: 'Contraseña o frase incorrecta' });
+    }
+
+    await runDb(db, 'BEGIN');
+    try {
+      await runDb(
+        db,
+        `TRUNCATE TABLE
+           relacion_articulos,
+           articulos_no_relacionados,
+           articulos_gampack_no_relacionados,
+           producto_rubro,
+           producto_externo_rubro,
+           lista_precios,
+           lista_interna
+         RESTART IDENTITY CASCADE`
+      );
+      await runDb(db, 'COMMIT');
+    } catch (truncateError) {
+      await runDb(db, 'ROLLBACK').catch(() => {});
+      throw truncateError;
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('Error DELETE /api/products/reset:', err);
+    return res.status(500).json({ error: 'db_error' });
   }
 });
 
