@@ -289,7 +289,7 @@ const generateAutoMatches = useCallback(async () => {
     setReviewOpen(true);
     return;
   }
-  
+
   console.log('🧠 Generando auto-matches con threshold:', threshold);
   setLoadingAuto(true);
   const acc: Suggestion[] = [];
@@ -301,65 +301,61 @@ const generateAutoMatches = useCallback(async () => {
     for (let k = start; k < end; k++) {
       const i = internals[k];
 
-      // ✅ Ignorar productos Gampack ya relacionados
+      // ❌ Ignoramos productos Gampack ya relacionados
       if ((i as any).tiene_relacion === true) continue;
 
-      console.log(i.nom_interno);
       const iName = i.nom_interno ?? '';
       if (!iName.trim()) continue;
 
-      const iTri = buildTrigramFreq(sanitizeText(iName));
-      const iToks = Array.from(new Set(tokenizeName(iName)));
-      if (iToks.length === 0) continue;
+      const iSan = sanitizeText(iName);
+      const iTri = buildTrigramFreq(iSan);
 
-      const candidateIdx = new Map<number, number>();
-      iToks.forEach(t => {
-        const arr = extIndexed.inv.get(t);
-        if (arr)
-          arr.forEach(idx => candidateIdx.set(idx, (candidateIdx.get(idx) || 0) + 1));
-      });
+      // 🧩 Nueva búsqueda: comparar contra TODOS los externos
+      for (const eIdx of extIndexed.items) {
+        const e = eIdx.item;
+        const eName = e.nom_externo ?? '';
+        if (!eName.trim()) continue;
 
-      const ranked = [...candidateIdx.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 50)
-        .map(([idx]) => extIndexed.items[idx]);
-
-      let local: Suggestion[] = [];
-      for (const eIdx of ranked) {
-        const id = `${i.id_interno}|${eIdx.item.id_externo}`;
+        const id = `${i.id_interno}|${e.id_externo}`;
         if (ignoredPairs.has(id) || seen.has(id)) continue;
 
-        const score = cosineByTri(iTri, eIdx.tri, sanitizeText(i.nom_interno ?? ''), sanitizeText(eIdx.item.nom_externo ?? ''));
-        console.log(`Comparando "${i.nom_interno}" con "${eIdx.item.nom_externo}" → score:`, score.toFixed(3));
-        if (score >= threshold)
-          local.push({
+        const score = cosineByTri(
+          iTri,
+          eIdx.tri,
+          iSan,
+          sanitizeText(eName)
+        );
+
+        // 🔍 Muestra los puntajes en consola
+        console.log(
+          `Comparando "${iName}" ↔ "${eName}" → score: ${score.toFixed(3)}`
+        );
+
+        if (score >= threshold) {
+          acc.push({
             internal: i,
-            external: eIdx.item,
+            external: e,
             reason: `Nombre similar (${score.toFixed(2)})`,
             score,
             id,
           });
+          seen.add(id);
+        }
       }
-
-      local.sort((a, b) => b.score - a.score);
-      local
-        .slice(0, MAX_CANDIDATES_PER_INTERNAL)
-        .forEach(s => {
-          seen.add(s.id);
-          acc.push(s);
-        });
     }
 
-    // Evita congelar la UI durante los lotes grandes
-    await new Promise(r => setTimeout(r, 0));
+    // Evita congelar la UI durante lotes grandes
+    await new Promise((r) => setTimeout(r, 0));
   }
 
+  // Ordena los resultados por mejor score
   acc.sort((a, b) => b.score - a.score);
   setSuggestions(acc);
   setReviewOpen(true);
   setLoadingAuto(false);
-}, [internals, extIndexed, ignoredPairs, threshold]);
 
+  console.log('✅ Total de sugerencias generadas:', acc.length);
+}, [internals, extIndexed, ignoredPairs, threshold]);
 
   /* ---------- Aceptar / Rechazar sugerencias ---------- */
   const removeFromStateAfterLink = (i: InternalItem, e: ExternalItem) => {
