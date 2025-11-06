@@ -314,16 +314,12 @@ const generateAutoMatches = useCallback(async () => {
     for (let k = start; k < end; k++) {
       const i = internals[k];
 
-      // ❌ Ignoramos productos Gampack ya relacionados
-      if ((i as any).tiene_relacion === true) continue;
-
       const iName = i.nom_interno ?? '';
       if (!iName.trim()) continue;
 
       const iSan = sanitizeText(iName);
       const iTri = buildTrigramFreq(iSan);
 
-      // 🧩 Nueva búsqueda: comparar contra TODOS los externos
       for (const eIdx of extIndexed.items) {
         const e = eIdx.item;
         const eName = e.nom_externo ?? '';
