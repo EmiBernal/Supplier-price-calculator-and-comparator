@@ -4,6 +4,7 @@ import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   CircleDot,
   Loader2,
@@ -103,6 +104,8 @@ const statusBadgeClass = (isActive: boolean) =>
       : 'bg-gray-200 text-gray-700 dark:bg-white/10 dark:text-white/60',
   ].join(' ');
 
+const DATABASE_RESET_PHRASE = 'Quiero borrar la base de datos';
+
 const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigate }) => {
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [providersError, setProvidersError] = useState<string | null>(null);
@@ -122,6 +125,11 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
   const [bulkPassword, setBulkPassword] = useState('');
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [showResetForm, setShowResetForm] = useState(false);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetPhrase, setResetPhrase] = useState('');
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetLoading, setResetLoading] = useState(false);
 
   useEffect(() => {
     const fetchProviders = async () => {
@@ -542,6 +550,67 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
     }
   };
 
+  const handleCancelReset = () => {
+    setShowResetForm(false);
+    setResetPassword('');
+    setResetPhrase('');
+    setResetError(null);
+  };
+
+  const handleDatabaseReset: React.FormEventHandler<HTMLFormElement> = async (
+    event
+  ) => {
+    event.preventDefault();
+    if (resetPassword !== 'mariano1275' || resetPhrase !== DATABASE_RESET_PHRASE) {
+      setResetError('Contraseña o frase incorrecta');
+      return;
+    }
+
+    setResetLoading(true);
+    setResetError(null);
+    setActionFeedback(null);
+
+    try {
+      const response = await apiFetch('/api/products/reset', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: resetPassword,
+          confirmation: resetPhrase,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await parseErrorResponse(response));
+      }
+
+      setProviders([]);
+      setSelectedProvider(null);
+      setProducts([]);
+      setSearch('');
+      setProductSearch('');
+      setProductDrafts({});
+      setSavingProducts({});
+      setProductErrors({});
+      setShowResetForm(false);
+      setResetPassword('');
+      setResetPhrase('');
+      setActionFeedback({
+        type: 'success',
+        message: 'Base de datos eliminada correctamente.',
+      });
+    } catch (error) {
+      console.error('Error resetting database:', error);
+      setResetError(
+        error instanceof Error && error.message
+          ? error.message
+          : 'No se pudo eliminar la base de datos. Intentalo nuevamente.'
+      );
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0b0f1a] p-6">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -578,6 +647,116 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
 
         {/* CONTENEDOR PRINCIPAL */}
         <section className="space-y-4">
+          <div className="rounded-3xl border border-red-300 bg-red-50/90 p-6 shadow-sm dark:border-red-500/40 dark:bg-red-500/10">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-full bg-red-100 p-2 text-red-600 dark:bg-red-500/20 dark:text-red-200">
+                  <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold text-red-800 dark:text-red-100">
+                    Acción peligrosa
+                  </h2>
+                  <p className="text-sm text-red-700 dark:text-red-200/90">
+                    Eliminará todos los productos cargados, pero mantendrá las tablas para volver a empezar.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowResetForm(true);
+                  setResetError(null);
+                }}
+                disabled={resetLoading || showResetForm}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-500 bg-red-600 px-5 py-3 text-base font-semibold text-white shadow-lg transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/60 dark:bg-red-500"
+              >
+                {resetLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Eliminando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" /> Eliminar base de datos
+                  </>
+                )}
+              </button>
+            </div>
+
+            {showResetForm && (
+              <form onSubmit={handleDatabaseReset} className="mt-5 space-y-4">
+                <div className="space-y-1">
+                  <label htmlFor="reset-password" className="text-sm font-medium text-red-800 dark:text-red-100">
+                    Contraseña
+                  </label>
+                  <input
+                    id="reset-password"
+                    type="password"
+                    value={resetPassword}
+                    onChange={(event) => {
+                      setResetPassword(event.target.value);
+                      if (resetError) setResetError(null);
+                    }}
+                    disabled={resetLoading}
+                    className="w-full rounded-2xl border border-red-200/80 bg-white px-4 py-3 text-sm shadow-inner transition focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed dark:border-red-500/30 dark:bg-[#0b0f1a] dark:text-red-100"
+                    placeholder="Ingresa la contraseña"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label htmlFor="reset-phrase" className="text-sm font-medium text-red-800 dark:text-red-100">
+                    Frase de confirmación
+                  </label>
+                  <input
+                    id="reset-phrase"
+                    type="text"
+                    value={resetPhrase}
+                    onChange={(event) => {
+                      setResetPhrase(event.target.value);
+                      if (resetError) setResetError(null);
+                    }}
+                    disabled={resetLoading}
+                    className="w-full rounded-2xl border border-red-200/80 bg-white px-4 py-3 text-sm shadow-inner transition focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed dark:border-red-500/30 dark:bg-[#0b0f1a] dark:text-red-100"
+                    placeholder={DATABASE_RESET_PHRASE}
+                    autoComplete="off"
+                  />
+                </div>
+
+                {resetError && (
+                  <div className="rounded-2xl border border-red-300 bg-red-100/80 px-4 py-3 text-sm text-red-800 dark:border-red-500/40 dark:bg-red-500/20 dark:text-red-100">
+                    {resetError}
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <button
+                    type="submit"
+                    disabled={resetLoading}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-500 bg-red-600 px-5 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/60 dark:bg-red-500"
+                  >
+                    {resetLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" /> Eliminando...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="h-4 w-4" /> Confirmar eliminación
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelReset}
+                    disabled={resetLoading}
+                    className="inline-flex items-center justify-center rounded-2xl border border-red-200 bg-white px-5 py-3 text-sm font-medium text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/30 dark:bg-transparent dark:text-red-100 dark:hover:bg-red-500/10"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+
           {providersError && (
             <div className="rounded-2xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 p-4 text-sm text-red-700 dark:text-red-200">
               {providersError}
