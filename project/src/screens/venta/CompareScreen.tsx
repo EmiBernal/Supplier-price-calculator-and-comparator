@@ -7,6 +7,7 @@ import { Search, List, LayoutGrid, CalendarDays, XCircle, Loader2 } from 'lucide
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
 import { GampackRelationsView } from '../../components/GampackRelationsView';
+import { isFiniteNumber, safeToFixed, toFiniteNumber } from '../../utils/number';
 
 interface CompareScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -255,46 +256,58 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
 
   // Helpers diferencia
   const getDifferencePct = (internal?: number | null, external?: number | null) => {
-    if (external == null || external === 0 || internal == null) return null;
-    const diff = ((internal - external) / external) * 100;
-    return parseFloat(diff.toFixed(2));
+    const internalValue = toFiniteNumber(internal);
+    const externalValue = toFiniteNumber(external);
+    if (externalValue == null || externalValue === 0 || internalValue == null) return null;
+    const diff = ((internalValue - externalValue) / externalValue) * 100;
+    const formatted = safeToFixed(diff, 2);
+    return formatted === '—' ? null : Number.parseFloat(formatted);
   };
   const getDifferenceAmt = (internal?: number | null, external?: number | null) => {
-    if (internal == null || external == null) return null;
-    const amt = internal - external;
-    return parseFloat(amt.toFixed(2));
+    const internalValue = toFiniteNumber(internal);
+    const externalValue = toFiniteNumber(external);
+    if (internalValue == null || externalValue == null) return null;
+    const amt = internalValue - externalValue;
+    const formatted = safeToFixed(amt, 2);
+    return formatted === '—' ? null : Number.parseFloat(formatted);
   };
   const formatSignedMoney = (n: number) => {
+    if (!isFiniteNumber(n)) {
+      return '—';
+    }
     const sign = n > 0 ? '+' : n < 0 ? '−' : '';
-    const abs = Math.abs(n).toFixed(2);
-    return `${sign}$${abs}`;
+    const abs = safeToFixed(Math.abs(n), 2);
+    return abs === '—' ? '—' : `${sign}$${abs}`;
   };
 
   // Veredicto textual
   function getVerdict(internal?: number | null, external?: number | null) {
-    if (internal == null || external == null) {
+    const internalValue = toFiniteNumber(internal);
+    const externalValue = toFiniteNumber(external);
+
+    if (internalValue == null || externalValue == null) {
       return {
         tone: 'na' as const,
         text: 'Sin suficientes datos para comparar.',
         classes: 'text-gray-600 dark:text-white/70'
       };
     }
-    if (internal < external) {
-      const ahorro = external - internal;
-      const pct = (ahorro / external) * 100;
+    if (internalValue < externalValue) {
+      const ahorro = externalValue - internalValue;
+      const pct = (ahorro / externalValue) * 100;
       return {
         tone: 'cheaper' as const,
-        text: `Gampack es más barato: ahorrás $${ahorro.toFixed(2)} (${pct.toFixed(2)}%) frente al proveedor.`,
+        text: `Gampack es más barato: ahorrás $${safeToFixed(ahorro, 2)} (${safeToFixed(pct, 2)}%) frente al proveedor.`,
         classes:
           'bg-green-50 text-green-800 border-green-300/40 dark:bg-green-500/10 dark:text-green-200 dark:border-green-500/20'
       };
     }
-    if (internal > external) {
-      const extra = internal - external;
-      const pct = (extra / external) * 100;
+    if (internalValue > externalValue) {
+      const extra = internalValue - externalValue;
+      const pct = (extra / externalValue) * 100;
       return {
         tone: 'expensive' as const,
-        text: `Gampack es más caro: +$${extra.toFixed(2)} (+${pct.toFixed(2)}%) vs el proveedor.`,
+        text: `Gampack es más caro: +$${safeToFixed(extra, 2)} (+${safeToFixed(pct, 2)}%) vs el proveedor.`,
         classes:
           'bg-red-50 text-red-800 border-red-300/40 dark:bg-red-500/10 dark:text-red-200 dark:border-red-500/20'
       };
@@ -531,8 +544,8 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
               columns={[
                 { key: 'internalProduct', label: 'Producto Interno', sortable: true, render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
                 { key: 'externalProduct', label: 'Producto Proveedor', sortable: true, render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
-                { key: 'internalFinalPrice', label: 'Final Interno', sortable: true, render: (v: any) => <span className="dark:text-white">{typeof v === 'number' ? `$${v.toFixed(2)}` : '—'}</span> },
-                { key: 'externalFinalPrice', label: 'Final Proveedor', sortable: true, render: (v: any) => <span className="dark:text-white">{typeof v === 'number' ? `$${v.toFixed(2)}` : '—'}</span> },
+                { key: 'internalFinalPrice', label: 'Final Interno', sortable: true, render: (v: any) => <span className="dark:text-white">{isFiniteNumber(v) ? `$${safeToFixed(v, 2)}` : '—'}</span> },
+                { key: 'externalFinalPrice', label: 'Final Proveedor', sortable: true, render: (v: any) => <span className="dark:text-white">{isFiniteNumber(v) ? `$${safeToFixed(v, 2)}` : '—'}</span> },
                 { key: 'internalDate', label: 'Fecha Interna', render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
                 { key: 'externalDate', label: 'Fecha Proveedor', render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
                 { key: 'supplier', label: 'Proveedor', render: (v: any) => <span className="dark:text-white">{v ?? '—'}</span> },
@@ -555,8 +568,8 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
                   key: 'conclusion',
                   label: 'Conclusión',
                   render: (_v: any, row: any) => {
-                    const internal = typeof row.internalFinalPrice === 'number' ? row.internalFinalPrice : null;
-                    const external = typeof row.externalFinalPrice === 'number' ? row.externalFinalPrice : null;
+                    const internal = isFiniteNumber(row.internalFinalPrice) ? row.internalFinalPrice : null;
+                    const external = isFiniteNumber(row.externalFinalPrice) ? row.externalFinalPrice : null;
                     const verdict = getVerdict(internal, external);
                     return (
                       <span
@@ -577,8 +590,8 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
             <div className="grid grid-cols-1 gap-4">
               {loading && <div className="text-sm text-gray-600 dark:text-white/70">Cargando...</div>}
               {!loading && comparisons.map((item, i) => {
-                const internal = typeof item.internalFinalPrice === 'number' ? item.internalFinalPrice : null;
-                const external = typeof item.externalFinalPrice === 'number' ? item.externalFinalPrice : null;
+                const internal = isFiniteNumber(item.internalFinalPrice) ? item.internalFinalPrice : null;
+                const external = isFiniteNumber(item.externalFinalPrice) ? item.externalFinalPrice : null;
                 const pct = getDifferencePct(internal, external);
                 const amt = getDifferenceAmt(internal, external);
                 const verdict = getVerdict(internal, external);
@@ -604,7 +617,7 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
                         <p className="text-xs text-gray-500 dark:text-white/60">Producto Gampack</p>
                         <p className="text-base font-semibold text-gray-900 dark:text-white">{item.internalProduct ?? '—'}</p>
                         <p className="text-xs text-gray-500 dark:text-white/60 mt-1">Precio Interno</p>
-                        <p className="text-lg font-bold text-green-600">{internal != null ? `$${internal.toFixed(2)}` : '—'}</p>
+                        <p className="text-lg font-bold text-green-600">{internal != null ? `$${safeToFixed(internal, 2)}` : '—'}</p>
                       </div>
                       <div className="text-center">
                         <p className="text-xs text-gray-500 dark:text-white/60">Diferencia</p>
@@ -621,7 +634,7 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ onNavigate }) => {
                         <p className="text-xs text-gray-500 dark:text-white/60">Producto Proveedor</p>
                         <p className="text-base font-semibold text-gray-900 dark:text-white">{item.externalProduct ?? '—'}</p>
                         <p className="text-xs text-gray-500 dark:text-white/60 mt-1">Precio Externo</p>
-                        <p className="text-lg font-bold text-blue-600">{external != null ? `$${external.toFixed(2)}` : '—'}</p>
+                        <p className="text-lg font-bold text-blue-600">{external != null ? `$${safeToFixed(external, 2)}` : '—'}</p>
                       </div>
                     </div>
 

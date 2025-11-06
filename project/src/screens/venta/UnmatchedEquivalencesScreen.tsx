@@ -5,6 +5,7 @@ import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
 import { Trash2 } from 'lucide-react';
 import { formatYMD, compareYMD, formatYearMonth, compareYearMonth } from '../../utils/date';
+import { isFiniteNumber, safeToFixed } from '../../utils/number';
 
 
 /* ---------- Similaridad mejorada: trigramas + Levenshtein + fonética ---------- */
@@ -219,6 +220,7 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
 
   // umbral similitud
   const [threshold, setThreshold] = useState<number>(DEFAULT_SIMILARITY_THRESHOLD);
+  const thresholdLabel = safeToFixed(threshold, 2);
 
   // Top button
   const [showTop, setShowTop] = useState(false);
@@ -328,23 +330,30 @@ const generateAutoMatches = useCallback(async () => {
         const id = `${i.id_interno}|${e.id_externo}`;
         if (ignoredPairs.has(id) || seen.has(id)) continue;
 
-        const score = cosineByTri(
+        const rawScore = cosineByTri(
           iTri,
           eIdx.tri,
           iSan,
           sanitizeText(eName)
         );
 
+        if (!isFiniteNumber(rawScore)) {
+          continue;
+        }
+
+        const score = rawScore;
+
         // 🔍 Muestra los puntajes en consola
+        const scoreForLog = safeToFixed(score, 3);
         console.log(
-          `Comparando "${iName}" ↔ "${eName}" → score: ${score.toFixed(3)}`
+          `Comparando "${iName}" ↔ "${eName}" → score: ${scoreForLog}`
         );
 
         if (score >= threshold) {
           acc.push({
             internal: i,
             external: e,
-            reason: `Nombre similar (${score.toFixed(2)})`,
+            reason: `Nombre similar (${safeToFixed(score, 2)})`,
             score,
             id,
           });
@@ -580,7 +589,7 @@ const generateAutoMatches = useCallback(async () => {
               </div>
 
               <div className="flex-shrink-0 flex flex-col items-end gap-2">
-                <div className="text-xs text-gray-600 dark:text-gray-300">Umbral: <b>{threshold.toFixed(2)}</b></div>
+                <div className="text-xs text-gray-600 dark:text-gray-300">Umbral: <b>{thresholdLabel}</b></div>
                 <input type="range" min={0.3} max={0.9} step={0.01} value={threshold} onChange={e => setThreshold(parseFloat(e.target.value))} className="w-40 accent-blue-600" />
                 <Button onClick={generateAutoMatches} disabled={loadingAuto}>{loadingAuto ? 'Buscando coincidencias…' : 'Relacionar automáticamente'}</Button>
               </div>
@@ -607,11 +616,13 @@ const generateAutoMatches = useCallback(async () => {
                 </div>
                 {loadingAuto && <div className="mt-3 h-1 w-full bg-blue-200/50 dark:bg-blue-950/50 rounded"><div className="h-1 w-1/3 animate-pulse bg-blue-600 rounded" /></div>}
                 <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[420px] overflow-auto pr-1">
-                  {suggestions.length === 0 && !loadingAuto && <div className="col-span-full text-sm text-blue-900/80 dark:text-blue-100/80">No hay coincidencias por encima del umbral ({threshold.toFixed(2)}).</div>}
-                  {suggestions.map((s) => (
-                    <div key={s.id} className="rounded-xl bg-white dark:bg-[#0e1526] border border-blue-200/50 dark:border-white/10 p-4 shadow">
+                  {suggestions.length === 0 && !loadingAuto && <div className="col-span-full text-sm text-blue-900/80 dark:text-blue-100/80">No hay coincidencias por encima del umbral ({thresholdLabel}).</div>}
+                  {suggestions.map((s) => {
+                    const scoreBadge = safeToFixed(s.score * 100, 0);
+                    return (
+                      <div key={s.id} className="rounded-xl bg-white dark:bg-[#0e1526] border border-blue-200/50 dark:border-white/10 p-4 shadow">
                       <div className="text-xs uppercase tracking-wide text-blue-700 dark:text-blue-300 mb-2 flex items-center justify-between">
-                        <span>{s.reason}</span><span className="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-[10px] font-semibold">{(s.score*100).toFixed(0)}%</span>
+                        <span>{s.reason}</span><span className="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-[10px] font-semibold">{scoreBadge === '—' ? '—' : `${scoreBadge}%`}</span>
                       </div>
                       <div className="space-y-2">
                         <div className="text-sm">
@@ -628,8 +639,9 @@ const generateAutoMatches = useCallback(async () => {
                         <Button onClick={() => acceptSuggestion(s)}>Aceptar</Button>
                         <Button onClick={() => rejectSuggestion(s)} variant="secondary">Descartar</Button>
                       </div>
-                    </div>
-                  ))}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
