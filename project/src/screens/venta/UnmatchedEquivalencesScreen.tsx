@@ -48,7 +48,7 @@ function levenshteinDistance(a: string, b: string) {
   return dp[a.length][b.length];
 }
 
-// Similitud combinada: trigramas + Levenshtein + fonética
+// 🔥 NUEVA FUNCIÓN DE SIMILITUD: trigramas + Levenshtein + fonética + prefijo/sufijo
 function cosineByTri(
   a: Record<string, number>,
   b: Record<string, number>,
@@ -68,25 +68,38 @@ function cosineByTri(
   const maxLen = Math.max(sA.length, sB.length);
   const levSim = 1 - lev / maxLen;
 
-  // --- Fonética básica: comparar simplificación de consonantes y vocales ---
+  // --- Fonética mejorada (más tolerante) ---
   const normalizeSound = (txt: string) =>
     txt
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^\p{L}\p{N} ]/gu, "")
       .replace(/[aeiou]/g, "a")
       .replace(/(ll|y)/g, "y")
       .replace(/(c|z|s)/g, "s")
       .replace(/(b|v)/g, "b")
       .replace(/h/g, "")
-      .replace(/([rsntd]+)$/g, ""); // quita sufijos leves
+      .replace(/(q|k)/g, "k")
+      .replace(/([rsntd]+)$/g, "");
+
   const phonA = normalizeSound(sA);
   const phonB = normalizeSound(sB);
   const phonLev = levenshteinDistance(phonA, phonB);
   const phonSim = 1 - phonLev / Math.max(phonA.length, phonB.length);
 
-  // --- Combinación ponderada ---
-  // 0.6 trigram, 0.25 Levenshtein, 0.15 fonético
-  const score = cosine * 0.45 + levSim * 0.35 + phonSim * 0.20;
+  // --- Prefijo / Sufijo match (ej: Tenedor ↔ Tendedor) ---
+  const prefixMatch = sA.startsWith(sB.slice(0, 4)) || sB.startsWith(sA.slice(0, 4)) ? 0.3 : 0;
+  const suffixMatch = sA.endsWith(sB.slice(-3)) || sB.endsWith(sA.slice(-3)) ? 0.3 : 0;
+  const partialBonus = Math.min(1, prefixMatch + suffixMatch);
+
+  // --- Ponderación ajustada ---
+  // Más peso al trigram + fonética
+  const score = cosine * 0.45 + levSim * 0.25 + phonSim * 0.20 + partialBonus * 0.10;
+
+  // 🔍 Limita a [0,1]
   return Math.min(1, Math.max(0, score));
 }
+
 
 // Tokeniza nombre (solo palabras útiles)
 function tokenizeName(s: string) {
