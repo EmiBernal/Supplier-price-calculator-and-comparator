@@ -6,6 +6,10 @@ import {
   TrendingDown,
   TrendingUp,
   Minus,
+  Search,
+  ChevronDown,
+  Moon,
+  Sun,
 } from 'lucide-react';
 
 import { apiFetch } from '../lib/api';
@@ -72,6 +76,13 @@ type SelectedSummary = {
 interface SimplifiedComparisonViewProps {
   className?: string;
 }
+
+type ThemePreference = 'dark' | 'light';
+type SortOption = 'original' | 'gampack' | 'proveedor';
+
+const THEME_STORAGE_KEY = 'simplifiedComparisonViewTheme';
+const SORT_STORAGE_KEY = 'simplifiedComparisonViewSort';
+const PROVIDERS_STORAGE_KEY = 'simplifiedComparisonViewProviders';
 
 const parseIdsFromQuery = (raw: unknown): number[] => {
   if (!raw) return [];
@@ -215,6 +226,11 @@ const normalizeNumberLike = (value: unknown): number | null => {
   return null;
 };
 
+const arraysEqual = (a: string[], b: string[]): boolean => {
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+};
+
 const hasActiveRelations = (product: GampackProduct): boolean => {
   const booleanLike = normalizeBooleanLike(product.tiene_relacion);
   if (booleanLike != null) {
@@ -249,6 +265,32 @@ const hasActiveRelations = (product: GampackProduct): boolean => {
 export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> = ({
   className,
 }) => {
+  const [theme, setTheme] = useState<ThemePreference>(() => {
+    if (typeof window === 'undefined') return 'dark';
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === 'light' ? 'light' : 'dark';
+  });
+  const [relatedSearch, setRelatedSearch] = useState('');
+  const [showProviderFilter, setShowProviderFilter] = useState(false);
+  const [selectedProviders, setSelectedProviders] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = window.localStorage.getItem(PROVIDERS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === 'string')
+        : [];
+    } catch (error) {
+      console.warn('No se pudo leer la preferencia de proveedores', error);
+      return [];
+    }
+  });
+  const [sortOption, setSortOption] = useState<SortOption>(() => {
+    if (typeof window === 'undefined') return 'original';
+    const stored = window.localStorage.getItem(SORT_STORAGE_KEY);
+    return stored === 'gampack' || stored === 'proveedor' ? stored : 'original';
+  });
+
   const [gampackItems, setGampackItems] = useState<GampackProduct[]>([]);
   const [gampackSearch, setGampackSearch] = useState('');
   const [loadingGampack, setLoadingGampack] = useState(false);
@@ -259,6 +301,28 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
   const [relations, setRelations] = useState<SimplifiedRelation[]>([]);
   const [loadingRelations, setLoadingRelations] = useState(false);
   const [relationsError, setRelationsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(SORT_STORAGE_KEY, sortOption);
+  }, [sortOption]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(
+      PROVIDERS_STORAGE_KEY,
+      JSON.stringify(selectedProviders)
+    );
+  }, [selectedProviders]);
+
+  const toggleTheme = () => {
+    setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -421,16 +485,90 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
       });
   }, [gampackItems, relations, selectedProducts]);
 
+  const uniqueProviders = useMemo(() => {
+    const providers = new Set<string>();
+    relations.forEach((relation) => {
+      providers.add(relation.supplier);
+    });
+    return Array.from(providers).sort((a, b) => a.localeCompare(b, 'es'));
+  }, [relations]);
+
+  useEffect(() => {
+    if (uniqueProviders.length === 0) {
+      setShowProviderFilter(false);
+      setSelectedProviders([]);
+      return;
+    }
+
+    setSelectedProviders((current) => {
+      const sanitized = current.filter((provider) => uniqueProviders.includes(provider));
+      if (arraysEqual(sanitized, current)) {
+        return current;
+      }
+      return sanitized;
+    });
+  }, [uniqueProviders]);
+
+  const filteredAndSortedRelations = useMemo(() => {
+    if (relations.length === 0) return [] as SimplifiedRelation[];
+
+    const normalizedSearch = relatedSearch.trim().toLowerCase();
+    const activeProviders =
+      selectedProviders.length === 0 ? null : new Set(selectedProviders);
+
+    const filtered = relations.filter((relation) => {
+      if (activeProviders && !activeProviders.has(relation.supplier)) {
+        return false;
+      }
+
+      if (!normalizedSearch) return true;
+
+      const haystack = [
+        relation.supplier,
+        relation.supplierProductName,
+        relation.supplierProductCode,
+        relation.gampackName,
+        relation.gampackCode,
+      ]
+        .map((value) => value.toLowerCase())
+        .join(' ');
+
+      return haystack.includes(normalizedSearch);
+    });
+
+    if (sortOption === 'original') {
+      return filtered;
+    }
+
+    const sorted = [...filtered];
+
+    if (sortOption === 'gampack') {
+      sorted.sort((a, b) => {
+        const aDiff = isFiniteNumber(a.differencePct) ? (a.differencePct as number) : Infinity;
+        const bDiff = isFiniteNumber(b.differencePct) ? (b.differencePct as number) : Infinity;
+        return aDiff - bDiff;
+      });
+    } else if (sortOption === 'proveedor') {
+      sorted.sort((a, b) => {
+        const aDiff = isFiniteNumber(a.differencePct) ? (a.differencePct as number) : -Infinity;
+        const bDiff = isFiniteNumber(b.differencePct) ? (b.differencePct as number) : -Infinity;
+        return bDiff - aDiff;
+      });
+    }
+
+    return sorted;
+  }, [relations, relatedSearch, selectedProviders, sortOption]);
+
   const relationsByGampack = useMemo(() => {
     const grouped = new Map<number | 'unknown', SimplifiedRelation[]>();
-    relations.forEach((relation) => {
+    filteredAndSortedRelations.forEach((relation) => {
       const key = relation.gampackId ?? 'unknown';
       const list = grouped.get(key) ?? [];
       list.push(relation);
       grouped.set(key, list);
     });
     return grouped;
-  }, [relations]);
+  }, [filteredAndSortedRelations]);
 
   const toggleProductSelection = (productId: number) => {
     setSelectedProducts((current) =>
@@ -440,199 +578,393 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
     );
   };
 
+  const toggleProvider = (provider: string) => {
+    setSelectedProviders((current) => {
+      if (uniqueProviders.length === 0) {
+        return [];
+      }
+
+      const baseline = current.length === 0 ? uniqueProviders : current;
+      const hasProvider = baseline.includes(provider);
+      const next = hasProvider
+        ? baseline.filter((item) => item !== provider)
+        : [...baseline, provider];
+
+      if (next.length === uniqueProviders.length) {
+        return [];
+      }
+
+      const ordered = uniqueProviders.filter((item) => next.includes(item));
+      return ordered;
+    });
+  };
+
   const clearSelection = () => {
     setSelectedProducts([]);
   };
 
-  const baseClasses = ['grid grid-cols-1 gap-6 p-4 md:grid-cols-2', className]
+  const baseClasses = [
+    'grid grid-cols-1 gap-6 rounded-2xl p-4 md:grid-cols-2 transition-colors duration-300',
+    theme === 'dark'
+      ? 'bg-slate-950/90 text-gray-100'
+      : 'bg-gray-50 text-gray-900',
+    className,
+  ]
     .filter(Boolean)
     .join(' ');
 
+  const panelClasses =
+    'flex flex-col rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition-colors duration-300 dark:border-transparent dark:bg-gray-900/90 dark:shadow-lg dark:ring-1 dark:ring-black/30';
+
+  const listContainerClasses =
+    'relative flex-1 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950/40';
+
+  const overlayClasses =
+    'absolute inset-0 z-10 flex items-center justify-center bg-white/85 dark:bg-gray-900/70';
+
+  const resultsListClasses =
+    'max-h-[70vh] divide-y divide-gray-200 overflow-y-auto dark:divide-gray-800';
+
   return (
-    <div className={baseClasses}>
-      <section className="flex flex-col rounded-lg bg-gray-900/90 p-4 shadow-lg ring-1 ring-black/30">
-        <header className="mb-4">
-          <h2 className="text-lg font-semibold text-white">Productos Gampack</h2>
-          <p className="text-sm text-gray-400">
-            Seleccioná uno o varios productos Gampack con relaciones activas para ver detalles.
-          </p>
-        </header>
-
-        <div className="mb-4 flex flex-col gap-3">
-          <Input
-            value={gampackSearch}
-            onChange={(event) => setGampackSearch(event.target.value)}
-            placeholder="Buscar por nombre o código"
-            className="border-gray-700 bg-gray-950/40 text-gray-100 placeholder:text-gray-500 focus:border-green-400 focus:ring-green-400"
-          />
-
-          <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>{loadingGampack ? 'Cargando productos…' : `${filteredGampackItems.length} resultados`}</span>
-            <button
-              type="button"
-              onClick={clearSelection}
-              className="rounded-full border border-gray-700 px-3 py-1 font-medium text-gray-300 transition hover:border-green-500 hover:text-white"
-            >
-              Limpiar selección
-            </button>
-          </div>
-        </div>
-
-        {gampackError && (
-          <p className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-            {gampackError}
-          </p>
-        )}
-
-        <div className="relative flex-1 overflow-hidden rounded-lg border border-gray-800">
-          {loadingGampack && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-900/70">
-              <Loader2 className="mr-2 h-5 w-5 animate-spin text-gray-200" />
-              <span className="text-sm text-gray-200">Cargando productos…</span>
-            </div>
-          )}
-
-          {!loadingGampack && gampackItemsWithRelations.length === 0 ? (
-            <div className="text-center text-gray-500 dark:text-white/60 p-4">
-              No hay productos Gampack con relaciones registradas.
-            </div>
-          ) : (
-            <ul className="max-h-[70vh] divide-y divide-gray-800 overflow-y-auto">
-              {filteredGampackItems.length === 0 && !loadingGampack ? (
-                <li className="px-4 py-6 text-center text-sm text-gray-500">
-                  No encontramos resultados con ese criterio.
-                </li>
-              ) : (
-                filteredGampackItems.map((product) => {
-                  const isSelected = selectedProducts.includes(product.id_interno);
-                  return (
-                    <li
-                      key={product.id_interno}
-                      onClick={() => toggleProductSelection(product.id_interno)}
-                      className={[
-                        'cursor-pointer px-4 py-3 transition-all',
-                        'hover:bg-green-600/20',
-                        isSelected
-                          ? 'bg-green-600/30 text-white'
-                          : 'text-gray-200',
-                      ].join(' ')}
-                    >
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-semibold">{product.nom_interno ?? 'Sin nombre'}</p>
-                          <p className="text-xs text-gray-400">Código: {product.cod_interno ?? '—'}</p>
-                        </div>
-                        {isSelected && (
-                          <CheckCircle2 className="h-5 w-5 text-green-400" aria-hidden="true" />
-                        )}
-                      </div>
-                      {product.precio_final != null && (
-                        <p className="mt-2 text-sm text-gray-300">
-                          Precio final: {formatCurrency(product.precio_final)}
-                        </p>
-                      )}
-                    </li>
-                  );
-                })
-              )}
-            </ul>
-          )}
-        </div>
-      </section>
-
-      <section className="flex flex-col rounded-lg bg-gray-900/90 p-4 shadow-lg ring-1 ring-black/30">
-        <header className="mb-4 flex flex-col gap-2">
-          <h2 className="text-lg font-semibold text-white">Productos relacionados</h2>
-          <p className="text-sm text-gray-400">
-            {selectedProducts.length === 0
-              ? 'Seleccioná uno o varios productos Gampack para ver sus relaciones.'
-              : 'Compará los precios de proveedores frente a los valores de Gampack.'}
-          </p>
-        </header>
-
-        {relationsError && (
-          <p className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-            {relationsError}
-          </p>
-        )}
-
-        <div className="mb-4 flex flex-wrap gap-2">
-          {selectedDetails.length > 0 ? (
-            selectedDetails.map((product) => (
+    <div className={theme === 'dark' ? 'dark' : ''}>
+      <div className={baseClasses}>
+        <div className="md:col-span-2 flex justify-end">
+          <label className="flex cursor-pointer items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
+            <input
+              type="checkbox"
+              checked={theme === 'dark'}
+              onChange={toggleTheme}
+              className="peer sr-only"
+            />
+            <div className="relative h-6 w-11 rounded-full bg-gray-300 transition-colors duration-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-400 dark:bg-gray-700">
               <span
-                key={product.id}
-                className="inline-flex items-center gap-2 rounded-full bg-green-600/20 px-3 py-1 text-xs font-medium text-green-200"
+                className={`absolute top-0.5 left-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-gray-500 shadow transition-transform duration-300 dark:bg-gray-900 dark:text-gray-100 ${
+                  theme === 'dark' ? 'translate-x-5' : ''
+                }`}
               >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                {product.name}
+                {theme === 'dark' ? (
+                  <Moon className="h-3.5 w-3.5" aria-hidden="true" />
+                ) : (
+                  <Sun className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
               </span>
-            ))
-          ) : (
-            <span className="text-xs text-gray-500">
-              Aún no seleccionaste productos.
-            </span>
-          )}
+            </div>
+            <span>{theme === 'dark' ? 'Modo oscuro' : 'Modo claro'}</span>
+          </label>
         </div>
 
-        {selectedProducts.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-gray-800 bg-gray-950/40 p-6 text-center text-sm text-gray-500">
-            Seleccioná uno o varios productos Gampack para ver sus relaciones.
-          </div>
-        ) : loadingRelations ? (
-          <div className="flex flex-1 items-center justify-center rounded-lg border border-gray-800 bg-gray-950/40 p-6 text-sm text-gray-400">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin text-gray-200" /> Cargando relaciones…
-          </div>
-        ) : relations.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-gray-800 bg-gray-950/40 p-6 text-center text-sm text-gray-500">
-            No encontramos productos de proveedores relacionados con tu selección.
-          </div>
-        ) : (
-          <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-            {selectedDetails.map((product) => {
-              const productRelations = relationsByGampack.get(product.id) ?? [];
+        <section className={panelClasses}>
+          <header className="mb-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Productos Gampack</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Seleccioná uno o varios productos Gampack con relaciones activas para ver detalles.
+            </p>
+          </header>
 
-              return (
-                <article
-                  key={product.id}
-                  className="rounded-xl border border-gray-800 bg-gray-950/30 p-4"
+          <div className="mb-4 flex flex-col gap-3">
+            <Input
+              value={gampackSearch}
+              onChange={(event) => setGampackSearch(event.target.value)}
+              placeholder="Buscar por nombre o código"
+              className="border-gray-300 focus:border-green-500 focus:ring-green-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:focus:border-green-400 dark:focus:ring-green-500/40"
+            />
+
+            <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+              <span>{loadingGampack ? 'Cargando productos…' : `${filteredGampackItems.length} resultados`}</span>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="rounded-full border border-gray-300 px-3 py-1 font-medium text-gray-600 transition hover:border-green-500 hover:text-green-600 dark:border-gray-700 dark:text-gray-300 dark:hover:border-green-500 dark:hover:text-white"
+              >
+                Limpiar selección
+              </button>
+            </div>
+          </div>
+
+          {gampackError && (
+            <p className="mb-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200">
+              {gampackError}
+            </p>
+          )}
+
+          <div className={listContainerClasses}>
+            {loadingGampack && (
+              <div className={overlayClasses}>
+                <Loader2 className="mr-2 h-5 w-5 animate-spin text-gray-600 dark:text-gray-200" />
+                <span className="text-sm text-gray-700 dark:text-gray-200">Cargando productos…</span>
+              </div>
+            )}
+
+            {!loadingGampack && gampackItemsWithRelations.length === 0 ? (
+              <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                No hay productos Gampack con relaciones registradas.
+              </div>
+            ) : (
+              <ul className={resultsListClasses}>
+                {filteredGampackItems.length === 0 && !loadingGampack ? (
+                  <li className="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                    No encontramos resultados con ese criterio.
+                  </li>
+                ) : (
+                  filteredGampackItems.map((product) => {
+                    const isSelected = selectedProducts.includes(product.id_interno);
+                    return (
+                      <li
+                        key={product.id_interno}
+                        onClick={() => toggleProductSelection(product.id_interno)}
+                        className={[
+                          'cursor-pointer px-4 py-3 transition-colors duration-150',
+                          'hover:bg-green-500/10 dark:hover:bg-green-600/20',
+                          isSelected
+                            ? 'bg-green-100 text-green-800 dark:bg-green-600/30 dark:text-white'
+                            : 'text-gray-700 dark:text-gray-200',
+                        ].join(' ')}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <p className="font-semibold">{product.nom_interno ?? 'Sin nombre'}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              Código: {product.cod_interno ?? '—'}
+                            </p>
+                          </div>
+                          {isSelected && (
+                            <CheckCircle2 className="h-5 w-5 text-green-500 dark:text-green-400" aria-hidden="true" />
+                          )}
+                        </div>
+                        {product.precio_final != null && (
+                          <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                            Precio final: {formatCurrency(product.precio_final)}
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })
+                )}
+              </ul>
+            )}
+          </div>
+        </section>
+
+        <section className={panelClasses}>
+          <header className="mb-4 flex flex-col gap-2">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Productos relacionados</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              {selectedProducts.length === 0
+                ? 'Seleccioná uno o varios productos Gampack para ver sus relaciones.'
+                : 'Compará los precios de proveedores frente a los valores de Gampack.'}
+            </p>
+          </header>
+
+          <div className="mb-4 space-y-3">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Buscar producto o proveedor..."
+                value={relatedSearch}
+                onChange={(event) => setRelatedSearch(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 bg-white px-10 py-2 text-sm text-gray-800 shadow-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-white/10 dark:text-white/80 dark:focus:border-blue-400/60 dark:focus:ring-blue-500/30"
+              />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-white/60" />
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="relative flex-1">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-800 shadow-sm transition hover:border-blue-400 dark:border-white/10 dark:bg-white/10 dark:text-white/80 dark:hover:border-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={() => setShowProviderFilter((open) => !open)}
+                  disabled={uniqueProviders.length === 0}
                 >
-                  <header className="mb-3 flex flex-col gap-1">
-                    <span className="text-xs uppercase tracking-wide text-gray-500">
-                      Producto Gampack
-                    </span>
-                    <h3 className="text-base font-semibold text-white">
-                      {product.name}
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      Código {product.code} · Precio {formatCurrency(product.price)}
-                    </p>
-                  </header>
+                  <span>Filtrar por proveedor</span>
+                  <ChevronDown className="h-4 w-4" />
+                </button>
+                {showProviderFilter && (
+                  <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-md dark:border-white/10 dark:bg-[#1a1f2e]">
+                    {uniqueProviders.length === 0 ? (
+                      <p className="px-4 py-2 text-sm text-gray-500 dark:text-white/70">
+                        No hay proveedores disponibles.
+                      </p>
+                    ) : (
+                      uniqueProviders.map((provider) => {
+                        const isChecked =
+                          selectedProviders.length === 0 || selectedProviders.includes(provider);
+                        return (
+                          <label
+                            key={provider}
+                            className="flex cursor-pointer items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-white/70 dark:hover:bg-white/10"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleProvider(provider)}
+                              className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500 dark:border-white/20 dark:bg-transparent dark:text-green-400 dark:focus:ring-green-400"
+                            />
+                            {provider}
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
 
-                  {productRelations.length === 0 ? (
-                    <p className="rounded-lg border border-dashed border-gray-800 bg-gray-950/40 px-3 py-2 text-sm text-gray-500">
-                      No hay proveedores relacionados para este producto.
-                    </p>
-                  ) : (
+              <div className="sm:w-60">
+                <select
+                  value={sortOption}
+                  onChange={(event) => setSortOption(event.target.value as SortOption)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-white/10 dark:text-white/80 dark:focus:border-blue-400/60 dark:focus:ring-blue-500/30"
+                >
+                  <option value="original">Orden original</option>
+                  <option value="gampack">Primero los Gampack más baratos</option>
+                  <option value="proveedor">Primero los proveedores más baratos</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {relationsError && (
+            <p className="mb-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200">
+              {relationsError}
+            </p>
+          )}
+
+          <div className="mb-4 flex flex-wrap gap-2">
+            {selectedDetails.length > 0 ? (
+              selectedDetails.map((product) => (
+                <span
+                  key={product.id}
+                  className="inline-flex items-center gap-2 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700 dark:bg-green-600/20 dark:text-green-200"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {product.name}
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-gray-500 dark:text-gray-500">
+                Aún no seleccionaste productos.
+              </span>
+            )}
+          </div>
+
+          {selectedProducts.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white/70 p-6 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-950/40 dark:text-gray-500">
+              Seleccioná uno o varios productos Gampack para ver sus relaciones.
+            </div>
+          ) : loadingRelations ? (
+            <div className="flex flex-1 items-center justify-center rounded-lg border border-gray-200 bg-white/80 p-6 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950/40 dark:text-gray-400">
+              <Loader2 className="mr-2 h-5 w-5 animate-spin text-gray-600 dark:text-gray-200" /> Cargando relaciones…
+            </div>
+          ) : filteredAndSortedRelations.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white/70 p-6 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-950/40 dark:text-gray-500">
+              No encontramos productos de proveedores relacionados con tu selección.
+            </div>
+          ) : (
+            <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+              {selectedDetails.map((product) => {
+                const productRelations = relationsByGampack.get(product.id) ?? [];
+
+                return (
+                  <article
+                    key={product.id}
+                    className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition dark:border-gray-800 dark:bg-gray-950/30"
+                  >
+                    <header className="mb-3 flex flex-col gap-1">
+                      <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-500">
+                        Producto Gampack
+                      </span>
+                      <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                        {product.name}
+                      </h3>
+                      <p className="text-xs text-gray-600 dark:text-gray-500">
+                        Código {product.code} · Precio {formatCurrency(product.price)}
+                      </p>
+                    </header>
+
+                    {productRelations.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-gray-300 bg-white/70 px-3 py-2 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-950/40 dark:text-gray-500">
+                        No hay proveedores relacionados para este producto.
+                      </p>
+                    ) : (
+                      <ul className="space-y-3">
+                        {productRelations.map((relation) => {
+                          const badge = differenceBadgeConfig(relation.differencePct);
+                          const updatedAt = relation.supplierDate ?? relation.gampackDate ?? null;
+
+                          return (
+                            <li
+                              key={relation.id}
+                              className="rounded-lg border border-gray-200 bg-gray-50 p-3 transition hover:border-green-500/60 dark:border-gray-800 dark:bg-gray-900/60"
+                            >
+                              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                <div>
+                                  <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                                    {relation.supplier} · {relation.supplierProductName}
+                                  </p>
+                                  <p className="text-xs text-gray-600 dark:text-gray-500">
+                                    Código {relation.supplierProductCode} · Actualización {relation.supplierDate ?? '—'}
+                                  </p>
+                                </div>
+                                <div className="text-sm text-gray-700 dark:text-gray-300">
+                                  <p>Proveedor: {formatCurrency(relation.supplierPrice)}</p>
+                                  <p>Gampack: {formatCurrency(relation.gampackPrice)}</p>
+                                </div>
+                              </div>
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <div
+                                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${badge.badgeClasses}`}
+                                >
+                                  <badge.Icon className="h-4 w-4" aria-hidden="true" />
+                                  <span>
+                                    Diferencia: {badge.percentage}
+                                    {` — ${badge.label}`}
+                                  </span>
+                                </div>
+                                <span className="text-xs text-gray-600 dark:text-gray-500">
+                                  Actualización: {updatedAt ?? '—'}
+                                </span>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </article>
+                );
+              })}
+
+              {Array.from(relationsByGampack.entries())
+                .filter(([key]) => key === 'unknown')
+                .map(([, orphanRelations]) => (
+                  <article
+                    key="unknown"
+                    className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition dark:border-gray-800 dark:bg-gray-950/30"
+                  >
+                    <header className="mb-3">
+                      <h3 className="text-base font-semibold text-gray-900 dark:text-white">Relaciones sin producto interno</h3>
+                      <p className="text-xs text-gray-600 dark:text-gray-500">
+                        Estos registros no pudieron vincularse a un producto Gampack específico.
+                      </p>
+                    </header>
                     <ul className="space-y-3">
-                      {productRelations.map((relation) => {
+                      {orphanRelations.map((relation) => {
                         const badge = differenceBadgeConfig(relation.differencePct);
                         const updatedAt = relation.supplierDate ?? relation.gampackDate ?? null;
 
                         return (
                           <li
                             key={relation.id}
-                            className="rounded-lg border border-gray-800 bg-gray-900/60 p-3 transition hover:border-green-500/60"
+                            className="rounded-lg border border-gray-200 bg-gray-50 p-3 transition hover:border-green-500/60 dark:border-gray-800 dark:bg-gray-900/60"
                           >
                             <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                               <div>
-                                <p className="text-sm font-semibold text-white">
+                                <p className="text-sm font-semibold text-gray-900 dark:text-white">
                                   {relation.supplier} · {relation.supplierProductName}
                                 </p>
-                                <p className="text-xs text-gray-500">
+                                <p className="text-xs text-gray-600 dark:text-gray-500">
                                   Código {relation.supplierProductCode} · Actualización {relation.supplierDate ?? '—'}
                                 </p>
                               </div>
-                              <div className="text-sm text-gray-300">
+                              <div className="text-sm text-gray-700 dark:text-gray-300">
                                 <p>Proveedor: {formatCurrency(relation.supplierPrice)}</p>
                                 <p>Gampack: {formatCurrency(relation.gampackPrice)}</p>
                               </div>
@@ -647,7 +979,7 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
                                   {` — ${badge.label}`}
                                 </span>
                               </div>
-                              <span className="text-xs text-gray-500">
+                              <span className="text-xs text-gray-600 dark:text-gray-500">
                                 Actualización: {updatedAt ?? '—'}
                               </span>
                             </div>
@@ -655,68 +987,12 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
                         );
                       })}
                     </ul>
-                  )}
-                </article>
-              );
-            })}
-
-            {Array.from(relationsByGampack.entries())
-              .filter(([key]) => key === 'unknown')
-              .map(([, orphanRelations]) => (
-                <article key="unknown" className="rounded-xl border border-gray-800 bg-gray-950/30 p-4">
-                  <header className="mb-3">
-                    <h3 className="text-base font-semibold text-white">Relaciones sin producto interno</h3>
-                    <p className="text-xs text-gray-500">
-                      Estos registros no pudieron vincularse a un producto Gampack específico.
-                    </p>
-                  </header>
-                  <ul className="space-y-3">
-                    {orphanRelations.map((relation) => {
-                      const badge = differenceBadgeConfig(relation.differencePct);
-                      const updatedAt = relation.supplierDate ?? relation.gampackDate ?? null;
-
-                      return (
-                        <li
-                          key={relation.id}
-                          className="rounded-lg border border-gray-800 bg-gray-900/60 p-3 transition hover:border-green-500/60"
-                        >
-                          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                            <div>
-                              <p className="text-sm font-semibold text-white">
-                                {relation.supplier} · {relation.supplierProductName}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                Código {relation.supplierProductCode} · Actualización {relation.supplierDate ?? '—'}
-                              </p>
-                            </div>
-                            <div className="text-sm text-gray-300">
-                              <p>Proveedor: {formatCurrency(relation.supplierPrice)}</p>
-                              <p>Gampack: {formatCurrency(relation.gampackPrice)}</p>
-                            </div>
-                          </div>
-                          <div className="mt-3 flex flex-wrap items-center gap-2">
-                            <div
-                              className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${badge.badgeClasses}`}
-                            >
-                              <badge.Icon className="h-4 w-4" aria-hidden="true" />
-                              <span>
-                                Diferencia: {badge.percentage}
-                                {` — ${badge.label}`}
-                              </span>
-                            </div>
-                            <span className="text-xs text-gray-500">
-                              Actualización: {updatedAt ?? '—'}
-                            </span>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </article>
-              ))}
-          </div>
-        )}
-      </section>
+                  </article>
+                ))}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 };
