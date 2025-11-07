@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import type { LucideIcon } from 'lucide-react';
 import {
   Loader2,
@@ -8,13 +9,12 @@ import {
   Minus,
   Search,
   ChevronDown,
-  Moon,
-  Sun,
 } from 'lucide-react';
 
 import { apiFetch } from '../lib/api';
 import { Input } from './Input';
 import { isFiniteNumber, safeToFixed } from '../utils/number';
+import { useTheme } from '../context/theme';
 
 type GampackProduct = {
   id_interno: number;
@@ -77,10 +77,8 @@ interface SimplifiedComparisonViewProps {
   className?: string;
 }
 
-type ThemePreference = 'dark' | 'light';
 type SortOption = 'original' | 'gampack' | 'proveedor';
 
-const THEME_STORAGE_KEY = 'simplifiedComparisonViewTheme';
 const SORT_STORAGE_KEY = 'simplifiedComparisonViewSort';
 const PROVIDERS_STORAGE_KEY = 'simplifiedComparisonViewProviders';
 
@@ -265,11 +263,7 @@ const hasActiveRelations = (product: GampackProduct): boolean => {
 export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> = ({
   className,
 }) => {
-  const [theme, setTheme] = useState<ThemePreference>(() => {
-    if (typeof window === 'undefined') return 'dark';
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    return stored === 'light' ? 'light' : 'dark';
-  });
+  const { theme } = useTheme();
   const [relatedSearch, setRelatedSearch] = useState('');
   const [showProviderFilter, setShowProviderFilter] = useState(false);
   const [selectedProviders, setSelectedProviders] = useState<string[]>(() => {
@@ -301,11 +295,7 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
   const [relations, setRelations] = useState<SimplifiedRelation[]>([]);
   const [loadingRelations, setLoadingRelations] = useState(false);
   const [relationsError, setRelationsError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  }, [theme]);
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -319,10 +309,6 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
       JSON.stringify(selectedProviders)
     );
   }, [selectedProviders]);
-
-  const toggleTheme = () => {
-    setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
-  };
 
   useEffect(() => {
     let cancelled = false;
@@ -485,6 +471,27 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
       });
   }, [gampackItems, relations, selectedProducts]);
 
+  useEffect(() => {
+    if (selectedDetails.length === 0) {
+      setExpandedGroups([]);
+      return;
+    }
+
+    setExpandedGroups((current) =>
+      current.filter((groupId) =>
+        selectedDetails.some((product) => String(product.id) === groupId)
+      )
+    );
+  }, [selectedDetails]);
+
+  const toggleGroup = (groupId: string) => {
+    setExpandedGroups((current) =>
+      current.includes(groupId)
+        ? current.filter((value) => value !== groupId)
+        : [...current, groupId]
+    );
+  };
+
   const uniqueProviders = useMemo(() => {
     const providers = new Set<string>();
     relations.forEach((relation) => {
@@ -628,31 +635,6 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
   return (
     <div className={theme === 'dark' ? 'dark' : ''}>
       <div className={baseClasses}>
-        <div className="md:col-span-2 flex justify-end">
-          <label className="flex cursor-pointer items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
-            <input
-              type="checkbox"
-              checked={theme === 'dark'}
-              onChange={toggleTheme}
-              className="peer sr-only"
-            />
-            <div className="relative h-6 w-11 rounded-full bg-gray-300 transition-colors duration-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-400 dark:bg-gray-700">
-              <span
-                className={`absolute top-0.5 left-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-gray-500 shadow transition-transform duration-300 dark:bg-gray-900 dark:text-gray-100 ${
-                  theme === 'dark' ? 'translate-x-5' : ''
-                }`}
-              >
-                {theme === 'dark' ? (
-                  <Moon className="h-3.5 w-3.5" aria-hidden="true" />
-                ) : (
-                  <Sun className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-              </span>
-            </div>
-            <span>{theme === 'dark' ? 'Modo oscuro' : 'Modo claro'}</span>
-          </label>
-        </div>
-
         <section className={panelClasses}>
           <header className="mb-4">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Productos Gampack</h2>
@@ -862,73 +844,117 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
             <div className="flex-1 space-y-4 overflow-y-auto pr-1">
               {selectedDetails.map((product) => {
                 const productRelations = relationsByGampack.get(product.id) ?? [];
+                const groupId = String(product.id);
+                const isOpen = expandedGroups.includes(groupId);
 
                 return (
-                  <article
+                  <div
                     key={product.id}
-                    className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition dark:border-gray-800 dark:bg-gray-950/30"
+                    className="rounded-2xl border border-gray-200 bg-white shadow-sm transition-all duration-300 dark:border-white/10 dark:bg-white/5"
                   >
-                    <header className="mb-3 flex flex-col gap-1">
-                      <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-500">
-                        Producto Gampack
-                      </span>
-                      <h3 className="text-base font-semibold text-gray-900 dark:text-white">
-                        {product.name}
-                      </h3>
-                      <p className="text-xs text-gray-600 dark:text-gray-500">
-                        Código {product.code} · Precio {formatCurrency(product.price)}
-                      </p>
-                    </header>
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(groupId)}
+                      className="flex w-full items-center justify-between px-4 py-3 text-left transition-all duration-300 hover:bg-gray-50 dark:hover:bg-white/10"
+                      aria-expanded={isOpen}
+                    >
+                      <div className="space-y-1">
+                        <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-white/50">
+                          Producto Gampack
+                        </p>
+                        <p className="text-base font-semibold text-gray-800 dark:text-white">{product.name}</p>
+                        <p className="text-sm text-gray-500 dark:text-white/60">
+                          Código: {product.code ?? '—'} — Precio: {formatCurrency(product.price)}
+                        </p>
+                      </div>
+                      <ChevronDown
+                        className={`h-5 w-5 transform text-gray-500 transition-transform duration-300 dark:text-white/60 ${
+                          isOpen ? 'rotate-180' : ''
+                        }`}
+                        aria-hidden="true"
+                      />
+                    </button>
 
-                    {productRelations.length === 0 ? (
-                      <p className="rounded-lg border border-dashed border-gray-300 bg-white/70 px-3 py-2 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-950/40 dark:text-gray-500">
-                        No hay proveedores relacionados para este producto.
-                      </p>
-                    ) : (
-                      <ul className="space-y-3">
-                        {productRelations.map((relation) => {
-                          const badge = differenceBadgeConfig(relation.differencePct);
-                          const updatedAt = relation.supplierDate ?? relation.gampackDate ?? null;
+                    <AnimatePresence initial={false}>
+                      {isOpen && (
+                        <motion.div
+                          key="content"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.3, ease: 'easeInOut' }}
+                          className="space-y-3 overflow-hidden border-t border-gray-100 bg-gray-50/40 p-4 dark:border-white/10 dark:bg-white/5"
+                        >
+                          {productRelations.length === 0 ? (
+                            <p className="rounded-lg border border-dashed border-gray-300 bg-white/70 px-3 py-2 text-sm text-gray-500 dark:border-gray-700 dark:bg-white/10 dark:text-gray-400">
+                              No hay proveedores relacionados para este producto.
+                            </p>
+                          ) : (
+                            <div className="space-y-3">
+                              {productRelations.map((relation) => {
+                                const updatedAt = relation.supplierDate ?? relation.gampackDate ?? null;
+                                const differenceValue = isFiniteNumber(relation.differencePct)
+                                  ? (relation.differencePct as number)
+                                  : null;
+                                const differenceText =
+                                  differenceValue == null
+                                    ? 'Diferencia: — — Datos insuficientes'
+                                    : differenceValue < 0
+                                    ? `Diferencia: ${safeToFixed(Math.abs(differenceValue), 1)}% — Gampack más barato`
+                                    : differenceValue > 0
+                                    ? `Diferencia: ${safeToFixed(differenceValue, 1)}% — Proveedor más barato`
+                                    : 'Diferencia: 0.0% — Precios iguales';
+                                const relationClasses =
+                                  differenceValue == null
+                                    ? 'border-gray-200 bg-white dark:border-white/10 dark:bg-white/5'
+                                    : differenceValue < 0
+                                    ? 'border-emerald-400/30 bg-emerald-500/10'
+                                    : differenceValue > 0
+                                    ? 'border-red-400/30 bg-red-500/10'
+                                    : 'border-gray-200 bg-white dark:border-white/10 dark:bg-white/5';
+                                const differenceColor =
+                                  differenceValue == null
+                                    ? 'text-gray-600 dark:text-white/70'
+                                    : differenceValue < 0
+                                    ? 'text-emerald-400'
+                                    : differenceValue > 0
+                                    ? 'text-red-400'
+                                    : 'text-gray-600 dark:text-white/70';
 
-                          return (
-                            <li
-                              key={relation.id}
-                              className="rounded-lg border border-gray-200 bg-gray-50 p-3 transition hover:border-green-500/60 dark:border-gray-800 dark:bg-gray-900/60"
-                            >
-                              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                                <div>
-                                  <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                                    {relation.supplier} · {relation.supplierProductName}
-                                  </p>
-                                  <p className="text-xs text-gray-600 dark:text-gray-500">
-                                    Código {relation.supplierProductCode} · Actualización {relation.supplierDate ?? '—'}
-                                  </p>
-                                </div>
-                                <div className="text-sm text-gray-700 dark:text-gray-300">
-                                  <p>Proveedor: {formatCurrency(relation.supplierPrice)}</p>
-                                  <p>Gampack: {formatCurrency(relation.gampackPrice)}</p>
-                                </div>
-                              </div>
-                              <div className="mt-3 flex flex-wrap items-center gap-2">
-                                <div
-                                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${badge.badgeClasses}`}
-                                >
-                                  <badge.Icon className="h-4 w-4" aria-hidden="true" />
-                                  <span>
-                                    Diferencia: {badge.percentage}
-                                    {` — ${badge.label}`}
-                                  </span>
-                                </div>
-                                <span className="text-xs text-gray-600 dark:text-gray-500">
-                                  Actualización: {updatedAt ?? '—'}
-                                </span>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </article>
+                                return (
+                                  <div
+                                    key={relation.id}
+                                    className={`rounded-xl border p-3 transition ${relationClasses}`}
+                                  >
+                                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                      <div>
+                                        <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                                          {relation.supplier} - {relation.supplierProductName}
+                                        </p>
+                                        <p className="text-xs text-gray-600 dark:text-white/70">
+                                          Código {relation.supplierProductCode} · Actualización {relation.supplierDate ?? '—'}
+                                        </p>
+                                      </div>
+                                      <div className="text-sm text-gray-700 dark:text-gray-200">
+                                        <p>Proveedor: {formatCurrency(relation.supplierPrice)}</p>
+                                        <p>Gampack: {formatCurrency(relation.gampackPrice)}</p>
+                                      </div>
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                                      <p className={`text-sm font-medium ${differenceColor}`}>{differenceText}</p>
+                                      <span className="text-xs text-gray-600 dark:text-white/60">
+                                        Actualización consolidada: {updatedAt ?? '—'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 );
               })}
 
