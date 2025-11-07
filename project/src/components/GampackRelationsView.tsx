@@ -7,7 +7,6 @@ import {
   TrendingDown,
   TrendingUp,
   Minus,
-  Search,
   ChevronDown,
 } from 'lucide-react';
 
@@ -264,7 +263,6 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
   className,
 }) => {
   const { theme } = useTheme();
-  const [relatedSearch, setRelatedSearch] = useState('');
   const [showProviderFilter, setShowProviderFilter] = useState(false);
   const [selectedProviders, setSelectedProviders] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
@@ -519,29 +517,12 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
   const filteredAndSortedRelations = useMemo(() => {
     if (relations.length === 0) return [] as SimplifiedRelation[];
 
-    const normalizedSearch = relatedSearch.trim().toLowerCase();
     const activeProviders =
       selectedProviders.length === 0 ? null : new Set(selectedProviders);
 
-    const filtered = relations.filter((relation) => {
-      if (activeProviders && !activeProviders.has(relation.supplier)) {
-        return false;
-      }
-
-      if (!normalizedSearch) return true;
-
-      const haystack = [
-        relation.supplier,
-        relation.supplierProductName,
-        relation.supplierProductCode,
-        relation.gampackName,
-        relation.gampackCode,
-      ]
-        .map((value) => value.toLowerCase())
-        .join(' ');
-
-      return haystack.includes(normalizedSearch);
-    });
+    const filtered = !activeProviders
+      ? relations
+      : relations.filter((relation) => activeProviders.has(relation.supplier));
 
     if (sortOption === 'original') {
       return filtered;
@@ -564,7 +545,7 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
     }
 
     return sorted;
-  }, [relations, relatedSearch, selectedProviders, sortOption]);
+  }, [relations, selectedProviders, sortOption]);
 
   const relationsByGampack = useMemo(() => {
     const grouped = new Map<number | 'unknown', SimplifiedRelation[]>();
@@ -737,70 +718,57 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
             </p>
           </header>
 
-          <div className="mb-4 space-y-3">
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Buscar producto o proveedor..."
-                value={relatedSearch}
-                onChange={(event) => setRelatedSearch(event.target.value)}
-                className="w-full rounded-lg border border-gray-300 bg-white px-10 py-2 text-sm text-gray-800 shadow-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-white/10 dark:text-white/80 dark:focus:border-blue-400/60 dark:focus:ring-blue-500/30"
-              />
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-white/60" />
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[220px]">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-800 shadow-sm transition hover:border-blue-400 dark:border-white/10 dark:bg-white/10 dark:text-white/80 dark:hover:border-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => setShowProviderFilter((open) => !open)}
+                disabled={uniqueProviders.length === 0}
+              >
+                <span>Filtrar por proveedor</span>
+                <ChevronDown className="h-4 w-4" />
+              </button>
+              {showProviderFilter && (
+                <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-md dark:border-white/10 dark:bg-[#1a1f2e]">
+                  {uniqueProviders.length === 0 ? (
+                    <p className="px-4 py-2 text-sm text-gray-500 dark:text-white/70">
+                      No hay proveedores disponibles.
+                    </p>
+                  ) : (
+                    uniqueProviders.map((provider) => {
+                      const isChecked =
+                        selectedProviders.length === 0 || selectedProviders.includes(provider);
+                      return (
+                        <label
+                          key={provider}
+                          className="flex cursor-pointer items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-white/70 dark:hover:bg-white/10"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleProvider(provider)}
+                            className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500 dark:border-white/20 dark:bg-transparent dark:text-green-400 dark:focus:ring-green-400"
+                          />
+                          {provider}
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              )}
             </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <div className="relative flex-1">
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-800 shadow-sm transition hover:border-blue-400 dark:border-white/10 dark:bg-white/10 dark:text-white/80 dark:hover:border-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-                  onClick={() => setShowProviderFilter((open) => !open)}
-                  disabled={uniqueProviders.length === 0}
-                >
-                  <span>Filtrar por proveedor</span>
-                  <ChevronDown className="h-4 w-4" />
-                </button>
-                {showProviderFilter && (
-                  <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-md dark:border-white/10 dark:bg-[#1a1f2e]">
-                    {uniqueProviders.length === 0 ? (
-                      <p className="px-4 py-2 text-sm text-gray-500 dark:text-white/70">
-                        No hay proveedores disponibles.
-                      </p>
-                    ) : (
-                      uniqueProviders.map((provider) => {
-                        const isChecked =
-                          selectedProviders.length === 0 || selectedProviders.includes(provider);
-                        return (
-                          <label
-                            key={provider}
-                            className="flex cursor-pointer items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-white/70 dark:hover:bg-white/10"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => toggleProvider(provider)}
-                              className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500 dark:border-white/20 dark:bg-transparent dark:text-green-400 dark:focus:ring-green-400"
-                            />
-                            {provider}
-                          </label>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="sm:w-60">
-                <select
-                  value={sortOption}
-                  onChange={(event) => setSortOption(event.target.value as SortOption)}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-white/10 dark:text-white/80 dark:focus:border-blue-400/60 dark:focus:ring-blue-500/30"
-                >
-                  <option value="original">Orden original</option>
-                  <option value="gampack">Primero los Gampack más baratos</option>
-                  <option value="proveedor">Primero los proveedores más baratos</option>
-                </select>
-              </div>
+            <div className="sm:w-60 min-w-[180px]">
+              <select
+                value={sortOption}
+                onChange={(event) => setSortOption(event.target.value as SortOption)}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-white/10 dark:text-white/80 dark:focus:border-blue-400/60 dark:focus:ring-blue-500/30"
+              >
+                <option value="original">Orden original</option>
+                <option value="gampack">Primero los Gampack más baratos</option>
+                <option value="proveedor">Primero los proveedores más baratos</option>
+              </select>
             </div>
           </div>
 
