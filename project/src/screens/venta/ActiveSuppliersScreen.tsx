@@ -9,7 +9,6 @@ import {
   CircleDot,
   Loader2,
   RotateCcw,
-  Search,
   Save,
   Trash2,
   X,
@@ -115,7 +114,6 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
   const [products, setProducts] = useState<ProviderProduct[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [productsError, setProductsError] = useState<string | null>(null);
-  const [productSearch, setProductSearch] = useState('');
   const [productDrafts, setProductDrafts] = useState<Record<string, ProductDraft>>({});
   const [savingProducts, setSavingProducts] = useState<Record<string, boolean>>({});
   const [productErrors, setProductErrors] = useState<Record<string, string | null>>({});
@@ -245,28 +243,13 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
   const handleCloseModal = () => {
     setSelectedProvider(null);
     setProducts([]);
-    setProductSearch('');
     setProductsError(null);
     setProductDrafts({});
     setSavingProducts({});
     setProductErrors({});
   };
 
-  const displayedProducts = useMemo(() => {
-    const query = productSearch.trim().toLowerCase();
-    if (!query) return products;
-    return products.filter((product) => {
-      const code = product.code?.toLowerCase() ?? '';
-      const companyType = product.companyType?.toLowerCase() ?? '';
-      const family = product.family?.toLowerCase() ?? '';
-      return (
-        product.name.toLowerCase().includes(query) ||
-        code.includes(query) ||
-        companyType.includes(query) ||
-        family.includes(query)
-      );
-    });
-  }, [products, productSearch]);
+  const displayedProducts = products;
 
   const getOriginalComparableValue = (
     product: ProviderProduct,
@@ -896,18 +879,8 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
               </div>
 
               <div className="flex max-h-[calc(90vh-140px)] flex-col gap-4 overflow-y-auto px-6 py-5">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="relative w-full md:max-w-sm">
-                    <input
-                      type="text"
-                      value={productSearch}
-                      onChange={(event) => setProductSearch(event.target.value)}
-                      placeholder="Buscar por nombre, código, tipo o familia"
-                      className={[baseInputClasses, 'pl-10'].join(' ')}
-                    />
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-white/60" />
-                  </div>
-                  <div className="text-sm text-gray-600 dark:text-white/70">
+                <div className="flex w-full items-center justify-end">
+                  <div className="text-sm text-gray-600 dark:text-white/70 text-right">
                     {displayedProducts.length.toLocaleString('es-AR')} de {products.length.toLocaleString('es-AR')} productos
                   </div>
                 </div>
