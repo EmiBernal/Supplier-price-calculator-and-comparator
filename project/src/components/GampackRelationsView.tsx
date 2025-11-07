@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, CheckCircle2 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import {
+  Loader2,
+  CheckCircle2,
+  TrendingDown,
+  TrendingUp,
+  Minus,
+} from 'lucide-react';
 
 import { apiFetch } from '../lib/api';
 import { Input } from './Input';
@@ -130,23 +137,49 @@ const buildSimplifiedRelations = (rows: RawRelation[]): SimplifiedRelation[] => 
   return Array.from(seen.values()).sort((a, b) => a.supplier.localeCompare(b.supplier, 'es'));
 };
 
-const differenceColor = (difference: number | null): string => {
-  if (!isFiniteNumber(difference)) return 'text-gray-400';
-  if (difference < 0) return 'text-green-400';
-  if (difference > 0) return 'text-red-400';
-  return 'text-gray-400';
+type DifferenceBadgeConfig = {
+  Icon: LucideIcon;
+  badgeClasses: string;
+  label: string;
+  percentage: string;
 };
 
-const differenceLabel = (difference: number | null): string => {
-  if (!isFiniteNumber(difference)) return 'Diferencia: sin datos ⚪';
-  const formatted = `${difference > 0 ? '+' : ''}${safeToFixed(difference, 1)}%`;
+const differenceBadgeConfig = (difference: number | null): DifferenceBadgeConfig => {
+  if (!isFiniteNumber(difference)) {
+    return {
+      Icon: Minus,
+      badgeClasses: 'bg-gray-500/10 text-gray-400',
+      label: 'Datos insuficientes',
+      percentage: '—',
+    } satisfies DifferenceBadgeConfig;
+  }
+
+  const percentage = `${difference > 0 ? '+' : ''}${safeToFixed(difference, 1)}%`;
+
   if (difference < 0) {
-    return `Diferencia: ${formatted} 🟢`;
+    return {
+      Icon: TrendingDown,
+      badgeClasses: 'bg-emerald-500/10 text-emerald-400',
+      label: 'Gampack más barato',
+      percentage,
+    } satisfies DifferenceBadgeConfig;
   }
+
   if (difference > 0) {
-    return `Diferencia: ${formatted} 🔴`;
+    return {
+      Icon: TrendingUp,
+      badgeClasses: 'bg-red-500/10 text-red-400',
+      label: 'Proveedor más barato',
+      percentage,
+    } satisfies DifferenceBadgeConfig;
   }
-  return `Diferencia: ${formatted} ⚪`;
+
+  return {
+    Icon: Minus,
+    badgeClasses: 'bg-gray-500/10 text-gray-400',
+    label: 'Precios iguales',
+    percentage,
+  } satisfies DifferenceBadgeConfig;
 };
 
 const normalizeBooleanLike = (value: unknown): boolean | null => {
@@ -581,7 +614,68 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
                     </p>
                   ) : (
                     <ul className="space-y-3">
-                      {productRelations.map((relation) => (
+                      {productRelations.map((relation) => {
+                        const badge = differenceBadgeConfig(relation.differencePct);
+                        const updatedAt = relation.supplierDate ?? relation.gampackDate ?? null;
+
+                        return (
+                          <li
+                            key={relation.id}
+                            className="rounded-lg border border-gray-800 bg-gray-900/60 p-3 transition hover:border-green-500/60"
+                          >
+                            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-white">
+                                  {relation.supplier} · {relation.supplierProductName}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  Código {relation.supplierProductCode} · Actualización {relation.supplierDate ?? '—'}
+                                </p>
+                              </div>
+                              <div className="text-sm text-gray-300">
+                                <p>Proveedor: {formatCurrency(relation.supplierPrice)}</p>
+                                <p>Gampack: {formatCurrency(relation.gampackPrice)}</p>
+                              </div>
+                            </div>
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <div
+                                className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${badge.badgeClasses}`}
+                              >
+                                <badge.Icon className="h-4 w-4" aria-hidden="true" />
+                                <span>
+                                  Diferencia: {badge.percentage}
+                                  {` — ${badge.label}`}
+                                </span>
+                              </div>
+                              <span className="text-xs text-gray-500">
+                                Actualización: {updatedAt ?? '—'}
+                              </span>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </article>
+              );
+            })}
+
+            {Array.from(relationsByGampack.entries())
+              .filter(([key]) => key === 'unknown')
+              .map(([, orphanRelations]) => (
+                <article key="unknown" className="rounded-xl border border-gray-800 bg-gray-950/30 p-4">
+                  <header className="mb-3">
+                    <h3 className="text-base font-semibold text-white">Relaciones sin producto interno</h3>
+                    <p className="text-xs text-gray-500">
+                      Estos registros no pudieron vincularse a un producto Gampack específico.
+                    </p>
+                  </header>
+                  <ul className="space-y-3">
+                    {orphanRelations.map((relation) => {
+                      const badge = differenceBadgeConfig(relation.differencePct);
+                      const updatedAt = relation.supplierDate ?? relation.gampackDate ?? null;
+
+                      return (
                         <li
                           key={relation.id}
                           className="rounded-lg border border-gray-800 bg-gray-900/60 p-3 transition hover:border-green-500/60"
@@ -600,52 +694,23 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
                               <p>Gampack: {formatCurrency(relation.gampackPrice)}</p>
                             </div>
                           </div>
-                          <p className={`mt-3 text-sm font-semibold ${differenceColor(relation.differencePct)}`}>
-                            {differenceLabel(relation.differencePct)}
-                          </p>
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <div
+                              className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${badge.badgeClasses}`}
+                            >
+                              <badge.Icon className="h-4 w-4" aria-hidden="true" />
+                              <span>
+                                Diferencia: {badge.percentage}
+                                {` — ${badge.label}`}
+                              </span>
+                            </div>
+                            <span className="text-xs text-gray-500">
+                              Actualización: {updatedAt ?? '—'}
+                            </span>
+                          </div>
                         </li>
-                      ))}
-                    </ul>
-                  )}
-                </article>
-              );
-            })}
-
-            {Array.from(relationsByGampack.entries())
-              .filter(([key]) => key === 'unknown')
-              .map(([, orphanRelations]) => (
-                <article key="unknown" className="rounded-xl border border-gray-800 bg-gray-950/30 p-4">
-                  <header className="mb-3">
-                    <h3 className="text-base font-semibold text-white">Relaciones sin producto interno</h3>
-                    <p className="text-xs text-gray-500">
-                      Estos registros no pudieron vincularse a un producto Gampack específico.
-                    </p>
-                  </header>
-                  <ul className="space-y-3">
-                    {orphanRelations.map((relation) => (
-                      <li
-                        key={relation.id}
-                        className="rounded-lg border border-gray-800 bg-gray-900/60 p-3 transition hover:border-green-500/60"
-                      >
-                        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                          <div>
-                            <p className="text-sm font-semibold text-white">
-                              {relation.supplier} · {relation.supplierProductName}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              Código {relation.supplierProductCode} · Actualización {relation.supplierDate ?? '—'}
-                            </p>
-                          </div>
-                          <div className="text-sm text-gray-300">
-                            <p>Proveedor: {formatCurrency(relation.supplierPrice)}</p>
-                            <p>Gampack: {formatCurrency(relation.gampackPrice)}</p>
-                          </div>
-                        </div>
-                        <p className={`mt-3 text-sm font-semibold ${differenceColor(relation.differencePct)}`}>
-                          {differenceLabel(relation.differencePct)}
-                        </p>
-                      </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 </article>
               ))}
