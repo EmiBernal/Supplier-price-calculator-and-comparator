@@ -843,39 +843,60 @@ app.get('/api/providers/products', async (req, res) => {
     }
     const isGampack = normalizedName === 'gampack';
 
-    const rows = await getDbRows(
-      db,
-      isGampack
-        ? `
-            SELECT
-              id_interno,
-              nom_interno,
-              cod_interno,
-              precio_final,
-              fecha,
-              familia,
-              CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
-            FROM lista_interna
-            ORDER BY LOWER(nom_interno) ASC, cod_interno ASC NULLS LAST
-          `
-        : `
-            SELECT
-              id_externo,
-              nom_externo,
-              cod_externo,
-              precio_final,
-              fecha,
-              proveedor,
-              tipo_empresa,
-              familia,
-              CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
-            FROM lista_precios
-            WHERE LOWER(REGEXP_REPLACE(TRIM(proveedor), '\\s+', ' ', 'g')) = $1
-            ORDER BY LOWER(nom_externo) ASC, cod_externo ASC NULLS LAST
-          `,
-      isGampack ? [] : [normalizedName]
-    );
+    const rawLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 100;
+    const rawOffset = Number.parseInt(req.query.offset, 10);
+    const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
 
+    const [rows, totalRow] = await Promise.all([
+      getDbRows(
+        db,
+        isGampack
+          ? `
+              SELECT
+                id_interno,
+                nom_interno,
+                cod_interno,
+                precio_final,
+                fecha,
+                familia,
+                CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
+              FROM lista_interna
+              ORDER BY LOWER(nom_interno) ASC, cod_interno ASC NULLS LAST
+              LIMIT $1 OFFSET $2
+            `
+          : `
+              SELECT
+                id_externo,
+                nom_externo,
+                cod_externo,
+                precio_final,
+                fecha,
+                proveedor,
+                tipo_empresa,
+                familia,
+                CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
+              FROM lista_precios
+              WHERE LOWER(REGEXP_REPLACE(TRIM(proveedor), '\\s+', ' ', 'g')) = $1
+              ORDER BY LOWER(nom_externo) ASC, cod_externo ASC NULLS LAST
+              LIMIT $2 OFFSET $3
+            `,
+        isGampack ? [limit, offset] : [normalizedName, limit, offset]
+      ),
+      getDbRow(
+        db,
+        isGampack
+          ? `SELECT COUNT(*)::int AS total FROM lista_interna`
+          : `
+              SELECT COUNT(*)::int AS total
+              FROM lista_precios
+              WHERE LOWER(REGEXP_REPLACE(TRIM(proveedor), '\\s+', ' ', 'g')) = $1
+            `,
+        isGampack ? [] : [normalizedName]
+      ),
+    ]);
+
+    const total = Number(totalRow?.total ?? 0);
     const normalizedRows = normalizeRowsDates(rows, ['fecha']);
 
     const normalized = isGampack
@@ -903,8 +924,10 @@ app.get('/api/providers/products', async (req, res) => {
         }));
 
     res.json({
-      provider: isGampack ? 'Gampack' : normalized[0]?.provider ?? rawName,
       products: normalized,
+      total,
+      limit,
+      offset,
     });
   } catch (err) {
     console.error('Error /api/providers/products:', err);
