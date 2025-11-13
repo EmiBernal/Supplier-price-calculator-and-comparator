@@ -752,6 +752,7 @@ app.get('/api/providers/active', async (req, res) => {
     }
 
     const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const normalizedSearch = searchRaw.toLowerCase();
     const params = [];
     const conditions = ["proveedor IS NOT NULL", "TRIM(proveedor) <> ''"];
 
@@ -773,7 +774,22 @@ app.get('/api/providers/active', async (req, res) => {
       ORDER BY LOWER(proveedor) ASC
     `;
 
-    const rows = await getDbRows(db, sql, params);
+    const [rows, gampackRaw] = await Promise.all([
+      getDbRows(db, sql, params),
+      getDbRow(
+        db,
+        `
+          SELECT
+            COUNT(*)::int AS products,
+            MAX(fecha) AS last_update,
+            SUM(CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN 1 ELSE 0 END)::int AS recent_products,
+            CASE WHEN MAX(fecha) >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
+          FROM lista_interna
+        `,
+        []
+      ),
+    ]);
+
     const normalized = normalizeRowsDates(rows, ['last_update']).map((row) => ({
       name: row.name,
       products: Number(row.products ?? 0),
@@ -782,7 +798,27 @@ app.get('/api/providers/active', async (req, res) => {
       is_active: Boolean(row.is_active),
     }));
 
-    res.json(normalized);
+    const providersList = [...normalized];
+    if (gampackRaw) {
+      const [normalizedGampack] = normalizeRowsDates([gampackRaw], ['last_update']);
+      const gampackEntry = {
+        name: 'Gampack',
+        products: Number(gampackRaw.products ?? 0),
+        last_update: normalizedGampack?.last_update ?? null,
+        recent_products: Number(gampackRaw.recent_products ?? 0),
+        is_active: Boolean(gampackRaw.is_active),
+      };
+      const matchesSearch =
+        !normalizedSearch || 'gampack'.includes(normalizedSearch) || 'gampack'.startsWith(normalizedSearch);
+      if (matchesSearch) {
+        providersList.push(gampackEntry);
+      }
+    }
+
+    const collator = new Intl.Collator('es', { sensitivity: 'base' });
+    providersList.sort((a, b) => collator.compare(a.name, b.name));
+
+    res.json(providersList);
   } catch (err) {
     console.error('Error /api/providers/active:', err);
     res.status(500).json({ error: 'db_error' });
@@ -805,40 +841,69 @@ app.get('/api/providers/products', async (req, res) => {
     if (!normalizedName) {
       return res.status(400).json({ error: 'Proveedor requerido' });
     }
+    const isGampack = normalizedName === 'gampack';
+
     const rows = await getDbRows(
       db,
-      `
-        SELECT
-          id_externo,
-          nom_externo,
-          cod_externo,
-          precio_final,
-          fecha,
-          proveedor,
-          tipo_empresa,
-          familia,
-          CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
-        FROM lista_precios
-        WHERE LOWER(REGEXP_REPLACE(TRIM(proveedor), '\\s+', ' ', 'g')) = $1
-        ORDER BY LOWER(nom_externo) ASC, cod_externo ASC NULLS LAST
-      `,
-      [normalizedName]
+      isGampack
+        ? `
+            SELECT
+              id_interno,
+              nom_interno,
+              cod_interno,
+              precio_final,
+              fecha,
+              familia,
+              CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
+            FROM lista_interna
+            ORDER BY LOWER(nom_interno) ASC, cod_interno ASC NULLS LAST
+          `
+        : `
+            SELECT
+              id_externo,
+              nom_externo,
+              cod_externo,
+              precio_final,
+              fecha,
+              proveedor,
+              tipo_empresa,
+              familia,
+              CASE WHEN fecha >= CURRENT_DATE - INTERVAL '90 day' THEN TRUE ELSE FALSE END AS is_active
+            FROM lista_precios
+            WHERE LOWER(REGEXP_REPLACE(TRIM(proveedor), '\\s+', ' ', 'g')) = $1
+            ORDER BY LOWER(nom_externo) ASC, cod_externo ASC NULLS LAST
+          `,
+      isGampack ? [] : [normalizedName]
     );
 
-    const normalized = normalizeRowsDates(rows, ['fecha']).map((row) => ({
-      id: row.id_externo,
-      name: row.nom_externo,
-      code: row.cod_externo,
-      price: Number(row.precio_final ?? 0),
-      date: row.fecha ?? null,
-      provider: row.proveedor,
-      companyType: row.tipo_empresa ?? null,
-      family: row.familia ?? null,
-      is_active: Boolean(row.is_active),
-    }));
+    const normalizedRows = normalizeRowsDates(rows, ['fecha']);
+
+    const normalized = isGampack
+      ? normalizedRows.map((row) => ({
+          id: row.id_interno,
+          name: row.nom_interno,
+          code: row.cod_interno,
+          price: Number(row.precio_final ?? 0),
+          date: row.fecha ?? null,
+          provider: 'Gampack',
+          companyType: 'Gampack',
+          family: row.familia ?? null,
+          is_active: Boolean(row.is_active),
+        }))
+      : normalizedRows.map((row) => ({
+          id: row.id_externo,
+          name: row.nom_externo,
+          code: row.cod_externo,
+          price: Number(row.precio_final ?? 0),
+          date: row.fecha ?? null,
+          provider: row.proveedor,
+          companyType: row.tipo_empresa ?? null,
+          family: row.familia ?? null,
+          is_active: Boolean(row.is_active),
+        }));
 
     res.json({
-      provider: normalized[0]?.provider ?? rawName,
+      provider: isGampack ? 'Gampack' : normalized[0]?.provider ?? rawName,
       products: normalized,
     });
   } catch (err) {
@@ -860,28 +925,84 @@ app.patch('/api/providers/products/:id', async (req, res) => {
     }
 
     const payload = req.body && typeof req.body === 'object' ? req.body : {};
+
+    const existingExternal = await getDbRow(
+      db,
+      `SELECT proveedor FROM lista_precios WHERE id_externo = $1`,
+      [id]
+    );
+
+    let targetConfig = null;
+    if (existingExternal) {
+      targetConfig = {
+        table: 'lista_precios',
+        idColumn: 'id_externo',
+        columns: {
+          name: 'nom_externo',
+          code: 'cod_externo',
+          price: 'precio_final',
+          date: 'fecha',
+          companyType: 'tipo_empresa',
+          family: 'familia',
+        },
+        providerColumn: 'proveedor',
+        providerLabel: null,
+        companyTypeLabel: null,
+      };
+    } else {
+      const existingInternal = await getDbRow(
+        db,
+        `SELECT id_interno FROM lista_interna WHERE id_interno = $1`,
+        [id]
+      );
+      if (existingInternal) {
+        targetConfig = {
+          table: 'lista_interna',
+          idColumn: 'id_interno',
+          columns: {
+            name: 'nom_interno',
+            code: 'cod_interno',
+            price: 'precio_final',
+            date: 'fecha',
+            companyType: null,
+            family: 'familia',
+          },
+          providerColumn: null,
+          providerLabel: 'Gampack',
+          companyTypeLabel: 'Gampack',
+        };
+      }
+    }
+
+    if (!targetConfig) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
     const updates = [];
     const params = [];
     let dateParamIndex = null;
+
+    const pushUpdate = (column, value) => {
+      if (!column) {
+        return false;
+      }
+      params.push(value);
+      updates.push(`${column} = $${params.length}`);
+      return true;
+    };
 
     if (Object.prototype.hasOwnProperty.call(payload, 'name')) {
       const value = normalizeWhitespace(payload.name ?? '');
       if (!value) {
         return res.status(400).json({ error: 'El nombre es obligatorio' });
       }
-      params.push(value);
-      updates.push(`nom_externo = $${params.length}`);
+      pushUpdate(targetConfig.columns.name, value);
     }
 
     if (Object.prototype.hasOwnProperty.call(payload, 'code')) {
       const rawCode = payload.code;
       const value = normalizeWhitespace(rawCode ?? '');
-      if (value) {
-        params.push(value);
-      } else {
-        params.push(null);
-      }
-      updates.push(`cod_externo = $${params.length}`);
+      pushUpdate(targetConfig.columns.code, value || null);
     }
 
     if (Object.prototype.hasOwnProperty.call(payload, 'price')) {
@@ -889,8 +1010,7 @@ app.patch('/api/providers/products/:id', async (req, res) => {
       if (parsedPrice == null) {
         return res.status(400).json({ error: 'Precio inválido' });
       }
-      params.push(parsedPrice);
-      updates.push(`precio_final = $${params.length}`);
+      pushUpdate(targetConfig.columns.price, parsedPrice);
     }
 
     if (Object.prototype.hasOwnProperty.call(payload, 'date')) {
@@ -898,46 +1018,58 @@ app.patch('/api/providers/products/:id', async (req, res) => {
       if (!normalizedDate) {
         return res.status(400).json({ error: 'Fecha inválida' });
       }
-      params.push(normalizedDate);
+      pushUpdate(targetConfig.columns.date, normalizedDate);
       dateParamIndex = params.length;
-      updates.push(`fecha = $${dateParamIndex}`);
     }
 
     if (Object.prototype.hasOwnProperty.call(payload, 'companyType')) {
+      if (!targetConfig.columns.companyType) {
+        return res.status(400).json({ error: 'El tipo de empresa solo puede modificarse en proveedores externos.' });
+      }
       const value = normalizeWhitespace(payload.companyType ?? '');
       if (!value) {
         return res.status(400).json({ error: 'El tipo de empresa es obligatorio' });
       }
-      params.push(value);
-      updates.push(`tipo_empresa = $${params.length}`);
+      pushUpdate(targetConfig.columns.companyType, value);
     }
 
     if (Object.prototype.hasOwnProperty.call(payload, 'family')) {
       const rawFamily = payload.family;
       const value = normalizeWhitespace(rawFamily ?? '');
-      if (value) {
-        params.push(value);
-      } else {
-        params.push(null);
-      }
-      updates.push(`familia = $${params.length}`);
+      pushUpdate(targetConfig.columns.family, value || null);
     }
 
     if (dateParamIndex) {
       updates.push(`mes_actualizacion = TO_CHAR($${dateParamIndex}::date, 'YYYY-MM')`);
     }
 
-    if (updates.length === 0) {
+    const hasChanges = updates.length > 0;
+    if (!hasChanges) {
       return res.status(400).json({ error: 'Sin cambios para aplicar' });
     }
 
     params.push(id);
+    const returningFields = [
+      `${targetConfig.idColumn} AS id`,
+      `${targetConfig.columns.name} AS name`,
+      `${targetConfig.columns.code ?? 'NULL'} AS code`,
+      `precio_final`,
+      `${targetConfig.columns.date} AS fecha`,
+      targetConfig.providerColumn
+        ? `${targetConfig.providerColumn} AS proveedor`
+        : `'${targetConfig.providerLabel}'::text AS proveedor`,
+      targetConfig.columns.companyType
+        ? `${targetConfig.columns.companyType} AS tipo_empresa`
+        : `'${targetConfig.companyTypeLabel}'::text AS tipo_empresa`,
+      `${targetConfig.columns.family} AS familia`,
+    ];
+
     const updated = await getDbRow(
       db,
-      `UPDATE lista_precios
+      `UPDATE ${targetConfig.table}
          SET ${updates.join(', ')}
-       WHERE id_externo = $${params.length}
-       RETURNING id_externo, nom_externo, cod_externo, precio_final, fecha, proveedor, tipo_empresa, familia`,
+       WHERE ${targetConfig.idColumn} = $${params.length}
+       RETURNING ${returningFields.join(', ')}`,
       params,
     );
 
@@ -948,9 +1080,9 @@ app.patch('/api/providers/products/:id', async (req, res) => {
     const [normalizedRow] = normalizeRowsDates([updated], ['fecha']);
 
     return res.json({
-      id: updated.id_externo,
-      name: updated.nom_externo,
-      code: updated.cod_externo,
+      id: updated.id,
+      name: updated.name,
+      code: updated.code,
       price: Number(updated.precio_final ?? 0),
       date: normalizedRow?.fecha ?? null,
       provider: updated.proveedor,
@@ -1011,13 +1143,17 @@ app.delete('/api/providers/active/:name', async (req, res) => {
       return res.status(400).json({ error: 'Proveedor requerido' });
     }
 
+    const isGampack = normalizedName === 'gampack';
+
     const result = await runDb(
       db,
-      `DELETE FROM lista_precios
-       WHERE proveedor IS NOT NULL
-         AND TRIM(proveedor) <> ''
-         AND LOWER(REGEXP_REPLACE(TRIM(proveedor), '\\s+', ' ', 'g')) = $1`,
-      [normalizedName]
+      isGampack
+        ? `DELETE FROM lista_interna`
+        : `DELETE FROM lista_precios
+           WHERE proveedor IS NOT NULL
+             AND TRIM(proveedor) <> ''
+             AND LOWER(REGEXP_REPLACE(TRIM(proveedor), '\\s+', ' ', 'g')) = $1`,
+      isGampack ? [] : [normalizedName]
     );
 
     return res.json({ ok: true, deleted: result.rowCount ?? 0 });
@@ -1039,13 +1175,19 @@ app.post('/api/providers/active/delete-all', async (req, res) => {
       return res.status(403).json({ error: 'Contraseña incorrecta' });
     }
 
-    const result = await runDb(
-      db,
-      `DELETE FROM lista_precios
-       WHERE proveedor IS NOT NULL AND TRIM(proveedor) <> ''`
-    );
+    const [externalResult, internalResult] = await Promise.all([
+      runDb(
+        db,
+        `DELETE FROM lista_precios
+         WHERE proveedor IS NOT NULL AND TRIM(proveedor) <> ''`
+      ),
+      runDb(db, `DELETE FROM lista_interna`),
+    ]);
 
-    return res.json({ ok: true, deleted: result.rowCount ?? 0 });
+    return res.json({
+      ok: true,
+      deleted: (externalResult.rowCount ?? 0) + (internalResult.rowCount ?? 0),
+    });
   } catch (err) {
     console.error('Error POST /api/providers/active/delete-all:', err);
     res.status(500).json({ error: 'db_error' });
