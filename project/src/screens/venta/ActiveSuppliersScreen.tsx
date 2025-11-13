@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Navigation } from '../../components/Navigation';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
@@ -117,6 +117,10 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
   const [productDrafts, setProductDrafts] = useState<Record<string, ProductDraft>>({});
   const [savingProducts, setSavingProducts] = useState<Record<string, boolean>>({});
   const [productErrors, setProductErrors] = useState<Record<string, string | null>>({});
+  const [offset, setOffset] = useState(0);
+  const [limit] = useState(100);
+  const [total, setTotal] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [deletingProvider, setDeletingProvider] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
@@ -128,6 +132,8 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
   const [resetPhrase, setResetPhrase] = useState('');
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetLoading, setResetLoading] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const skipNextFetchRef = useRef(false);
 
   useEffect(() => {
     const fetchProviders = async () => {
@@ -192,7 +198,7 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
     [providers]
   );
 
-  const handleOpenProvider = async (provider: ProviderSummary) => {
+  const handleOpenProvider = (provider: ProviderSummary) => {
     setSelectedProvider(provider);
     setLoadingProducts(true);
     setProductsError(null);
@@ -201,43 +207,11 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
     setProductDrafts({});
     setSavingProducts({});
     setProductErrors({});
-    try {
-      const response = await apiFetch(
-        `/api/providers/products?name=${encodeURIComponent(provider.name)}`
-      );
-      if (!response.ok) {
-        throw new Error(await parseErrorResponse(response));
-      }
-      const data = await response.json();
-      const normalizedProducts: ProviderProduct[] = Array.isArray(data?.products)
-        ? data.products.map((product: any, index: number) => ({
-            id:
-              product?.id ??
-              product?.id_externo ??
-              `${product?.code ?? ''}-${index}`,
-            name: String(
-              product?.name ?? product?.nom_externo ?? 'Producto sin nombre'
-            ),
-            code: product?.code ?? product?.cod_externo ?? null,
-            price: Number(product?.price ?? product?.precio_final ?? 0),
-            date: product?.date ?? product?.fecha ?? null,
-            companyType:
-              product?.companyType ?? product?.tipo_empresa ?? null,
-            family: product?.family ?? product?.familia ?? null,
-            isActive: Boolean(product?.isActive ?? product?.is_active ?? false),
-          }))
-        : [];
-      setProducts(normalizedProducts);
-    } catch (error) {
-      console.error('Error fetching provider products:', error);
-      setProductsError(
-        error instanceof Error && error.message
-          ? error.message
-          : 'No se pudieron cargar los productos de este proveedor.'
-      );
-    } finally {
-      setLoadingProducts(false);
-    }
+    setOffset(0);
+    setTotal(null);
+    setLoadingMore(false);
+    loadingMoreRef.current = false;
+    skipNextFetchRef.current = false;
   };
 
   const handleCloseModal = () => {
@@ -247,9 +221,118 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
     setProductDrafts({});
     setSavingProducts({});
     setProductErrors({});
+    setLoadingProducts(false);
+    setOffset(0);
+    setTotal(null);
+    setLoadingMore(false);
+    loadingMoreRef.current = false;
+    skipNextFetchRef.current = false;
+    setProductSearch('');
   };
 
   const displayedProducts = products;
+  const totalProductsCount =
+    typeof total === 'number'
+      ? total
+      : selectedProvider?.products ?? displayedProducts.length;
+
+  const providerName = selectedProvider?.name ?? null;
+
+  useEffect(() => {
+    if (!providerName) return;
+    if (skipNextFetchRef.current) {
+      skipNextFetchRef.current = false;
+      return;
+    }
+
+    let isActive = true;
+    const fetchProducts = async () => {
+      const isInitialLoad = offset === 0;
+      if (isInitialLoad) {
+        setProductsError(null);
+        setLoadingProducts(true);
+      }
+
+      try {
+        const response = await apiFetch(
+          `/api/providers/products?name=${encodeURIComponent(
+            providerName
+          )}&limit=${limit}&offset=${offset}`
+        );
+        if (!response.ok) {
+          throw new Error(await parseErrorResponse(response));
+        }
+        const data = await response.json();
+        if (!isActive) return;
+
+        const normalizedProducts: ProviderProduct[] = Array.isArray(data?.products)
+          ? data.products.map((product: any, index: number) => ({
+              id:
+                product?.id ??
+                product?.id_externo ??
+                `${product?.code ?? product?.cod_externo ?? 'producto'}-${offset + index}`,
+              name: String(
+                product?.name ?? product?.nom_externo ?? 'Producto sin nombre'
+              ),
+              code: product?.code ?? product?.cod_externo ?? null,
+              price: Number(product?.price ?? product?.precio_final ?? 0),
+              date: product?.date ?? product?.fecha ?? null,
+              companyType: product?.companyType ?? product?.tipo_empresa ?? null,
+              family: product?.family ?? product?.familia ?? null,
+              isActive: Boolean(product?.isActive ?? product?.is_active ?? false),
+            }))
+          : [];
+
+        const parsedTotal = Number(data?.total);
+        setProducts((prev) =>
+          offset === 0 ? normalizedProducts : [...prev, ...normalizedProducts]
+        );
+        setTotal(Number.isFinite(parsedTotal) ? parsedTotal : null);
+      } catch (error) {
+        if (!isActive) return;
+        console.error('Error fetching provider products:', error);
+        setProductsError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'No se pudieron cargar los productos de este proveedor.'
+        );
+        if (offset > 0) {
+          skipNextFetchRef.current = true;
+          setOffset((current) => Math.max(0, current - limit));
+        }
+      } finally {
+        if (!isActive) return;
+        if (offset === 0) {
+          setLoadingProducts(false);
+        }
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
+    };
+
+    fetchProducts();
+
+    return () => {
+      isActive = false;
+    };
+  }, [providerName, offset, limit]);
+
+  const handleModalScroll: React.UIEventHandler<HTMLDivElement> = (event) => {
+    if (!selectedProvider || loadingProducts || loadingMoreRef.current) {
+      return;
+    }
+    if (typeof total !== 'number' || products.length >= total) {
+      return;
+    }
+
+    const target = event.currentTarget;
+    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+    if (distanceFromBottom < 200) {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+      setOffset((current) => current + limit);
+    }
+  };
 
   const getOriginalComparableValue = (
     product: ProviderProduct,
@@ -847,7 +930,7 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                   </h2>
                   <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-white/70">
                     <span>
-                      {selectedProvider.products.toLocaleString('es-AR')} productos cargados
+                      {totalProductsCount.toLocaleString('es-AR')} productos cargados
                     </span>
                     <span className="hidden text-gray-400 dark:text-white/40 md:inline">•</span>
                     <span>Última actualización {formatDate(selectedProvider.last_update)}</span>
@@ -878,10 +961,13 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                 </div>
               </div>
 
-              <div className="flex max-h-[calc(90vh-140px)] flex-col gap-4 overflow-y-auto px-6 py-5">
+              <div
+                className="flex max-h-[calc(90vh-140px)] flex-col gap-4 overflow-y-auto px-6 py-5"
+                onScroll={handleModalScroll}
+              >
                 <div className="flex w-full items-center justify-end">
                   <div className="text-sm text-gray-600 dark:text-white/70 text-right">
-                    {displayedProducts.length.toLocaleString('es-AR')} de {products.length.toLocaleString('es-AR')} productos
+                    {displayedProducts.length.toLocaleString('es-AR')} de {totalProductsCount.toLocaleString('es-AR')} productos
                   </div>
                 </div>
 
@@ -1034,6 +1120,13 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                         );
                       })}
                     </div>
+
+                    {loadingMore && (
+                      <div className="flex items-center justify-center gap-2 py-4 text-sm text-gray-600 dark:text-white/70">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Cargando más productos...
+                      </div>
+                    )}
 
                     {displayedProducts.length === 0 && (
                       <div className="rounded-3xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500 dark:border-white/10 dark:text-white/60">
