@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigation } from '../../components/Navigation';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
@@ -10,6 +10,7 @@ import {
   Loader2,
   RotateCcw,
   Save,
+  Search,
   Trash2,
   X,
 } from 'lucide-react';
@@ -114,6 +115,7 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
   const [products, setProducts] = useState<ProviderProduct[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [productsError, setProductsError] = useState<string | null>(null);
+  const [productSearch, setProductSearch] = useState('');
   const [productDrafts, setProductDrafts] = useState<Record<string, ProductDraft>>({});
   const [savingProducts, setSavingProducts] = useState<Record<string, boolean>>({});
   const [productErrors, setProductErrors] = useState<Record<string, string | null>>({});
@@ -230,7 +232,25 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
     setProductSearch('');
   };
 
-  const displayedProducts = products;
+  const deferredProductSearch = useDeferredValue(productSearch);
+
+  const displayedProducts = useMemo(() => {
+    const query = deferredProductSearch.trim().toLowerCase();
+    if (!query) {
+      return products;
+    }
+    return products.filter((product) => {
+      const haystack = [
+        product.name,
+        product.code,
+        product.companyType,
+        product.family,
+      ]
+        .map((value) => (value ? String(value).toLowerCase() : ''))
+        .filter(Boolean);
+      return haystack.some((value) => value.includes(query));
+    });
+  }, [products, deferredProductSearch]);
   const totalProductsCount =
     typeof total === 'number'
       ? total
@@ -965,10 +985,26 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                 className="flex max-h-[calc(90vh-140px)] flex-col gap-4 overflow-y-auto px-6 py-5"
                 onScroll={handleModalScroll}
               >
-                <div className="flex w-full items-center justify-end">
-                  <div className="text-sm text-gray-600 dark:text-white/70 text-right">
-                    {displayedProducts.length.toLocaleString('es-AR')} de {totalProductsCount.toLocaleString('es-AR')} productos
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div className="text-sm text-gray-600 dark:text-white/70">
+                    Mostrando {displayedProducts.length.toLocaleString('es-AR')} de{' '}
+                    {totalProductsCount.toLocaleString('es-AR')} productos
                   </div>
+                  <label className="relative w-full md:w-80">
+                    <span className="sr-only">Buscar productos</span>
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      value={productSearch}
+                      onChange={(event) => setProductSearch(event.target.value)}
+                      placeholder={
+                        selectedProvider?.name?.trim().toLowerCase() === 'gampack'
+                          ? 'Buscar productos Gampack...'
+                          : 'Buscar productos del proveedor...'
+                      }
+                      className="w-full rounded-2xl border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 shadow-sm transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                    />
+                  </label>
                 </div>
 
                 {productsError && (

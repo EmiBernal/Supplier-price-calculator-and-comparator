@@ -1323,9 +1323,14 @@ function createNoRelacionadosHandler(tipo) {
           params.push(searchTerm, searchTerm, searchTerm);
         }
 
+        const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
         const paginationSql = usePagination
           ? `LIMIT $${params.length + 1} OFFSET $${params.length + 2}`
           : '';
+        const queryParams = [...params];
+        if (usePagination) {
+          queryParams.push(limit, offset);
+        }
 
         const sql = `
           SELECT
@@ -1352,19 +1357,36 @@ function createNoRelacionadosHandler(tipo) {
             END AS es_pendiente,
             LOWER(lp.nom_externo) AS nombre_lower
           FROM lista_precios lp
-          ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+          ${whereClause}
           ORDER BY es_pendiente DESC,
                    lp.fecha DESC NULLS LAST,
                    lp.id_externo DESC,
                    nombre_lower ASC
           ${paginationSql}
         `;
-        if (usePagination) {
-          params.push(limit, offset);
-        }
 
-        const rows = await getDbRows(db, sql, params);
-        return res.json(normalizeRowsDates(rows, ['fecha']));
+        const countSql = `
+          SELECT COUNT(*)::int AS total
+          FROM lista_precios lp
+          ${whereClause}
+        `;
+
+        const [rows, totalRow] = await Promise.all([
+          getDbRows(db, sql, queryParams),
+          getDbRow(db, countSql, params),
+        ]);
+        const normalizedRows = normalizeRowsDates(rows, ['fecha']);
+        const totalValue = Number(totalRow?.total ?? normalizedRows.length);
+        const limitValue = usePagination ? Number(limit ?? normalizedRows.length) : normalizedRows.length;
+        const hasMore = usePagination ? offset + rows.length < totalValue : false;
+
+        return res.json({
+          items: normalizedRows,
+          total: totalValue,
+          limit: limitValue,
+          offset,
+          hasMore,
+        });
       }
 
       // INTERNOS SIN RELACIÓN
@@ -1391,9 +1413,14 @@ function createNoRelacionadosHandler(tipo) {
         params.push(searchTerm, searchTerm);
       }
 
+      const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
       const paginationSql = usePagination
         ? `LIMIT $${params.length + 1} OFFSET $${params.length + 2}`
         : '';
+      const queryParams = [...params];
+      if (usePagination) {
+        queryParams.push(limit, offset);
+      }
 
       const sql = `
         SELECT
@@ -1419,19 +1446,36 @@ function createNoRelacionadosHandler(tipo) {
           END AS es_pendiente,
           LOWER(li.nom_interno) AS nombre_lower
         FROM lista_interna li
-        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        ${whereClause}
         ORDER BY es_pendiente DESC,
                  li.fecha DESC NULLS LAST,
                  li.id_interno DESC,
                  nombre_lower ASC
         ${paginationSql}
       `;
-      if (usePagination) {
-        params.push(limit, offset);
-      }
 
-      const rows = await getDbRows(db, sql, params);
-      return res.json(normalizeRowsDates(rows, ['fecha']));
+      const countSql = `
+        SELECT COUNT(*)::int AS total
+        FROM lista_interna li
+        ${whereClause}
+      `;
+
+      const [rows, totalRow] = await Promise.all([
+        getDbRows(db, sql, queryParams),
+        getDbRow(db, countSql, params),
+      ]);
+      const normalizedRows = normalizeRowsDates(rows, ['fecha']);
+      const totalValue = Number(totalRow?.total ?? normalizedRows.length);
+      const limitValue = usePagination ? Number(limit ?? normalizedRows.length) : normalizedRows.length;
+      const hasMore = usePagination ? offset + rows.length < totalValue : false;
+
+      return res.json({
+        items: normalizedRows,
+        total: totalValue,
+        limit: limitValue,
+        offset,
+        hasMore,
+      });
     } catch (err) {
       console.error('Error al obtener productos no relacionados:', err);
       return res.status(500).json({ error: 'db_error' });
@@ -1484,6 +1528,7 @@ app.get('/api/gampack', async (req, res) => {
     params.push(likeParam, likeParam);
   }
 
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const paginationSql = usePagination
     ? `LIMIT $${params.length + 1} OFFSET $${params.length + 2}`
     : '';
@@ -1502,19 +1547,39 @@ app.get('/api/gampack', async (req, res) => {
         WHERE ra.id_lista_interna = li.id_interno
       ) AS tiene_relacion
     FROM venta.lista_interna li
-    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ${whereClause}
     ORDER BY li.fecha DESC NULLS LAST,
              li.nom_interno ASC
     ${paginationSql}
   `;
 
+  const countSql = `
+    SELECT COUNT(*)::int AS total
+    FROM venta.lista_interna li
+    ${whereClause}
+  `;
+
+  const queryParams = [...params];
   if (usePagination) {
-    params.push(limit, offset);
+    queryParams.push(limit, offset);
   }
 
   try {
-    const rows = await getDbRows(db, sql, params);
-    return res.json(normalizeRowsDates(rows, ['fecha']));
+    const [rows, totalRow] = await Promise.all([
+      getDbRows(db, sql, queryParams),
+      getDbRow(db, countSql, params),
+    ]);
+    const normalizedRows = normalizeRowsDates(rows, ['fecha']);
+    const totalValue = Number(totalRow?.total ?? normalizedRows.length);
+    const limitValue = usePagination ? Number(limit ?? normalizedRows.length) : normalizedRows.length;
+    const hasMore = usePagination ? offset + rows.length < totalValue : false;
+    return res.json({
+      items: normalizedRows,
+      total: totalValue,
+      limit: limitValue,
+      offset,
+      hasMore,
+    });
   } catch (err) {
     console.error('Error al obtener productos Gampack:', err);
     return res.status(500).json({ error: 'Error al obtener productos Gampack' });
