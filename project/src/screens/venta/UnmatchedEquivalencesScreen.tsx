@@ -6,6 +6,7 @@ import { apiFetch } from '../../lib/api';
 import { Trash2 } from 'lucide-react';
 import { formatYMD, compareYMD, formatYearMonth, compareYearMonth } from '../../utils/date';
 import { isFiniteNumber, safeToFixed } from '../../utils/number';
+import { getBestSearchRank, normalizeSearchTerm } from '../../utils/search';
 
 
 /* ---------- Similaridad mejorada: trigramas + Levenshtein + fonética ---------- */
@@ -487,33 +488,57 @@ const generateAutoMatches = useCallback(async () => {
 
   /* ---------- Filtrado/sort ---------- */
   const filteredSortedExternals = useMemo(() => {
-    const q = normalizeStr(dSearchExt);
-    const filtered = externals.filter(r => !q || normalizeStr(r.cod_externo).includes(q) || normalizeStr(r.nom_externo).includes(q) || normalizeStr(r.proveedor).includes(q));
-    const sorted = [...filtered].sort((a, b) => {
-      const av: any = a[sortExtKey];
-      const bv: any = b[sortExtKey];
+    const normalizedQuery = normalizeSearchTerm(dSearchExt);
+    const ranked = externals
+      .map((item) => ({
+        item,
+        rank: normalizedQuery
+          ? getBestSearchRank([item.cod_externo, item.nom_externo, item.proveedor], normalizedQuery)
+          : null,
+      }))
+      .filter((entry) => (normalizedQuery ? entry.rank != null : true));
+
+    const sorted = [...ranked].sort((a, b) => {
+      if (normalizedQuery && a.rank !== b.rank) {
+        return (a.rank ?? 0) - (b.rank ?? 0);
+      }
+      const av: any = a.item[sortExtKey];
+      const bv: any = b.item[sortExtKey];
       let r: number;
       if (sortExtKey === 'fecha') r = compareYMD(av, bv);
       else if (sortExtKey === 'mes_actualizacion') r = compareYearMonth(av, bv);
       else r = cmp(normalizeStr(av), normalizeStr(bv));
       return sortExtDir === 'asc' ? r : -r;
     });
-    return sorted;
+
+    return sorted.map((entry) => entry.item);
   }, [externals, dSearchExt, sortExtKey, sortExtDir]);
 
   const filteredSortedInternals = useMemo(() => {
-    const q = normalizeStr(dSearchInt);
-    const filtered = internals.filter(r => !q || normalizeStr(r.cod_interno).includes(q) || normalizeStr(r.nom_interno).includes(q));
-    const sorted = [...filtered].sort((a, b) => {
-      const av: any = a[sortIntKey];
-      const bv: any = b[sortIntKey];
+    const normalizedQuery = normalizeSearchTerm(dSearchInt);
+    const ranked = internals
+      .map((item) => ({
+        item,
+        rank: normalizedQuery
+          ? getBestSearchRank([item.cod_interno, item.nom_interno], normalizedQuery)
+          : null,
+      }))
+      .filter((entry) => (normalizedQuery ? entry.rank != null : true));
+
+    const sorted = [...ranked].sort((a, b) => {
+      if (normalizedQuery && a.rank !== b.rank) {
+        return (a.rank ?? 0) - (b.rank ?? 0);
+      }
+      const av: any = a.item[sortIntKey];
+      const bv: any = b.item[sortIntKey];
       let r: number;
       if (sortIntKey === 'fecha') r = compareYMD(av, bv);
       else if (sortIntKey === 'mes_actualizacion') r = compareYearMonth(av, bv);
       else r = cmp(normalizeStr(av), normalizeStr(bv));
       return sortIntDir === 'asc' ? r : -r;
     });
-    return sorted;
+
+    return sorted.map((entry) => entry.item);
   }, [internals, dSearchInt, sortIntKey, sortIntDir]);
 
   const toggleSortExternal = (key: SortKeyExternal) => {
