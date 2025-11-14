@@ -14,6 +14,7 @@ import { apiFetch } from '../lib/api';
 import { Input } from './Input';
 import { isFiniteNumber, safeToFixed } from '../utils/number';
 import { useTheme } from '../context/theme';
+import { getBestSearchRank, normalizeSearchTerm } from '../utils/search';
 
 type GampackProduct = {
   id_interno: number;
@@ -426,14 +427,22 @@ export const SimplifiedComparisonView: React.FC<SimplifiedComparisonViewProps> =
   );
 
   const filteredGampackItems = useMemo(() => {
-    if (!gampackSearch.trim()) return gampackItemsWithRelations;
-    const search = gampackSearch.trim().toLowerCase();
-    return gampackItemsWithRelations.filter((item) => {
-      const haystack = [item.nom_interno, item.cod_interno]
-        .map((value) => value?.toString().toLowerCase() ?? '')
-        .join(' ');
-      return haystack.includes(search);
-    });
+    const normalizedQuery = normalizeSearchTerm(gampackSearch);
+    if (!normalizedQuery) return gampackItemsWithRelations;
+
+    return gampackItemsWithRelations
+      .map((item) => ({
+        item,
+        rank: getBestSearchRank([item.nom_interno, item.cod_interno], normalizedQuery),
+      }))
+      .filter((entry) => entry.rank != null)
+      .sort((a, b) => {
+        if (a.rank !== b.rank) {
+          return (a.rank ?? 0) - (b.rank ?? 0);
+        }
+        return (a.item.nom_interno ?? '').localeCompare(b.item.nom_interno ?? '', 'es');
+      })
+      .map((entry) => entry.item);
   }, [gampackItemsWithRelations, gampackSearch]);
 
   const selectedDetails = useMemo<SelectedSummary[]>(() => {
