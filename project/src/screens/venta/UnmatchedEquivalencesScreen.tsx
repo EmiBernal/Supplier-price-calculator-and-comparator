@@ -3,7 +3,8 @@ import { Button } from '../../components/Button';
 import { Navigation } from '../../components/Navigation';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
-import { Trash2 } from 'lucide-react';
+import { Loader2, Trash2 } from 'lucide-react';
+import { useProgressiveBatchLoader } from '../../hooks/useProgressiveBatchLoader';
 import { formatYMD, compareYMD, formatYearMonth, compareYearMonth } from '../../utils/date';
 import { isFiniteNumber, safeToFixed } from '../../utils/number';
 import { getBestSearchRank, normalizeSearchTerm } from '../../utils/search';
@@ -148,13 +149,6 @@ type PaginatedResult<T> = {
   hasMore: boolean;
 };
 
-type PaginationMeta = {
-  total: number;
-  limit: number;
-  offset: number;
-  hasMore: boolean;
-};
-
 const DEFAULT_SIMILARITY_THRESHOLD = 0.40;
 const MAX_CANDIDATES_PER_INTERNAL = Infinity;
 const BATCH_SIZE = 200;
@@ -177,13 +171,6 @@ const normalizeInternalRows = (rows: any[]): InternalItem[] =>
       cod_interno: item?.cod_interno ?? item?.codigo ?? null,
     }))
     .filter((item) => Number.isFinite(item.id_interno) && item.id_interno > 0);
-
-const createInitialMeta = (): PaginationMeta => ({
-  offset: 0,
-  limit: PAGINATION_PAGE_SIZE,
-  total: 0,
-  hasMore: false,
-});
 
 const buildPaginationResult = <T,>(
   data: any,
@@ -225,18 +212,20 @@ const buildPaginationResult = <T,>(
 
 const fetchPaginatedChunk = async <T,>(
   path: string,
-  offset: number
+  offset: number,
+  limit: number,
+  signal?: AbortSignal
 ): Promise<PaginatedResult<T>> => {
   const params = new URLSearchParams();
-  params.set('limit', String(PAGINATION_PAGE_SIZE));
+  params.set('limit', String(limit));
   params.set('offset', String(offset));
 
-  const res = await apiFetch(`${path}?${params.toString()}`);
+  const res = await apiFetch(`${path}?${params.toString()}`, { signal });
   if (!res.ok) {
     throw new Error(`request_failed:${path}`);
   }
   const data = await res.json();
-  return buildPaginationResult<T>(data, PAGINATION_PAGE_SIZE, offset);
+  return buildPaginationResult<T>(data, limit, offset);
 };
 
 const sortIcon = (dir?: SortDir) =>
@@ -284,14 +273,6 @@ const SearchInput: React.FC<{ value: string; onChange: (v: string) => void; plac
 );
 
 export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen) => void }> = ({ onNavigate }) => {
-  const [externals, setExternals] = useState<ExternalItem[]>([]);
-  const [internals, setInternals] = useState<InternalItem[]>([]);
-  const [externalMeta, setExternalMeta] = useState<PaginationMeta>(() => createInitialMeta());
-  const [internalMeta, setInternalMeta] = useState<PaginationMeta>(() => createInitialMeta());
-  const [loadingMoreExternals, setLoadingMoreExternals] = useState(false);
-  const [loadingMoreInternals, setLoadingMoreInternals] = useState(false);
-  const [loadingExternals, setLoadingExternals] = useState(true);
-  const [loadingInternals, setLoadingInternals] = useState(true);
   const [selectedExternals, setSelectedExternals] = useState<ExternalItem[]>([]);
   const [selectedInternal, setSelectedInternal] = useState<InternalItem | null>(null);
 
@@ -314,6 +295,67 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   const dSearchExt = useDeferredValue(searchExt);
   const dSearchInt = useDeferredValue(searchInt);
 
+  const fetchExternalPage = useCallback(
+    async (offset: number, limit: number, signal: AbortSignal) => {
+      const page = await fetchPaginatedChunk<any>(
+        '/api/no-relacionados/proveedores',
+        offset,
+        limit,
+        signal
+      );
+      return {
+        items: normalizeExternalRows(page.items),
+        total: page.total,
+        hasMore: page.hasMore,
+      };
+    },
+    []
+  );
+
+  const {
+    items: externals,
+    setItems: setExternals,
+    total: externalTotal,
+    setTotal: setExternalTotal,
+    loadedCount: externalLoadedCount,
+    isLoadingInitial: loadingExternals,
+    isLoadingMore: loadingMoreExternals,
+    error: externalsError,
+    reload: reloadExternals,
+  } = useProgressiveBatchLoader<ExternalItem>({
+    enabled: true,
+    limit: PAGINATION_PAGE_SIZE,
+    fetchPage: fetchExternalPage,
+  });
+
+  const fetchInternalPage = useCallback(
+    async (offset: number, limit: number, signal: AbortSignal) => {
+      const page = await fetchPaginatedChunk<any>('/api/gampack', offset, limit, signal);
+      return {
+        items: normalizeInternalRows(page.items),
+        total: page.total,
+        hasMore: page.hasMore,
+      };
+    },
+    []
+  );
+
+  const {
+    items: internals,
+    setItems: setInternals,
+    total: internalTotal,
+    setTotal: setInternalTotal,
+    loadedCount: internalLoadedCount,
+    isLoadingInitial: loadingInternals,
+    isLoadingMore: loadingMoreInternals,
+    error: internalsError,
+    reload: reloadInternals,
+  } = useProgressiveBatchLoader<InternalItem>({
+    enabled: true,
+    limit: PAGINATION_PAGE_SIZE,
+    fetchPage: fetchInternalPage,
+  });
+
   // ordenamientos
   const [sortExtKey, setSortExtKey] = useState<SortKeyExternal>('fecha');
   const [sortExtDir, setSortExtDir] = useState<SortDir>('desc');
@@ -326,103 +368,6 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
 
   // Top button
   const [showTop, setShowTop] = useState(false);
-
-  useEffect(() => {
-    let aborted = false;
-
-    const loadTables = async () => {
-      setLoadingExternals(true);
-      setLoadingInternals(true);
-      try {
-        const [externalPage, internalPage] = await Promise.all([
-          fetchPaginatedChunk<any>('/api/no-relacionados/proveedores', 0),
-          fetchPaginatedChunk<any>('/api/gampack', 0),
-        ]);
-
-        if (aborted) return;
-
-        const normalizedExternal = normalizeExternalRows(externalPage.items);
-        const normalizedInternal = normalizeInternalRows(internalPage.items);
-
-        setExternals(normalizedExternal);
-        setInternals(normalizedInternal);
-        setExternalMeta({
-          offset: externalPage.offset + externalPage.items.length,
-          limit: externalPage.limit,
-          total: externalPage.total,
-          hasMore: externalPage.hasMore,
-        });
-        setInternalMeta({
-          offset: internalPage.offset + internalPage.items.length,
-          limit: internalPage.limit,
-          total: internalPage.total,
-          hasMore: internalPage.hasMore,
-        });
-      } catch (error) {
-        console.error('Error cargando productos para vinculación manual:', error);
-        if (!aborted) {
-          setExternals([]);
-          setInternals([]);
-          setExternalMeta(createInitialMeta());
-          setInternalMeta(createInitialMeta());
-        }
-      } finally {
-        if (!aborted) {
-          setLoadingExternals(false);
-          setLoadingInternals(false);
-        }
-      }
-    };
-
-    loadTables();
-    return () => {
-      aborted = true;
-    };
-  }, []);
-
-  const loadMoreExternals = async () => {
-    if (loadingMoreExternals || loadingExternals || !externalMeta.hasMore) return;
-    setLoadingMoreExternals(true);
-    try {
-      const page = await fetchPaginatedChunk<any>('/api/no-relacionados/proveedores', externalMeta.offset);
-      const chunkLength = page.items.length;
-      const normalized = normalizeExternalRows(page.items);
-      setExternals((prev) => [...prev, ...normalized]);
-      setExternalMeta({
-        offset: page.offset + chunkLength,
-        limit: page.limit,
-        total: page.total,
-        hasMore: page.hasMore,
-      });
-    } catch (error) {
-      console.error('Error cargando más productos externos:', error);
-      alert('No se pudieron cargar más productos de proveedores.');
-    } finally {
-      setLoadingMoreExternals(false);
-    }
-  };
-
-  const loadMoreInternals = async () => {
-    if (loadingMoreInternals || loadingInternals || !internalMeta.hasMore) return;
-    setLoadingMoreInternals(true);
-    try {
-      const page = await fetchPaginatedChunk<any>('/api/gampack', internalMeta.offset);
-      const chunkLength = page.items.length;
-      const normalized = normalizeInternalRows(page.items);
-      setInternals((prev) => [...prev, ...normalized]);
-      setInternalMeta({
-        offset: page.offset + chunkLength,
-        limit: page.limit,
-        total: page.total,
-        hasMore: page.hasMore,
-      });
-    } catch (error) {
-      console.error('Error cargando más productos Gampack:', error);
-      alert('No se pudieron cargar más productos Gampack.');
-    } finally {
-      setLoadingMoreInternals(false);
-    }
-  };
 
 
   // accesos rápidos teclado
@@ -540,12 +485,18 @@ const generateAutoMatches = useCallback(async () => {
 
   /* ---------- Aceptar / Rechazar sugerencias ---------- */
   const removeFromStateAfterLink = (i: InternalItem, e: ExternalItem) => {
-  setExternals(prev => prev.filter(x => x.id_externo !== e.id_externo)); // solo quitamos el externo
-  // ✅ no quitamos el producto Gampack del estado
-  setSelectedExternals(prev => prev.filter(x => x.id_externo !== e.id_externo));
-  setSelectedInternal(prev => (prev?.id_interno === i.id_interno ? null : prev));
-  setSuggestions(prev => prev.filter(s => s.internal.id_interno !== i.id_interno && s.external.id_externo !== e.id_externo));
-};
+    setExternals((prev) => prev.filter((x) => x.id_externo !== e.id_externo)); // solo quitamos el externo
+    setExternalTotal((current) =>
+      typeof current === 'number' ? Math.max(0, current - 1) : current
+    );
+    setSelectedExternals((prev) => prev.filter((x) => x.id_externo !== e.id_externo));
+    setSelectedInternal((prev) => (prev?.id_interno === i.id_interno ? null : prev));
+    setSuggestions((prev) =>
+      prev.filter(
+        (s) => s.internal.id_interno !== i.id_interno && s.external.id_externo !== e.id_externo
+      )
+    );
+  };
 
   const acceptSuggestion = async (s: Suggestion) => {
     try {
@@ -582,6 +533,12 @@ const generateAutoMatches = useCallback(async () => {
         if (!res.ok) throw new Error('No se pudo vincular en lote');
         setExternals(prev => prev.filter(e => !extIds.includes(e.id_externo)));
         setInternals(prev => prev.filter(i => i.id_interno !== internal.id_interno));
+        setExternalTotal((current) =>
+          typeof current === 'number' ? Math.max(0, current - extIds.length) : current
+        );
+        setInternalTotal((current) =>
+          typeof current === 'number' ? Math.max(0, current - 1) : current
+        );
         setSuggestions(prev => prev.filter(s => s.internal.id_interno !== internal.id_interno));
       }
       toast(`✔ Vinculadas ${suggestions.length} sugerencias`);
@@ -709,6 +666,9 @@ const generateAutoMatches = useCallback(async () => {
       for (const id of ids) await apiFetch(`/api/no-relacionados/externos/${id}`, { method: 'DELETE' }).catch(() => {});
     } finally {
       setExternals(prev => prev.filter(x => !extDeleteIds.has(x.id_externo)));
+      setExternalTotal((current) =>
+        typeof current === 'number' ? Math.max(0, current - ids.length) : current
+      );
       setSelectedExternals(prev => prev.filter(x => !extDeleteIds.has(x.id_externo)));
       setExtDeleteIds(new Set());
       setDeleteModeExt(false);
@@ -729,6 +689,9 @@ const generateAutoMatches = useCallback(async () => {
       for (const id of ids) await apiFetch(`/api/no-relacionados/internos/${id}`, { method: 'DELETE' }).catch(() => {});
     } finally {
       setInternals(prev => prev.filter(x => !intDeleteIds.has(x.id_interno)));
+      setInternalTotal((current) =>
+        typeof current === 'number' ? Math.max(0, current - ids.length) : current
+      );
       if (selectedInternal && intDeleteIds.has(selectedInternal.id_interno)) setSelectedInternal(null);
       setIntDeleteIds(new Set());
       setDeleteModeInt(false);
@@ -747,6 +710,9 @@ const generateAutoMatches = useCallback(async () => {
       });
       if (res.ok) {
         setExternals(prev => prev.filter(e => !selectedExternals.some(se => se.id_externo === e.id_externo)));
+        setExternalTotal((current) =>
+          typeof current === 'number' ? Math.max(0, current - selectedExternals.length) : current
+        );
         setSelectedExternals([]); setSelectedInternal(null);
         setSuggestions(prev => prev.filter(s => s.internal.id_interno !== selectedInternal.id_interno && !selectedExternals.some(se => se.id_externo === s.external.id_externo)));
         toast('✔ Vinculación manual realizada');
@@ -859,9 +825,9 @@ const generateAutoMatches = useCallback(async () => {
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {loadingExternals
                       ? 'Cargando productos…'
-                      : externalMeta.total > 0
-                        ? `${externals.length.toLocaleString('es-AR')} de ${externalMeta.total.toLocaleString('es-AR')} productos`
-                        : `${externals.length.toLocaleString('es-AR')} productos`}
+                      : typeof externalTotal === 'number'
+                        ? `${externalLoadedCount.toLocaleString('es-AR')} de ${externalTotal.toLocaleString('es-AR')} productos`
+                        : `${externalLoadedCount.toLocaleString('es-AR')} productos cargados`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -883,6 +849,15 @@ const generateAutoMatches = useCallback(async () => {
               <div className="mb-3">
                 <SearchInput value={searchExt} onChange={setSearchExt} placeholder="Buscar por código, nombre o proveedor…" />
               </div>
+
+              {externalsError && (
+                <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+                  <span>{externalsError}</span>
+                  <Button onClick={reloadExternals} variant="secondary">
+                    Reintentar
+                  </Button>
+                </div>
+              )}
 
               <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10 shadow-sm bg-white dark:bg-[#0f1930]">
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-white/10 text-sm">
@@ -932,11 +907,10 @@ const generateAutoMatches = useCallback(async () => {
                   </tbody>
                 </table>
               </div>
-              {externalMeta.hasMore && (
-                <div className="mt-3 flex justify-center">
-                  <Button onClick={loadMoreExternals} disabled={loadingMoreExternals}>
-                    {loadingMoreExternals ? 'Cargando más…' : 'Cargar más'}
-                  </Button>
+              {loadingMoreExternals && (
+                <div className="mt-3 flex items-center justify-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Cargando más productos...
                 </div>
               )}
               <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
@@ -952,9 +926,9 @@ const generateAutoMatches = useCallback(async () => {
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {loadingInternals
                       ? 'Cargando productos…'
-                      : internalMeta.total > 0
-                        ? `${internals.length.toLocaleString('es-AR')} de ${internalMeta.total.toLocaleString('es-AR')} productos`
-                        : `${internals.length.toLocaleString('es-AR')} productos`}
+                      : typeof internalTotal === 'number'
+                        ? `${internalLoadedCount.toLocaleString('es-AR')} de ${internalTotal.toLocaleString('es-AR')} productos`
+                        : `${internalLoadedCount.toLocaleString('es-AR')} productos cargados`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -976,6 +950,15 @@ const generateAutoMatches = useCallback(async () => {
               <div className="mb-3">
                 <SearchInput value={searchInt} onChange={setSearchInt} placeholder="Buscar por código o nombre…" />
               </div>
+
+              {internalsError && (
+                <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+                  <span>{internalsError}</span>
+                  <Button onClick={reloadInternals} variant="secondary">
+                    Reintentar
+                  </Button>
+                </div>
+              )}
 
               <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10 shadow-sm bg-white dark:bg-[#0f1930]">
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-white/10 text-sm">
@@ -1029,11 +1012,10 @@ const generateAutoMatches = useCallback(async () => {
                   </tbody>
                 </table>
               </div>
-              {internalMeta.hasMore && (
-                <div className="mt-3 flex justify-center">
-                  <Button onClick={loadMoreInternals} disabled={loadingMoreInternals}>
-                    {loadingMoreInternals ? 'Cargando más…' : 'Cargar más'}
-                  </Button>
+              {loadingMoreInternals && (
+                <div className="mt-3 flex items-center justify-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Cargando más productos...
                 </div>
               )}
               <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
