@@ -140,10 +140,104 @@ type Suggestion = {
   id: string;
 };
 
+type PaginatedResult<T> = {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+};
+
+type PaginationMeta = {
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+};
+
 const DEFAULT_SIMILARITY_THRESHOLD = 0.40;
 const MAX_CANDIDATES_PER_INTERNAL = Infinity;
 const BATCH_SIZE = 200;
-const PAGINATION_PAGE_SIZE = 2000;
+const PAGINATION_PAGE_SIZE = 1000;
+
+const normalizeExternalRows = (rows: any[]): ExternalItem[] =>
+  (Array.isArray(rows) ? rows : [])
+    .map((item: any) => ({
+      ...item,
+      id_externo: Number(item?.id_externo ?? item?.id ?? 0),
+      cod_externo: item?.cod_externo ?? item?.codigo ?? null,
+    }))
+    .filter((item) => Number.isFinite(item.id_externo) && item.id_externo > 0);
+
+const normalizeInternalRows = (rows: any[]): InternalItem[] =>
+  (Array.isArray(rows) ? rows : [])
+    .map((item: any) => ({
+      ...item,
+      id_interno: Number(item?.id_interno ?? item?.id ?? 0),
+      cod_interno: item?.cod_interno ?? item?.codigo ?? null,
+    }))
+    .filter((item) => Number.isFinite(item.id_interno) && item.id_interno > 0);
+
+const createInitialMeta = (): PaginationMeta => ({
+  offset: 0,
+  limit: PAGINATION_PAGE_SIZE,
+  total: 0,
+  hasMore: false,
+});
+
+const buildPaginationResult = <T,>(
+  data: any,
+  fallbackLimit: number,
+  fallbackOffset: number
+): PaginatedResult<T> => {
+  if (Array.isArray(data)) {
+    const items = data as T[];
+    const limit = fallbackLimit;
+    const offset = fallbackOffset;
+    const total = offset + items.length;
+    const hasMore = items.length === limit;
+    return { items, total, limit, offset, hasMore };
+  }
+
+  const rawItems = Array.isArray(data?.items) ? (data.items as T[]) : [];
+  const limitValue = Number.isFinite(Number(data?.limit))
+    ? Number(data.limit)
+    : fallbackLimit;
+  const offsetValue = Number.isFinite(Number(data?.offset))
+    ? Number(data.offset)
+    : fallbackOffset;
+  const totalValue = Number.isFinite(Number(data?.total))
+    ? Number(data.total)
+    : offsetValue + rawItems.length;
+  const hasMoreValue =
+    typeof data?.hasMore === 'boolean'
+      ? Boolean(data.hasMore)
+      : offsetValue + rawItems.length < totalValue;
+
+  return {
+    items: rawItems,
+    total: totalValue,
+    limit: limitValue,
+    offset: offsetValue,
+    hasMore: hasMoreValue,
+  };
+};
+
+const fetchPaginatedChunk = async <T,>(
+  path: string,
+  offset: number
+): Promise<PaginatedResult<T>> => {
+  const params = new URLSearchParams();
+  params.set('limit', String(PAGINATION_PAGE_SIZE));
+  params.set('offset', String(offset));
+
+  const res = await apiFetch(`${path}?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`request_failed:${path}`);
+  }
+  const data = await res.json();
+  return buildPaginationResult<T>(data, PAGINATION_PAGE_SIZE, offset);
+};
 
 const sortIcon = (dir?: SortDir) =>
   dir ? <span className="inline-block ml-1 select-none">{dir === 'asc' ? '▲' : '▼'}</span>
@@ -192,6 +286,10 @@ const SearchInput: React.FC<{ value: string; onChange: (v: string) => void; plac
 export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen) => void }> = ({ onNavigate }) => {
   const [externals, setExternals] = useState<ExternalItem[]>([]);
   const [internals, setInternals] = useState<InternalItem[]>([]);
+  const [externalMeta, setExternalMeta] = useState<PaginationMeta>(() => createInitialMeta());
+  const [internalMeta, setInternalMeta] = useState<PaginationMeta>(() => createInitialMeta());
+  const [loadingMoreExternals, setLoadingMoreExternals] = useState(false);
+  const [loadingMoreInternals, setLoadingMoreInternals] = useState(false);
   const [loadingExternals, setLoadingExternals] = useState(true);
   const [loadingInternals, setLoadingInternals] = useState(true);
   const [selectedExternals, setSelectedExternals] = useState<ExternalItem[]>([]);
@@ -229,36 +327,6 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   // Top button
   const [showTop, setShowTop] = useState(false);
 
-  const fetchPaginatedList = useCallback(async (path: string) => {
-    const aggregated: any[] = [];
-    let offset = 0;
-    let keepFetching = true;
-
-    while (keepFetching) {
-      const params = new URLSearchParams();
-      params.set('limit', String(PAGINATION_PAGE_SIZE));
-      params.set('offset', String(offset));
-
-      const res = await apiFetch(`${path}?${params.toString()}`);
-      if (!res.ok) {
-        throw new Error(`request_failed:${path}`);
-      }
-      const chunk = await res.json();
-      if (!Array.isArray(chunk) || chunk.length === 0) {
-        keepFetching = false;
-      } else {
-        aggregated.push(...chunk);
-        if (chunk.length < PAGINATION_PAGE_SIZE) {
-          keepFetching = false;
-        } else {
-          offset += PAGINATION_PAGE_SIZE;
-        }
-      }
-    }
-
-    return aggregated;
-  }, []);
-
   useEffect(() => {
     let aborted = false;
 
@@ -266,36 +334,37 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
       setLoadingExternals(true);
       setLoadingInternals(true);
       try {
-        const [externalRows, internalRows] = await Promise.all([
-          fetchPaginatedList('/api/no-relacionados/proveedores'),
-          fetchPaginatedList('/api/gampack'),
+        const [externalPage, internalPage] = await Promise.all([
+          fetchPaginatedChunk<any>('/api/no-relacionados/proveedores', 0),
+          fetchPaginatedChunk<any>('/api/gampack', 0),
         ]);
 
         if (aborted) return;
 
-        const normalizedExternal = (Array.isArray(externalRows) ? externalRows : [])
-          .map((item: any) => ({
-            ...item,
-            id_externo: Number(item?.id_externo ?? item?.id ?? 0),
-            cod_externo: item?.cod_externo ?? item?.codigo ?? null,
-          }))
-          .filter((item: any) => Number.isFinite(item.id_externo) && item.id_externo > 0);
-
-        const normalizedInternal = (Array.isArray(internalRows) ? internalRows : [])
-          .map((item: any) => ({
-            ...item,
-            id_interno: Number(item?.id_interno ?? item?.id ?? 0),
-            cod_interno: item?.cod_interno ?? item?.codigo ?? null,
-          }))
-          .filter((item: any) => Number.isFinite(item.id_interno) && item.id_interno > 0);
+        const normalizedExternal = normalizeExternalRows(externalPage.items);
+        const normalizedInternal = normalizeInternalRows(internalPage.items);
 
         setExternals(normalizedExternal);
         setInternals(normalizedInternal);
+        setExternalMeta({
+          offset: externalPage.offset + externalPage.items.length,
+          limit: externalPage.limit,
+          total: externalPage.total,
+          hasMore: externalPage.hasMore,
+        });
+        setInternalMeta({
+          offset: internalPage.offset + internalPage.items.length,
+          limit: internalPage.limit,
+          total: internalPage.total,
+          hasMore: internalPage.hasMore,
+        });
       } catch (error) {
         console.error('Error cargando productos para vinculación manual:', error);
         if (!aborted) {
           setExternals([]);
           setInternals([]);
+          setExternalMeta(createInitialMeta());
+          setInternalMeta(createInitialMeta());
         }
       } finally {
         if (!aborted) {
@@ -309,7 +378,51 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
     return () => {
       aborted = true;
     };
-  }, [fetchPaginatedList]);
+  }, []);
+
+  const loadMoreExternals = async () => {
+    if (loadingMoreExternals || loadingExternals || !externalMeta.hasMore) return;
+    setLoadingMoreExternals(true);
+    try {
+      const page = await fetchPaginatedChunk<any>('/api/no-relacionados/proveedores', externalMeta.offset);
+      const chunkLength = page.items.length;
+      const normalized = normalizeExternalRows(page.items);
+      setExternals((prev) => [...prev, ...normalized]);
+      setExternalMeta({
+        offset: page.offset + chunkLength,
+        limit: page.limit,
+        total: page.total,
+        hasMore: page.hasMore,
+      });
+    } catch (error) {
+      console.error('Error cargando más productos externos:', error);
+      alert('No se pudieron cargar más productos de proveedores.');
+    } finally {
+      setLoadingMoreExternals(false);
+    }
+  };
+
+  const loadMoreInternals = async () => {
+    if (loadingMoreInternals || loadingInternals || !internalMeta.hasMore) return;
+    setLoadingMoreInternals(true);
+    try {
+      const page = await fetchPaginatedChunk<any>('/api/gampack', internalMeta.offset);
+      const chunkLength = page.items.length;
+      const normalized = normalizeInternalRows(page.items);
+      setInternals((prev) => [...prev, ...normalized]);
+      setInternalMeta({
+        offset: page.offset + chunkLength,
+        limit: page.limit,
+        total: page.total,
+        hasMore: page.hasMore,
+      });
+    } catch (error) {
+      console.error('Error cargando más productos Gampack:', error);
+      alert('No se pudieron cargar más productos Gampack.');
+    } finally {
+      setLoadingMoreInternals(false);
+    }
+  };
 
 
   // accesos rápidos teclado
@@ -746,7 +859,9 @@ const generateAutoMatches = useCallback(async () => {
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {loadingExternals
                       ? 'Cargando productos…'
-                      : `${externals.length.toLocaleString('es-AR')} productos`}
+                      : externalMeta.total > 0
+                        ? `${externals.length.toLocaleString('es-AR')} de ${externalMeta.total.toLocaleString('es-AR')} productos`
+                        : `${externals.length.toLocaleString('es-AR')} productos`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -817,6 +932,13 @@ const generateAutoMatches = useCallback(async () => {
                   </tbody>
                 </table>
               </div>
+              {externalMeta.hasMore && (
+                <div className="mt-3 flex justify-center">
+                  <Button onClick={loadMoreExternals} disabled={loadingMoreExternals}>
+                    {loadingMoreExternals ? 'Cargando más…' : 'Cargar más'}
+                  </Button>
+                </div>
+              )}
               <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
                 {loadingExternals ? 'Cargando productos…' : `${filteredSortedExternals.length} resultados`}
               </div>
@@ -830,7 +952,9 @@ const generateAutoMatches = useCallback(async () => {
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {loadingInternals
                       ? 'Cargando productos…'
-                      : `${internals.length.toLocaleString('es-AR')} productos`}
+                      : internalMeta.total > 0
+                        ? `${internals.length.toLocaleString('es-AR')} de ${internalMeta.total.toLocaleString('es-AR')} productos`
+                        : `${internals.length.toLocaleString('es-AR')} productos`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -905,6 +1029,13 @@ const generateAutoMatches = useCallback(async () => {
                   </tbody>
                 </table>
               </div>
+              {internalMeta.hasMore && (
+                <div className="mt-3 flex justify-center">
+                  <Button onClick={loadMoreInternals} disabled={loadingMoreInternals}>
+                    {loadingMoreInternals ? 'Cargando más…' : 'Cargar más'}
+                  </Button>
+                </div>
+              )}
               <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
                 {loadingInternals ? 'Cargando productos…' : `${filteredSortedInternals.length} resultados`}
               </div>
