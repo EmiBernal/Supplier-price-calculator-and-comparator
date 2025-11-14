@@ -1291,8 +1291,11 @@ function createNoRelacionadosHandler(tipo) {
       const searchTerm = hasSearch ? `%${searchRaw.toLowerCase()}%` : null;
 
       const onlyPending = String(req.query.onlyPending || '1') === '1';
-      const limit = parseLimitParam(req.query.limit);
-      const offset = parseOffsetParam(req.query.offset);
+      const limitRaw = req.query.limit;
+      const offsetRaw = req.query.offset;
+      const usePagination = typeof limitRaw !== 'undefined' || typeof offsetRaw !== 'undefined';
+      const limit = usePagination ? parseLimitParam(limitRaw) : null;
+      const offset = usePagination ? parseOffsetParam(offsetRaw) : 0;
 
       if (isExternos) {
         const params = [];
@@ -1319,6 +1322,10 @@ function createNoRelacionadosHandler(tipo) {
           )`);
           params.push(searchTerm, searchTerm, searchTerm);
         }
+
+        const paginationSql = usePagination
+          ? `LIMIT $${params.length + 1} OFFSET $${params.length + 2}`
+          : '';
 
         const sql = `
           SELECT
@@ -1350,9 +1357,11 @@ function createNoRelacionadosHandler(tipo) {
                    lp.fecha DESC NULLS LAST,
                    lp.id_externo DESC,
                    nombre_lower ASC
-          LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+          ${paginationSql}
         `;
-        params.push(limit, offset);
+        if (usePagination) {
+          params.push(limit, offset);
+        }
 
         const rows = await getDbRows(db, sql, params);
         return res.json(normalizeRowsDates(rows, ['fecha']));
@@ -1381,6 +1390,10 @@ function createNoRelacionadosHandler(tipo) {
         )`);
         params.push(searchTerm, searchTerm);
       }
+
+      const paginationSql = usePagination
+        ? `LIMIT $${params.length + 1} OFFSET $${params.length + 2}`
+        : '';
 
       const sql = `
         SELECT
@@ -1411,9 +1424,11 @@ function createNoRelacionadosHandler(tipo) {
                  li.fecha DESC NULLS LAST,
                  li.id_interno DESC,
                  nombre_lower ASC
-        LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+        ${paginationSql}
       `;
-      params.push(limit, offset);
+      if (usePagination) {
+        params.push(limit, offset);
+      }
 
       const rows = await getDbRows(db, sql, params);
       return res.json(normalizeRowsDates(rows, ['fecha']));
@@ -1451,8 +1466,11 @@ app.get('/api/gampack', async (req, res) => {
   const db = req.ctx.db;
   const searchRaw = typeof req.query.search === 'string' ? req.query.search : '';
   const search = searchRaw.trim().toLowerCase();
-  const limit = parseLimitParam(req.query.limit);
-  const offset = parseOffsetParam(req.query.offset);
+  const limitRaw = req.query.limit;
+  const offsetRaw = req.query.offset;
+  const usePagination = typeof limitRaw !== 'undefined' || typeof offsetRaw !== 'undefined';
+  const limit = usePagination ? parseLimitParam(limitRaw) : null;
+  const offset = usePagination ? parseOffsetParam(offsetRaw) : 0;
 
   const params = [];
   const where = [];
@@ -1465,6 +1483,10 @@ app.get('/api/gampack', async (req, res) => {
     )`);
     params.push(likeParam, likeParam);
   }
+
+  const paginationSql = usePagination
+    ? `LIMIT $${params.length + 1} OFFSET $${params.length + 2}`
+    : '';
 
   const sql = `
     SELECT
@@ -1483,11 +1505,12 @@ app.get('/api/gampack', async (req, res) => {
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY li.fecha DESC NULLS LAST,
              li.nom_interno ASC
-    LIMIT $${params.length + 1}
-    OFFSET $${params.length + 2}
+    ${paginationSql}
   `;
 
-  params.push(limit, offset);
+  if (usePagination) {
+    params.push(limit, offset);
+  }
 
   try {
     const rows = await getDbRows(db, sql, params);
@@ -2824,48 +2847,5 @@ app.get('/api/debug/relaciones', async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
-
-// ---------- PRODUCTOS GAMPACK (todos los productos de lista_interna) ----------
-app.get('/api/gampack', async (req, res) => {
-  const db = req.ctx.db;
-  if (!db) {
-    return res.status(500).json({ error: 'db_not_available' });
-  }
-
-  try {
-    const searchRaw = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
-    const params = [];
-    let where = '';
-
-    if (searchRaw) {
-      params.push(`%${searchRaw}%`, `%${searchRaw}%`);
-      where = `
-        WHERE LOWER(li.cod_interno) LIKE $1
-           OR LOWER(li.nom_interno) LIKE $2
-      `;
-    }
-
-    const sql = `
-      SELECT
-        li.id_interno,
-        li.cod_interno,
-        li.nom_interno,
-        li.precio_final,
-        li.fecha,
-        TO_CHAR(li.fecha, 'YYYY-MM') AS mes_actualizacion
-      FROM lista_interna li
-      ${where}
-      ORDER BY li.fecha DESC NULLS LAST, li.nom_interno ASC
-      LIMIT 1000
-    `;
-
-    const rows = await getDbRows(db, sql, params);
-    return res.json(normalizeRowsDates(rows, ['fecha']));
-  } catch (err) {
-    console.error('Error al obtener productos Gampack:', err);
-    return res.status(500).json({ error: 'Error al obtener productos Gampack' });
-  }
-});
-
 
 module.exports = app;
