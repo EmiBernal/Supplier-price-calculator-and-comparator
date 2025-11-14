@@ -142,6 +142,7 @@ type Suggestion = {
 const DEFAULT_SIMILARITY_THRESHOLD = 0.40;
 const MAX_CANDIDATES_PER_INTERNAL = Infinity;
 const BATCH_SIZE = 200;
+const PAGINATION_PAGE_SIZE = 2000;
 
 const sortIcon = (dir?: SortDir) =>
   dir ? <span className="inline-block ml-1 select-none">{dir === 'asc' ? '▲' : '▼'}</span>
@@ -190,6 +191,8 @@ const SearchInput: React.FC<{ value: string; onChange: (v: string) => void; plac
 export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen) => void }> = ({ onNavigate }) => {
   const [externals, setExternals] = useState<ExternalItem[]>([]);
   const [internals, setInternals] = useState<InternalItem[]>([]);
+  const [loadingExternals, setLoadingExternals] = useState(true);
+  const [loadingInternals, setLoadingInternals] = useState(true);
   const [selectedExternals, setSelectedExternals] = useState<ExternalItem[]>([]);
   const [selectedInternal, setSelectedInternal] = useState<InternalItem | null>(null);
 
@@ -225,41 +228,87 @@ export const UnmatchedEquivalencesScreen: React.FC<{ onNavigate: (screen: Screen
   // Top button
   const [showTop, setShowTop] = useState(false);
 
-  useEffect(() => {
-    // ✅ Proveedores no relacionados
-    apiFetch('/api/no-relacionados/proveedores')
-      .then(r => r.json())
-      .then(d => {
-        if (!Array.isArray(d)) { setExternals([]); return; }
-        setExternals(
-          d
-            .map((item: any) => ({
-              ...item,
-              id_externo: Number(item?.id_externo ?? item?.id ?? 0),
-              cod_externo: item?.cod_externo ?? item?.codigo ?? null,
-            }))
-            .filter((item: any) => Number.isFinite(item.id_externo) && item.id_externo > 0)
-        );
-      })
-      .catch(() => setExternals([]));
+  const fetchPaginatedList = useCallback(async (path: string) => {
+    const aggregated: any[] = [];
+    let offset = 0;
+    let keepFetching = true;
 
-    // ✅ Productos Gampack (todos, no solo los no relacionados)
-    apiFetch('/api/gampack')
-      .then(r => r.json())
-      .then(d => {
-        if (!Array.isArray(d)) { setInternals([]); return; }
-        setInternals(
-          d
-            .map((item: any) => ({
-              ...item,
-              id_interno: Number(item?.id_interno ?? item?.id ?? 0),
-              cod_interno: item?.cod_interno ?? item?.codigo ?? null,
-            }))
-            .filter((item: any) => Number.isFinite(item.id_interno) && item.id_interno > 0)
-        );
-      })
-      .catch(() => setInternals([]));
+    while (keepFetching) {
+      const params = new URLSearchParams();
+      params.set('limit', String(PAGINATION_PAGE_SIZE));
+      params.set('offset', String(offset));
+
+      const res = await apiFetch(`${path}?${params.toString()}`);
+      if (!res.ok) {
+        throw new Error(`request_failed:${path}`);
+      }
+      const chunk = await res.json();
+      if (!Array.isArray(chunk) || chunk.length === 0) {
+        keepFetching = false;
+      } else {
+        aggregated.push(...chunk);
+        if (chunk.length < PAGINATION_PAGE_SIZE) {
+          keepFetching = false;
+        } else {
+          offset += PAGINATION_PAGE_SIZE;
+        }
+      }
+    }
+
+    return aggregated;
   }, []);
+
+  useEffect(() => {
+    let aborted = false;
+
+    const loadTables = async () => {
+      setLoadingExternals(true);
+      setLoadingInternals(true);
+      try {
+        const [externalRows, internalRows] = await Promise.all([
+          fetchPaginatedList('/api/no-relacionados/proveedores'),
+          fetchPaginatedList('/api/gampack'),
+        ]);
+
+        if (aborted) return;
+
+        const normalizedExternal = (Array.isArray(externalRows) ? externalRows : [])
+          .map((item: any) => ({
+            ...item,
+            id_externo: Number(item?.id_externo ?? item?.id ?? 0),
+            cod_externo: item?.cod_externo ?? item?.codigo ?? null,
+          }))
+          .filter((item: any) => Number.isFinite(item.id_externo) && item.id_externo > 0);
+
+        const normalizedInternal = (Array.isArray(internalRows) ? internalRows : [])
+          .map((item: any) => ({
+            ...item,
+            id_interno: Number(item?.id_interno ?? item?.id ?? 0),
+            cod_interno: item?.cod_interno ?? item?.codigo ?? null,
+          }))
+          .filter((item: any) => Number.isFinite(item.id_interno) && item.id_interno > 0);
+
+        setExternals(normalizedExternal);
+        setInternals(normalizedInternal);
+      } catch (error) {
+        console.error('Error cargando productos para vinculación manual:', error);
+        if (!aborted) {
+          setExternals([]);
+          setInternals([]);
+        }
+      } finally {
+        if (!aborted) {
+          setLoadingExternals(false);
+          setLoadingInternals(false);
+        }
+      }
+    };
+
+    loadTables();
+    return () => {
+      aborted = true;
+    };
+  }, [fetchPaginatedList]);
 
 
   // accesos rápidos teclado
@@ -667,7 +716,14 @@ const generateAutoMatches = useCallback(async () => {
             {/* EXTERNOS */}
             <div>
               <div className="flex items-end justify-between gap-3 mb-3">
-                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Productos Proveedores no relacionados</h2>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Productos Proveedores no relacionados</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {loadingExternals
+                      ? 'Cargando productos…'
+                      : `${externals.length.toLocaleString('es-AR')} productos`}
+                  </p>
+                </div>
                 <div className="flex items-center gap-2">
                   <Button variant={deleteModeExt ? 'primary' : 'secondary'} onClick={() => { setDeleteModeExt(v => !v); if (deleteModeExt) setExtDeleteIds(new Set()); }}>
                     {deleteModeExt ? 'Salir de modo eliminar' : 'Modo eliminar'}
@@ -708,7 +764,15 @@ const generateAutoMatches = useCallback(async () => {
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-white/10 bg-white/80 dark:bg-transparent">
                     {filteredSortedExternals.length === 0 ? (
-                      <tr><td colSpan={4} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">{externals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}</td></tr>
+                      <tr>
+                        <td colSpan={4} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">
+                          {loadingExternals
+                            ? 'Cargando productos…'
+                            : externals.length === 0
+                              ? 'No hay productos no relacionados.'
+                              : 'Sin coincidencias.'}
+                        </td>
+                      </tr>
                     ) : filteredSortedExternals.map(item => {
                       const linkSel = selectedExternals.some(e => e.id_externo === item.id_externo);
                       const delSel = extDeleteIds.has(item.id_externo);
@@ -728,13 +792,22 @@ const generateAutoMatches = useCallback(async () => {
                   </tbody>
                 </table>
               </div>
-              <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">{filteredSortedExternals.length} resultados</div>
+              <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                {loadingExternals ? 'Cargando productos…' : `${filteredSortedExternals.length} resultados`}
+              </div>
             </div>
 
             {/* INTERNOS */}
             <div>
               <div className="flex items-end justify-between gap-3 mb-3">
-                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Productos Gampack</h2>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Productos Gampack</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {loadingInternals
+                      ? 'Cargando productos…'
+                      : `${internals.length.toLocaleString('es-AR')} productos`}
+                  </p>
+                </div>
                 <div className="flex items-center gap-2">
                   <Button variant={deleteModeInt ? 'primary' : 'secondary'} onClick={() => { setDeleteModeInt(v => !v); if (deleteModeInt) setIntDeleteIds(new Set()); }}>
                     {deleteModeInt ? 'Salir de modo eliminar' : 'Modo eliminar'}
@@ -774,7 +847,11 @@ const generateAutoMatches = useCallback(async () => {
                     {filteredSortedInternals.length === 0 ? (
                       <tr>
                         <td colSpan={3} className="px-6 py-4 text-center text-gray-500 dark:text-gray-300">
-                          {internals.length === 0 ? 'No hay productos no relacionados.' : 'Sin coincidencias.'}
+                          {loadingInternals
+                            ? 'Cargando productos…'
+                            : internals.length === 0
+                              ? 'No hay productos Gampack.'
+                              : 'Sin coincidencias.'}
                         </td>
                       </tr>
                     ) : filteredSortedInternals.map(item => {
@@ -803,7 +880,9 @@ const generateAutoMatches = useCallback(async () => {
                   </tbody>
                 </table>
               </div>
-              <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">{filteredSortedInternals.length} resultados</div>
+              <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                {loadingInternals ? 'Cargando productos…' : `${filteredSortedInternals.length} resultados`}
+              </div>
             </div>
           </div>
 
