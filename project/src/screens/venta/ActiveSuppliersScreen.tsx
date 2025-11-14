@@ -1,7 +1,8 @@
-import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Navigation } from '../../components/Navigation';
 import { Screen } from '../../types';
 import { apiFetch } from '../../lib/api';
+import { useProgressiveBatchLoader } from '../../hooks/useProgressiveBatchLoader';
 import {
   AlertCircle,
   AlertTriangle,
@@ -105,6 +106,7 @@ const statusBadgeClass = (isActive: boolean) =>
   ].join(' ');
 
 const DATABASE_RESET_PHRASE = 'Quiero borrar la base de datos';
+const PROVIDER_PRODUCTS_PAGE_SIZE = 1000;
 
 const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigate }) => {
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
@@ -112,17 +114,10 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
   const [search, setSearch] = useState('');
 
   const [selectedProvider, setSelectedProvider] = useState<ProviderSummary | null>(null);
-  const [products, setProducts] = useState<ProviderProduct[]>([]);
-  const [loadingProducts, setLoadingProducts] = useState(false);
-  const [productsError, setProductsError] = useState<string | null>(null);
-  const [productSearch, setProductSearch] = useState('');
   const [productDrafts, setProductDrafts] = useState<Record<string, ProductDraft>>({});
   const [savingProducts, setSavingProducts] = useState<Record<string, boolean>>({});
   const [productErrors, setProductErrors] = useState<Record<string, string | null>>({});
-  const [offset, setOffset] = useState(0);
-  const [limit] = useState(100);
-  const [total, setTotal] = useState<number | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [productSearch, setProductSearch] = useState('');
   const [deletingProvider, setDeletingProvider] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
@@ -134,8 +129,7 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
   const [resetPhrase, setResetPhrase] = useState('');
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetLoading, setResetLoading] = useState(false);
-  const loadingMoreRef = useRef(false);
-  const skipNextFetchRef = useRef(false);
+  const deferredProductSearch = useDeferredValue(productSearch);
 
   useEffect(() => {
     const fetchProviders = async () => {
@@ -202,37 +196,88 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
 
   const handleOpenProvider = (provider: ProviderSummary) => {
     setSelectedProvider(provider);
-    setLoadingProducts(true);
-    setProductsError(null);
-    setProducts([]);
     setProductSearch('');
     setProductDrafts({});
     setSavingProducts({});
     setProductErrors({});
-    setOffset(0);
     setTotal(null);
-    setLoadingMore(false);
-    loadingMoreRef.current = false;
-    skipNextFetchRef.current = false;
   };
 
   const handleCloseModal = () => {
     setSelectedProvider(null);
-    setProducts([]);
-    setProductsError(null);
     setProductDrafts({});
     setSavingProducts({});
     setProductErrors({});
-    setLoadingProducts(false);
-    setOffset(0);
     setTotal(null);
-    setLoadingMore(false);
-    loadingMoreRef.current = false;
-    skipNextFetchRef.current = false;
     setProductSearch('');
   };
 
-  const deferredProductSearch = useDeferredValue(productSearch);
+  const providerName = selectedProvider?.name?.trim() || null;
+
+  const fetchProviderProductsPage = useCallback(
+    async (offset: number, limit: number, signal: AbortSignal) => {
+      if (!providerName) {
+        return { items: [], total: 0, hasMore: false };
+      }
+
+      const response = await apiFetch(
+        `/api/providers/products?name=${encodeURIComponent(providerName)}&limit=${limit}&offset=${offset}`,
+        { signal }
+      );
+      if (!response.ok) {
+        throw new Error(await parseErrorResponse(response));
+      }
+      const data = await response.json();
+      const normalizedProducts: ProviderProduct[] = Array.isArray(data?.products)
+        ? data.products.map((product: any, index: number) => ({
+            id:
+              product?.id ??
+              product?.id_externo ??
+              product?.id_interno ??
+              `${product?.code ?? product?.cod_externo ?? 'producto'}-${offset + index}`,
+            name: String(product?.name ?? product?.nom_externo ?? 'Producto sin nombre'),
+            code: product?.code ?? product?.cod_externo ?? null,
+            price: Number(product?.price ?? product?.precio_final ?? 0),
+            date: product?.date ?? product?.fecha ?? null,
+            companyType: product?.companyType ?? product?.tipo_empresa ?? null,
+            family: product?.family ?? product?.familia ?? null,
+            isActive: Boolean(product?.isActive ?? product?.is_active ?? false),
+          }))
+        : [];
+
+      const parsedTotal = Number(data?.total);
+      const hasMore =
+        typeof data?.hasMore === 'boolean'
+          ? Boolean(data.hasMore)
+          : Number.isFinite(parsedTotal)
+          ? offset + normalizedProducts.length < parsedTotal
+          : normalizedProducts.length === limit;
+
+      return {
+        items: normalizedProducts,
+        total: Number.isFinite(parsedTotal) ? parsedTotal : null,
+        hasMore,
+      };
+    },
+    [providerName]
+  );
+
+  const {
+    items: products,
+    setItems: setProducts,
+    total,
+    setTotal,
+    loadedCount,
+    isLoadingInitial,
+    isLoadingMore,
+    error: productsError,
+    reload: reloadProducts,
+  } = useProgressiveBatchLoader<ProviderProduct>({
+    enabled: Boolean(providerName),
+    limit: PROVIDER_PRODUCTS_PAGE_SIZE,
+    deps: [providerName],
+    fetchPage: fetchProviderProductsPage,
+  });
 
   const displayedProducts = useMemo(() => {
     const query = deferredProductSearch.trim().toLowerCase();
@@ -254,105 +299,7 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
   const totalProductsCount =
     typeof total === 'number'
       ? total
-      : selectedProvider?.products ?? displayedProducts.length;
-
-  const providerName = selectedProvider?.name ?? null;
-
-  useEffect(() => {
-    if (!providerName) return;
-    if (skipNextFetchRef.current) {
-      skipNextFetchRef.current = false;
-      return;
-    }
-
-    let isActive = true;
-    const fetchProducts = async () => {
-      const isInitialLoad = offset === 0;
-      if (isInitialLoad) {
-        setProductsError(null);
-        setLoadingProducts(true);
-      }
-
-      try {
-        const response = await apiFetch(
-          `/api/providers/products?name=${encodeURIComponent(
-            providerName
-          )}&limit=${limit}&offset=${offset}`
-        );
-        if (!response.ok) {
-          throw new Error(await parseErrorResponse(response));
-        }
-        const data = await response.json();
-        if (!isActive) return;
-
-        const normalizedProducts: ProviderProduct[] = Array.isArray(data?.products)
-          ? data.products.map((product: any, index: number) => ({
-              id:
-                product?.id ??
-                product?.id_externo ??
-                `${product?.code ?? product?.cod_externo ?? 'producto'}-${offset + index}`,
-              name: String(
-                product?.name ?? product?.nom_externo ?? 'Producto sin nombre'
-              ),
-              code: product?.code ?? product?.cod_externo ?? null,
-              price: Number(product?.price ?? product?.precio_final ?? 0),
-              date: product?.date ?? product?.fecha ?? null,
-              companyType: product?.companyType ?? product?.tipo_empresa ?? null,
-              family: product?.family ?? product?.familia ?? null,
-              isActive: Boolean(product?.isActive ?? product?.is_active ?? false),
-            }))
-          : [];
-
-        const parsedTotal = Number(data?.total);
-        setProducts((prev) =>
-          offset === 0 ? normalizedProducts : [...prev, ...normalizedProducts]
-        );
-        setTotal(Number.isFinite(parsedTotal) ? parsedTotal : null);
-      } catch (error) {
-        if (!isActive) return;
-        console.error('Error fetching provider products:', error);
-        setProductsError(
-          error instanceof Error && error.message
-            ? error.message
-            : 'No se pudieron cargar los productos de este proveedor.'
-        );
-        if (offset > 0) {
-          skipNextFetchRef.current = true;
-          setOffset((current) => Math.max(0, current - limit));
-        }
-      } finally {
-        if (!isActive) return;
-        if (offset === 0) {
-          setLoadingProducts(false);
-        }
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      }
-    };
-
-    fetchProducts();
-
-    return () => {
-      isActive = false;
-    };
-  }, [providerName, offset, limit]);
-
-  const handleModalScroll: React.UIEventHandler<HTMLDivElement> = (event) => {
-    if (!selectedProvider || loadingProducts || loadingMoreRef.current) {
-      return;
-    }
-    if (typeof total !== 'number' || products.length >= total) {
-      return;
-    }
-
-    const target = event.currentTarget;
-    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
-    if (distanceFromBottom < 200) {
-      loadingMoreRef.current = true;
-      setLoadingMore(true);
-      setOffset((current) => current + limit);
-    }
-  };
+      : selectedProvider?.products ?? loadedCount ?? displayedProducts.length;
 
   const getOriginalComparableValue = (
     product: ProviderProduct,
@@ -983,12 +930,12 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
 
               <div
                 className="flex max-h-[calc(90vh-140px)] flex-col gap-4 overflow-y-auto px-6 py-5"
-                onScroll={handleModalScroll}
               >
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="text-sm text-gray-600 dark:text-white/70">
                     Mostrando {displayedProducts.length.toLocaleString('es-AR')} de{' '}
-                    {totalProductsCount.toLocaleString('es-AR')} productos
+                    {totalProductsCount.toLocaleString('es-AR')} productos ·{' '}
+                    {loadedCount.toLocaleString('es-AR')} cargados
                   </div>
                   <label className="relative w-full md:w-80">
                     <span className="sr-only">Buscar productos</span>
@@ -1008,12 +955,19 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                 </div>
 
                 {productsError && (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
-                    {productsError}
+                  <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+                    <span>{productsError}</span>
+                    <button
+                      type="button"
+                      onClick={reloadProducts}
+                      className="inline-flex items-center rounded-full border border-red-300 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-red-700 transition hover:border-red-400 hover:text-red-900 dark:border-red-500/50 dark:text-red-200"
+                    >
+                      Reintentar
+                    </button>
                   </div>
                 )}
 
-                {loadingProducts ? (
+                {isLoadingInitial ? (
                   <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-white/70">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Cargando productos del proveedor...
@@ -1157,7 +1111,7 @@ const ActiveSuppliersScreen: React.FC<ActiveSuppliersScreenProps> = ({ onNavigat
                       })}
                     </div>
 
-                    {loadingMore && (
+                    {isLoadingMore && (
                       <div className="flex items-center justify-center gap-2 py-4 text-sm text-gray-600 dark:text-white/70">
                         <Loader2 className="h-4 w-4 animate-spin" />
                         Cargando más productos...

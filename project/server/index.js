@@ -175,14 +175,10 @@ async function getDbRows(db, sql, params = []) {
 }
 
 function parseLimitParam(raw) {
-  const DEFAULT_LIMIT = 500;
-  const MIN_LIMIT = 50;
-  const MAX_LIMIT = 2000;
+  const DEFAULT_LIMIT = 1000;
   if (raw == null) return DEFAULT_LIMIT;
   const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed)) return DEFAULT_LIMIT;
-  if (parsed < MIN_LIMIT) return MIN_LIMIT;
-  if (parsed > MAX_LIMIT) return MAX_LIMIT;
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LIMIT;
   return parsed;
 }
 
@@ -843,8 +839,7 @@ app.get('/api/providers/products', async (req, res) => {
     }
     const isGampack = normalizedName === 'gampack';
 
-    const rawLimit = Number.parseInt(req.query.limit, 10);
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 100;
+    const limit = parseLimitParam(req.query.limit);
     const rawOffset = Number.parseInt(req.query.offset, 10);
     const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
 
@@ -928,6 +923,7 @@ app.get('/api/providers/products', async (req, res) => {
       total,
       limit,
       offset,
+      hasMore: offset + normalized.length < total,
     });
   } catch (err) {
     console.error('Error /api/providers/products:', err);
